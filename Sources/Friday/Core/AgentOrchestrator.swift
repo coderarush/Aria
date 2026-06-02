@@ -12,6 +12,7 @@ actor AgentOrchestrator {
     private let memory: ConversationMemory
     private let factory: DynamicToolFactory
     private let registry: ToolRegistry
+    private let subAgents: SubAgentRegistry
 
     /// Asks the user to approve running generated code. Param: a human-readable
     /// prompt (incl. code when "show code" is on). Returns true to proceed.
@@ -22,12 +23,14 @@ actor AgentOrchestrator {
          screen: ScreenCaptureEngine = ScreenCaptureEngine(),
          memory: ConversationMemory = ConversationMemory(),
          factory: DynamicToolFactory = DynamicToolFactory(),
-         registry: ToolRegistry = ToolRegistry()) {
+         registry: ToolRegistry = ToolRegistry(),
+         subAgents: SubAgentRegistry = SubAgentRegistry()) {
         self.gemini = gemini
         self.screen = screen
         self.memory = memory
         self.factory = factory
         self.registry = registry
+        self.subAgents = subAgents
     }
 
     func setConfirmationHandler(_ handler: @escaping @Sendable (String) async -> Bool) {
@@ -50,6 +53,8 @@ actor AgentOrchestrator {
 
         do {
             let catalog = await registry.catalog()
+                + "\n\nSUB-AGENTS (dispatch via action tool = the agent name, input.task = the goal):\n"
+                + (await subAgents.catalog())
             let response = try await gemini.send(
                 transcript: command,
                 screenshotJPEG: screenshot,
@@ -105,6 +110,21 @@ actor AgentOrchestrator {
     private func execute(_ action: AgentAction,
                          priorOutput: String,
                          context: GeminiClient.SystemContext) async -> ToolResult {
+        // Sub-agent dispatch: tool name matches an agent, or tool == "agent".
+        let agentName = action.tool == "agent" ? (action.input["name"] ?? "") : action.tool
+        if let agent = await subAgents.agent(named: agentName) {
+            let task = action.input["task"] ?? priorOutput
+            let ctx = AgentContext(
+                gemini: gemini, registry: registry, factory: factory,
+                system: context,
+                runAction: { [weak self] act, prior in
+                    await self?.execute(act, priorOutput: prior, context: context)
+                        ?? .fail("orchestrator gone")
+                })
+            let result = await agent.execute(task: task, context: ctx)
+            return result.success ? .ok(result.output) : .fail(result.output)
+        }
+
         // Native static tool wins if registered.
         if let tool = await registry.tool(named: action.tool) {
             if tool.isDestructive {
