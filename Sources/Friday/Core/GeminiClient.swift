@@ -67,6 +67,60 @@ actor GeminiClient {
         return response
     }
 
+    /// Ask Gemini to write a self-contained script in `language` that performs
+    /// `task`. Returns raw code (fences stripped). Used by DynamicToolFactory.
+    func generateScript(task: String,
+                        language: ToolLanguage,
+                        context: SystemContext) async throws -> String {
+        guard let apiKey = apiKeyProvider(), !apiKey.isEmpty else {
+            throw GeminiError.missingAPIKey
+        }
+        let prompt = """
+        Write a single, self-contained \(language.rawValue) script that accomplishes this task:
+
+        TASK: \(task)
+
+        Requirements:
+        - Output ONLY the code. No explanation, no markdown fences.
+        - The script must be runnable as-is with the standard \(language.rawValue) interpreter.
+        - Print results to stdout. Exit non-zero on failure.
+        - Prefer the standard library; avoid dependencies that need installation.
+        - It runs in an isolated temp directory; use absolute paths for user files.
+        - System: user \(context.username), app \(context.currentApp).
+        """
+        let payload: [String: Any] = [
+            "contents": [["role": "user", "parts": [["text": prompt]]]],
+            "generationConfig": ["temperature": 0.2]
+        ]
+        let body = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
+        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent?key=\(apiKey)")!
+        let data = try await performWithRetry(url: url, body: body)
+        return Self.stripCodeFences(Self.extractText(from: data))
+    }
+
+    static func extractText(from data: Data) -> String {
+        guard
+            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let candidates = root["candidates"] as? [[String: Any]],
+            let content = candidates.first?["content"] as? [String: Any],
+            let parts = content["parts"] as? [[String: Any]],
+            let text = parts.compactMap({ $0["text"] as? String }).first
+        else { return "" }
+        return text
+    }
+
+    /// Remove leading/trailing ``` fences (and language tag) if present.
+    static func stripCodeFences(_ s: String) -> String {
+        var lines = s.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        if let first = lines.first, first.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
+            lines.removeFirst()
+        }
+        if let last = lines.last, last.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
+            lines.removeLast()
+        }
+        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     // MARK: Networking + retry
 
     private func performWithRetry(url: URL, body: Data) async throws -> Data {

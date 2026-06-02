@@ -31,8 +31,8 @@ fully under your control.
 | Subsystem | Status |
 |---|---|
 | Wake word + orb + screen + Gemini loop | ✅ v0.1 |
+| Dynamic tool generation (Friday writes + runs + saves its own tools) | ✅ v0.2 |
 | Tool system (Shell, AppleScript, Files, Mail, Calendar, …) | 🔜 |
-| Dynamic tool generation (Friday writes its own tools) | 🔜 |
 | Sub-agents (Research, FileOrganizer, CodeWriter, …) | 🔜 |
 | Behavioral learning & proactive automation | 🔜 |
 | Onboarding + full Settings | 🔜 |

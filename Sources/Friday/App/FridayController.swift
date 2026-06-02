@@ -14,7 +14,29 @@ final class FridayController {
     func start() {
         setupPanel()
         wireEngine()
+        configureConfirmation()
         startListening()
+    }
+
+    /// Route the orchestrator's confirmation requests (run destructive code,
+    /// save a generated tool) to a modal alert.
+    private func configureConfirmation() {
+        Task {
+            await orchestrator.setConfirmationHandler { prompt in
+                await MainActor.run { Self.confirm(prompt) }
+            }
+        }
+    }
+
+    @MainActor
+    private static func confirm(_ message: String) -> Bool {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Friday"
+        alert.informativeText = message
+        alert.addButton(withTitle: "Allow")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     // MARK: Panel

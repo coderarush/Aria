@@ -10,13 +10,25 @@ actor AgentOrchestrator {
     private let gemini: GeminiClient
     private let screen: ScreenCaptureEngine
     private let memory: ConversationMemory
+    private let factory: DynamicToolFactory
+
+    /// Asks the user to approve running generated code. Param: a human-readable
+    /// prompt (incl. code when "show code" is on). Returns true to proceed.
+    /// When nil, destructive/confirmation-required runs are declined.
+    var confirmationHandler: (@Sendable (String) async -> Bool)?
 
     init(gemini: GeminiClient = GeminiClient(),
          screen: ScreenCaptureEngine = ScreenCaptureEngine(),
-         memory: ConversationMemory = ConversationMemory()) {
+         memory: ConversationMemory = ConversationMemory(),
+         factory: DynamicToolFactory = DynamicToolFactory()) {
         self.gemini = gemini
         self.screen = screen
         self.memory = memory
+        self.factory = factory
+    }
+
+    func setConfirmationHandler(_ handler: @escaping @Sendable (String) async -> Bool) {
+        confirmationHandler = handler
     }
 
     /// Process a spoken command and return what to display.
@@ -34,15 +46,15 @@ actor AgentOrchestrator {
         let context = await Self.currentSystemContext()
 
         do {
-            var response = try await gemini.send(
+            let response = try await gemini.send(
                 transcript: command,
                 screenshotJPEG: screenshot,
                 history: history,
                 context: context)
 
-            response = routeActions(response)
-            await record(command: command, response: response)
-            return response
+            let final = await routeActions(response, context: context)
+            await record(command: command, response: final)
+            return final
         } catch GeminiClient.GeminiError.missingAPIKey {
             return FridayResponse(type: .answer,
                 message: "I don't have a Gemini API key yet. Add one in Settings.",
@@ -55,22 +67,92 @@ actor AgentOrchestrator {
         }
     }
 
-    // MARK: Action routing (stubbed in slice)
+    // MARK: Action routing
 
-    private func routeActions(_ response: FridayResponse) -> FridayResponse {
+    /// Execute the actions Gemini requested. Each step's output feeds the next
+    /// step's context (sequential pipeline). Unknown tools fall back to dynamic
+    /// code generation. Static tools land in a later pass.
+    private func routeActions(_ response: FridayResponse,
+                              context: GeminiClient.SystemContext) async -> FridayResponse {
         switch response.type {
         case .answer, .clarify:
             return response
         case .action, .multiAction:
-            let names = response.actions.map(\.tool).joined(separator: ", ")
-            Log.agent.info("Action(s) requested but not yet implemented: \(names)")
+            var transcript = response.message
+            var priorOutput = ""
+            for action in response.actions {
+                let result = await execute(action, priorOutput: priorOutput, context: context)
+                transcript += "\n\n**\(action.tool)** → \(result.output)"
+                priorOutput = result.output
+                if !result.success { break }
+            }
             return FridayResponse(
                 type: .answer,
-                message: response.message + "\n\n_(Actions [\(names)] aren't wired up yet — coming in the next build.)_",
+                message: transcript,
                 confidence: response.confidence,
                 actions: response.actions,
                 followup: response.followup)
         }
+    }
+
+    /// Run a single action. "dynamic" → factory codegen+exec. Other tools are
+    /// routed to dynamic generation for now (static registry comes next pass).
+    private func execute(_ action: AgentAction,
+                         priorOutput: String,
+                         context: GeminiClient.SystemContext) async -> ToolResult {
+        let settings = DynamicToolSettings.load()
+        guard settings.allowCodeExecution else {
+            return .fail("Code execution is disabled in settings.")
+        }
+
+        // Build the task: explicit dynamic task, else synthesize from tool+input.
+        let language = ToolLanguage(rawValue: action.input["language"] ?? "python") ?? .python
+        var task = action.input["task"] ?? describe(action)
+        if !priorOutput.isEmpty {
+            task += "\n\nPrevious step output to use as input:\n\(priorOutput)"
+        }
+
+        let tool: GeneratedTool
+        do {
+            tool = try await factory.generateTool(for: task, language: language, context: context)
+        } catch {
+            return .fail("Couldn't generate a tool: \(error.localizedDescription)")
+        }
+
+        // Confirmation gate: destructive intent or "show code before run".
+        if isDestructive(task) || settings.showCodeBeforeRun {
+            let prompt = settings.showCodeBeforeRun
+                ? "Friday wants to run this \(language.rawValue):\n\n\(tool.code)"
+                : "This may modify or send data. Run it?"
+            let approved = await (confirmationHandler?(prompt) ?? false)
+            guard approved else { return .fail("Cancelled — not approved.") }
+        }
+
+        let result = await factory.execute(tool, timeout: 60)
+
+        // Offer to persist successful, non-trivial tools.
+        if result.success, settings.askBeforeSaving,
+           let confirm = confirmationHandler {
+            let save = await confirm("That worked. Save '\(tool.name)' as a reusable tool?")
+            if save { _ = await factory.saveTool(tool) }
+        } else if result.success, !settings.askBeforeSaving {
+            _ = await factory.saveTool(tool)
+        }
+        return result
+    }
+
+    private func describe(_ action: AgentAction) -> String {
+        let inputs = action.input
+            .filter { $0.key != "language" && $0.key != "task" }
+            .map { "\($0.key)=\($0.value)" }
+            .joined(separator: ", ")
+        return inputs.isEmpty ? action.tool : "\(action.tool): \(inputs)"
+    }
+
+    private func isDestructive(_ task: String) -> Bool {
+        let t = task.lowercased()
+        return ["delete", "remove", "rm ", "send", "post", "email", "submit",
+                "overwrite", "drop ", "kill"].contains { t.contains($0) }
     }
 
     // MARK: Local shortcuts
