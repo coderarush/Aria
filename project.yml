@@ -1,0 +1,23 @@
+# XcodeGen spec — generates Friday.xcodeproj for Xcode users.
+#   brew install xcodegen && xcodegen generate
+name: Friday
+options:
+  bundleIdPrefix: com.friday
+  deploymentTarget:
+    macOS: "14.0"
+targets:
+  Friday:
+    type: application
+    platform: macOS
+    sources:
+      - Sources/Friday
+    info:
+      path: Resources/Info.plist
+    entitlements:
+      path: Resources/Friday.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.friday.agent
+        MARKETING_VERSION: "0.1.0"
+        SWIFT_VERSION: "5.9"
+        ENABLE_HARDENED_RUNTIME: YES
