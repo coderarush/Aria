@@ -32,7 +32,7 @@ fully under your control.
 |---|---|
 | Wake word + orb + screen + Gemini loop | ✅ v0.1 |
 | Dynamic tool generation (Friday writes + runs + saves its own tools) | ✅ v0.2 |
-| Tool system (Shell, AppleScript, Files, Mail, Calendar, …) | 🔜 |
+| Tool system + registry (Shell, AppleScript, Files, Clipboard, Notify, OpenApp, Browser, WebSearch, WebFetch) | ✅ v0.3 |
 | Sub-agents (Research, FileOrganizer, CodeWriter, …) | 🔜 |
 | Behavioral learning & proactive automation | 🔜 |
 | Onboarding + full Settings | 🔜 |

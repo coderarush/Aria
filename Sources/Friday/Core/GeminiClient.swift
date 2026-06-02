@@ -42,7 +42,8 @@ actor GeminiClient {
     func send(transcript: String,
               screenshotJPEG: Data?,
               history: [ConversationTurn],
-              context: SystemContext) async throws -> FridayResponse {
+              context: SystemContext,
+              toolCatalog: String = "") async throws -> FridayResponse {
 
         guard let apiKey = apiKeyProvider(), !apiKey.isEmpty else {
             throw GeminiError.missingAPIKey
@@ -57,7 +58,8 @@ actor GeminiClient {
         let body = buildRequestBody(transcript: transcript,
                                     screenshotJPEG: screenshotJPEG,
                                     history: history,
-                                    context: context)
+                                    context: context,
+                                    toolCatalog: toolCatalog)
         let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent?key=\(apiKey)")!
 
         let data = try await performWithRetry(url: url, body: body)
@@ -153,18 +155,27 @@ actor GeminiClient {
     private func buildRequestBody(transcript: String,
                                  screenshotJPEG: Data?,
                                  history: [ConversationTurn],
-                                 context: SystemContext) -> Data {
+                                 context: SystemContext,
+                                 toolCatalog: String) -> Data {
         var parts: [[String: Any]] = []
 
         let historyText = history.map {
             "User: \($0.transcript)\nFriday: \($0.responseMessage)"
         }.joined(separator: "\n")
 
+        let toolsBlock = toolCatalog.isEmpty ? "" : """
+
+        AVAILABLE TOOLS (use via "action"/"multi_action"; for anything else emit \
+        an action with tool "dynamic" and an "input.task" describing what to do):
+        \(toolCatalog)
+        """
+
         let userText = """
         SYSTEM CONTEXT:
         - Current app: \(context.currentApp)
         - Time: \(ISO8601DateFormatter().string(from: context.time))
         - User: \(context.username)
+        \(toolsBlock)
 
         RECENT CONVERSATION:
         \(historyText.isEmpty ? "(none)" : historyText)

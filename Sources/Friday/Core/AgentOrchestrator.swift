@@ -11,6 +11,7 @@ actor AgentOrchestrator {
     private let screen: ScreenCaptureEngine
     private let memory: ConversationMemory
     private let factory: DynamicToolFactory
+    private let registry: ToolRegistry
 
     /// Asks the user to approve running generated code. Param: a human-readable
     /// prompt (incl. code when "show code" is on). Returns true to proceed.
@@ -20,11 +21,13 @@ actor AgentOrchestrator {
     init(gemini: GeminiClient = GeminiClient(),
          screen: ScreenCaptureEngine = ScreenCaptureEngine(),
          memory: ConversationMemory = ConversationMemory(),
-         factory: DynamicToolFactory = DynamicToolFactory()) {
+         factory: DynamicToolFactory = DynamicToolFactory(),
+         registry: ToolRegistry = ToolRegistry()) {
         self.gemini = gemini
         self.screen = screen
         self.memory = memory
         self.factory = factory
+        self.registry = registry
     }
 
     func setConfirmationHandler(_ handler: @escaping @Sendable (String) async -> Bool) {
@@ -46,11 +49,13 @@ actor AgentOrchestrator {
         let context = await Self.currentSystemContext()
 
         do {
+            let catalog = await registry.catalog()
             let response = try await gemini.send(
                 transcript: command,
                 screenshotJPEG: screenshot,
                 history: history,
-                context: context)
+                context: context,
+                toolCatalog: catalog)
 
             let final = await routeActions(response, context: context)
             await record(command: command, response: final)
@@ -100,6 +105,19 @@ actor AgentOrchestrator {
     private func execute(_ action: AgentAction,
                          priorOutput: String,
                          context: GeminiClient.SystemContext) async -> ToolResult {
+        // Native static tool wins if registered.
+        if let tool = await registry.tool(named: action.tool) {
+            if tool.isDestructive {
+                let approved = await (confirmationHandler?(
+                    "Run \(action.tool) with \(action.input)?") ?? false)
+                guard approved else { return .fail("Cancelled — not approved.") }
+            }
+            do { return try await tool.run(input: action.input) }
+            catch ToolError.missingInput(let key) { return .fail("Missing input '\(key)' for \(action.tool).") }
+            catch { return .fail("\(action.tool) failed: \(error.localizedDescription)") }
+        }
+
+        // Otherwise fall back to dynamic code generation.
         let settings = DynamicToolSettings.load()
         guard settings.allowCodeExecution else {
             return .fail("Code execution is disabled in settings.")
