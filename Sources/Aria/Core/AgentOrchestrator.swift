@@ -210,8 +210,10 @@ actor AgentOrchestrator {
     /// Calls `onText` with each text delta; runs up to maxRounds agentic turns.
     func handleStreaming(command: String, privacyMode: Bool,
                          onText: @escaping @Sendable (String) -> Void) async {
-        let screenshot: Data? = privacyMode ? nil : try? await screen.capturePrimaryJPEG()
+        let wantsScreen = !privacyMode && ModelRouter.needsScreen(for: command)
+        let screenshot: Data? = wantsScreen ? (try? await screen.capturePrimaryJPEG()) : nil
         var history = await memory.recentContext()
+        history = Array(history.suffix(8))
         let context = await Self.currentSystemContext()
         let tools = ToolDeclarations.declarations(for: await registry.specs())
         var transcript = command
@@ -222,7 +224,8 @@ actor AgentOrchestrator {
             for _ in 0..<maxRounds {
                 var calls: [(name: String, args: [String: String])] = []
                 let stream = await gemini.streamSend(transcript: transcript, screenshotJPEG: turnScreenshot,
-                                                     history: history, context: context, toolCatalog: "", tools: tools)
+                                                     history: history, context: context, toolCatalog: "", tools: tools,
+                                                     preferredModel: ModelRouter.model(for: command))
                 for try await ev in stream {
                     switch ev {
                     case .text(let t): full += t; onText(t)
@@ -231,9 +234,17 @@ actor AgentOrchestrator {
                 }
                 if calls.isEmpty { break }   // model is done talking/acting
                 var results = ""
-                for call in calls {
-                    let r = await execute(AgentAction(tool: call.name, input: call.args), priorOutput: "", context: context)
-                    results += "\n\(call.name): \(r.success ? r.output : "FAILED: \(r.output)")"
+                let ctx = context
+                await withTaskGroup(of: (String, ToolResult).self) { group in
+                    for call in calls {
+                        group.addTask {
+                            let r = await self.execute(AgentAction(tool: call.name, input: call.args), priorOutput: "", context: ctx)
+                            return (call.name, r)
+                        }
+                    }
+                    for await (name, r) in group {
+                        results += "\n\(name): \(r.success ? r.output : "FAILED: \(r.output)")"
+                    }
                 }
                 history.append(ConversationTurn(transcript: transcript, responseMessage: full, responseType: .action))
                 transcript = "Tool results:\(results)\n\nContinue: speak the final answer to the user, or call more tools if needed."

@@ -82,7 +82,8 @@ actor GeminiClient {
                     history: [ConversationTurn],
                     context: SystemContext,
                     toolCatalog: String = "",
-                    tools: [[String: Any]]? = nil) -> AsyncThrowingStream<StreamEvent, Error> {
+                    tools: [[String: Any]]? = nil,
+                    preferredModel: String? = nil) -> AsyncThrowingStream<StreamEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
@@ -94,13 +95,15 @@ actor GeminiClient {
                                                 history: history, context: context,
                                                 toolCatalog: toolCatalog,
                                                 tools: tools)
+                    let effectiveModels = ([preferredModel].compactMap { $0 } + models)
+                        .reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
                     var lastError: Error = GeminiError.emptyResponse
                     // Free tier meters RPM PER MODEL. Try every model FAST (no delay)
                     // to exploit their separate quota buckets; only if an entire pass
                     // is rate-limited do we wait briefly and retry the cycle.
                     let passes = 3
                     for pass in 0..<passes {
-                        for model in models {
+                        for model in effectiveModels {
                             let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):streamGenerateContent?alt=sse&key=\(apiKey)")!
                             var req = URLRequest(url: url)
                             req.httpMethod = "POST"
