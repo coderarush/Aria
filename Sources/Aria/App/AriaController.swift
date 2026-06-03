@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import AVFoundation
+import Combine
 
 /// Top-level coordinator that owns the runtime engines and the Island panel, and
 /// wires wake → listen → think → respond. Lives for the app's lifetime.
@@ -14,6 +15,7 @@ final class AriaController {
     private let patternEngine = PatternEngine()
     private var panel: IslandPanel?
     private var learningTimer: Timer?
+    private var settingsCancellable: AnyCancellable?
 
     func start() {
         setupPanel()
@@ -186,6 +188,10 @@ final class AriaController {
     }
 
     private func wireEngine() {
+        islandViewModel.accent = AppSettings.shared.accentColor
+        settingsCancellable = AppSettings.shared.$accentChoiceRaw
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.islandViewModel.accent = AppSettings.shared.accentColor }
         applyVoiceSettings()
         voice.onStart = { [weak self] in self?.wakeEngine.isSuspended = true }
         voice.onFinish = { [weak self] in

@@ -31,12 +31,23 @@ struct GeneralSettingsTab: View {
 
     var body: some View {
         Form {
-            Picker("Orb position", selection: $settings.orbPosition) {
-                ForEach(AppSettings.OrbPosition.allCases) { Text($0.label).tag($0) }
+            Picker("Accent", selection: Binding(
+                get: { settings.accentChoiceRaw },
+                set: { settings.accentChoiceRaw = $0 })) {
+                Text("Follow system").tag("system")
+                ForEach(Theme.presets, id: \.id) { p in
+                    Text(p.name).tag("preset:\(p.id)")
+                }
+                Text("Custom…").tag(customTag)
             }
-            Picker("Orb size", selection: $settings.orbSize) {
-                ForEach(AppSettings.OrbSize.allCases) { Text($0.rawValue.capitalized).tag($0) }
+            if settings.accentChoiceRaw.hasPrefix("custom:") || settings.accentChoiceRaw == customTag {
+                ColorPicker("Custom color", selection: customColorBinding, supportsOpacity: false)
             }
+            HStack(spacing: 8) {
+                Text("Preview").foregroundStyle(.secondary)
+                Capsule().fill(settings.accentColor).frame(width: 60, height: 10)
+            }
+            Divider()
             HStack {
                 Text("Response duration")
                 Slider(value: $settings.responseDuration, in: 3...20, step: 1)
@@ -46,6 +57,21 @@ struct GeneralSettingsTab: View {
             Toggle("Launch at login", isOn: $settings.launchAtLogin)
         }
         .padding()
+    }
+
+    private let customTag = "custom:#3B82F6"
+
+    private var customColorBinding: Binding<Color> {
+        Binding(
+            get: { settings.accentColor },
+            set: { newColor in
+                let ns = NSColor(newColor).usingColorSpace(.sRGB) ?? .systemBlue
+                let hex = String(format: "#%02X%02X%02X",
+                                 Int(ns.redComponent * 255),
+                                 Int(ns.greenComponent * 255),
+                                 Int(ns.blueComponent * 255))
+                settings.accentChoiceRaw = "custom:\(hex)"
+            })
     }
 }
 
