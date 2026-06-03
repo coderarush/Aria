@@ -1,4 +1,4 @@
-# Contributing to Friday
+# Contributing to Aria
 
 Thanks for helping build the best open-source AI agent for the Mac.
 
@@ -15,20 +15,20 @@ in production paths**. Every tool ships with a unit test.
 
 ## Project layout
 
-- `Sources/Friday/App` — entry point, menu bar, top-level wiring
-- `Sources/Friday/Core` — engines (wake, screen, Gemini, orchestrator, memory)
-- `Sources/Friday/UI` — orb + cards (SwiftUI)
-- `Sources/Friday/Tools` — tool implementations (growing)
-- `Sources/Friday/Utilities` — keychain, permissions, logging
-- `Tests/FridayTests` — XCTest
+- `Sources/Aria/App` — entry point, menu bar, top-level wiring
+- `Sources/Aria/Core` — engines (wake, screen, Gemini, orchestrator, memory)
+- `Sources/Aria/UI` — orb + cards (SwiftUI)
+- `Sources/Aria/Tools` — tool implementations (growing)
+- `Sources/Aria/Utilities` — keychain, permissions, logging
+- `Tests/AriaTests` — XCTest
 
 ## Adding a new tool
 
-Tools are the unit of capability. The `FridayTool` protocol (landing with the
+Tools are the unit of capability. The `AriaTool` protocol (landing with the
 tool system) looks like:
 
 ```swift
-protocol FridayTool {
+protocol AriaTool {
     /// Stable identifier the model references in `actions[].tool`.
     static var name: String { get }
     /// One line the model reads to decide when to use this tool.
@@ -42,12 +42,12 @@ protocol FridayTool {
 
 To add one:
 
-1. Create `Sources/Friday/Tools/<Category>/MyTool.swift` conforming to `FridayTool`.
+1. Create `Sources/Aria/Tools/<Category>/MyTool.swift` conforming to `AriaTool`.
 2. Give it a clear `name` and a `description` the model can act on.
 3. Mark `isDestructive = true` for anything that deletes, sends, or posts —
-   Friday will confirm with the user before running it.
+   Aria will confirm with the user before running it.
 4. Register it in the tool registry (`AgentOrchestrator`).
-5. Add a unit test in `Tests/FridayTests/ToolTests/MyToolTests.swift`. Mock any
+5. Add a unit test in `Tests/AriaTests/ToolTests/MyToolTests.swift`. Mock any
    side effects; never hit a real network/file in a unit test.
 6. Document it in the README tool list.
 

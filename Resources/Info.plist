@@ -3,19 +3,19 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Friday</string>
+    <string>Aria</string>
     <key>CFBundleDisplayName</key>
-    <string>Friday</string>
+    <string>Aria</string>
     <key>CFBundleIdentifier</key>
-    <string>com.friday.agent</string>
+    <string>com.aria.agent</string>
     <key>CFBundleVersion</key>
-    <string>0.1.0</string>
+    <string>2.0.0</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>2.0.0</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleExecutable</key>
-    <string>Friday</string>
+    <string>Aria</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>LSUIElement</key>
@@ -23,10 +23,10 @@
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Friday listens for the "Hey Friday" wake phrase on-device.</string>
+    <string>Aria listens for the "Hey Aria" wake phrase on-device.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
-    <string>Friday transcribes your voice commands on-device to understand what you need.</string>
+    <string>Aria transcribes your voice commands on-device to understand what you need.</string>
     <key>NSScreenCaptureUsageDescription</key>
-    <string>Friday captures your screen only when you issue a command, to see what you are working on.</string>
+    <string>Aria captures your screen only when you issue a command, to see what you are working on.</string>
 </dict>
 </plist>

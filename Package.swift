@@ -2,22 +2,22 @@
 import PackageDescription
 
 let package = Package(
-    name: "Friday",
+    name: "Aria",
     platforms: [
         .macOS(.v14)
     ],
     products: [
-        .executable(name: "Friday", targets: ["Friday"])
+        .executable(name: "Aria", targets: ["Aria"])
     ],
     targets: [
         .executableTarget(
-            name: "Friday",
-            path: "Sources/Friday"
+            name: "Aria",
+            path: "Sources/Aria"
         ),
         .testTarget(
-            name: "FridayTests",
-            dependencies: ["Friday"],
-            path: "Tests/FridayTests"
+            name: "AriaTests",
+            dependencies: ["Aria"],
+            path: "Tests/AriaTests"
         )
     ]
 )
