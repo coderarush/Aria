@@ -33,10 +33,12 @@ actor GeminiClient {
     init(model: String = "gemini-2.5-flash",
          session: URLSession = .shared,
          apiKeyProvider: @escaping () -> String? = { KeychainManager.read(account: KeychainKey.geminiAPIKey) }) {
-        // Primary model first, then capable fallbacks (deduped). If one model is
-        // unavailable/overloaded for the user's key, requests fall through to the
-        // next instead of failing.
-        self.models = [model, "gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"]
+        // Primary model first, then fallbacks (deduped). The free tier meters RPM
+        // PER MODEL, so spreading across several models — including the higher-RPM,
+        // faster `-lite` variants — multiplies effective free throughput: if one
+        // model is rate-limited, the next has its own bucket.
+        self.models = [model, "gemini-2.5-flash", "gemini-2.0-flash",
+                       "gemini-2.5-flash-lite", "gemini-2.0-flash-lite"]
             .reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
         self.session = session
         self.apiKeyProvider = apiKeyProvider
@@ -93,37 +95,38 @@ actor GeminiClient {
                                                 toolCatalog: toolCatalog,
                                                 tools: tools)
                     var lastError: Error = GeminiError.emptyResponse
-                    // 429 is a per-MINUTE free-tier quota shared across models, so
-                    // switching models doesn't help — WAITING does. Back off between
-                    // attempts (the API's own message says "retry in ~1.2s").
-                    let maxAttempts = 4
-                    var attempt = 0
-                    while attempt < maxAttempts {
-                        let model = models[min(attempt, models.count - 1)]
-                        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):streamGenerateContent?alt=sse&key=\(apiKey)")!
-                        var req = URLRequest(url: url)
-                        req.httpMethod = "POST"
-                        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                        req.httpBody = body
-                        do {
-                            let (bytes, resp) = try await session.bytes(for: req)
-                            let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
-                            guard status == 200 else { throw GeminiError.http(status) }
-                            var parser = GeminiStreamParser()
-                            for try await line in bytes.lines {
-                                try Task.checkCancellation()
-                                for ev in parser.consume(line + "\n") { continuation.yield(ev) }
+                    // Free tier meters RPM PER MODEL. Try every model FAST (no delay)
+                    // to exploit their separate quota buckets; only if an entire pass
+                    // is rate-limited do we wait briefly and retry the cycle.
+                    let passes = 3
+                    for pass in 0..<passes {
+                        for model in models {
+                            let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):streamGenerateContent?alt=sse&key=\(apiKey)")!
+                            var req = URLRequest(url: url)
+                            req.httpMethod = "POST"
+                            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                            req.httpBody = body
+                            do {
+                                let (bytes, resp) = try await session.bytes(for: req)
+                                let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+                                guard status == 200 else { throw GeminiError.http(status) }
+                                var parser = GeminiStreamParser()
+                                for try await line in bytes.lines {
+                                    try Task.checkCancellation()
+                                    for ev in parser.consume(line + "\n") { continuation.yield(ev) }
+                                }
+                                continuation.finish()
+                                return
+                            } catch let GeminiError.http(status) where [404, 408, 425, 429, 500, 502, 503, 504].contains(status) {
+                                lastError = GeminiError.http(status)
+                                continue   // next model immediately — separate free bucket
                             }
-                            continuation.finish()
-                            return
-                        } catch let GeminiError.http(status) where [404, 408, 425, 429, 500, 502, 503, 504].contains(status) {
-                            lastError = GeminiError.http(status)
-                            attempt += 1
-                            guard attempt < maxAttempts else { break }
-                            let backoff = min(1.2 * pow(2.0, Double(attempt - 1)), 6)  // 1.2, 2.4, 4.8s
-                            Log.trace("streamSend: \(model) http(\(status)); backoff \(backoff)s (attempt \(attempt)/\(maxAttempts))")
+                        }
+                        // Whole pass limited across ALL models → brief wait, retry cycle.
+                        if pass < passes - 1 {
+                            let backoff = min(1.5 * pow(2.0, Double(pass)), 6)  // 1.5, 3s
+                            Log.trace("streamSend: all models limited; backoff \(backoff)s (pass \(pass + 1)/\(passes))")
                             try? await Task.sleep(nanoseconds: UInt64(backoff * 1_000_000_000))
-                            continue
                         }
                     }
                     continuation.finish(throwing: lastError)
