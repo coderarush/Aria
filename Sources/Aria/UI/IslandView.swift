@@ -1,23 +1,13 @@
 import SwiftUI
 
-/// Aria's Siri-style presence: a soft, breathing accent aurora hugging the
-/// screen edges, plus a bottom caption for her reply. The center is transparent
-/// and click-through.
+/// Aria's Siri-style presence: a living aurora of soft accent light that drifts
+/// around the screen edges, drawn with an additive-blended Canvas for a smooth,
+/// high-end glow. The center is transparent and click-through. A bottom caption
+/// shows her reply.
 struct IslandView: View {
     @ObservedObject var viewModel: IslandViewModel
-    @State private var drift = 0.0       // slow rotation of the gradient
-    @State private var breathe = false   // gentle intensity pulse
 
     private var active: Bool { viewModel.isVisible && viewModel.state != .idle }
-
-    /// Smooth accent band that fades in and out around the ring — two soft lobes,
-    /// no harsh stop. Drifts slowly so the glow feels alive, not spinning.
-    private var bandColors: [Color] {
-        let a = viewModel.accent
-        return [a.opacity(0.0), a.opacity(0.5), a, a.opacity(0.5),
-                a.opacity(0.0),
-                a.opacity(0.5), a, a.opacity(0.5), a.opacity(0.0)]
-    }
 
     private var captionText: String {
         switch viewModel.state {
@@ -29,50 +19,99 @@ struct IslandView: View {
     }
     private var showCaption: Bool { active && !captionText.isEmpty }
 
-    /// While listening the aurora swells gently with the voice; otherwise it
-    /// holds a calm, breathing level.
-    private var intensity: CGFloat {
-        let level = viewModel.state == .listening ? CGFloat(viewModel.audioLevel) : 0
-        return 0.82 + level * 0.38 + (breathe ? 0.12 : 0)
-    }
-
     var body: some View {
         ZStack {
             Color.clear
-            glow
-                .opacity(active ? 1 : 0)
-                .animation(.easeInOut(duration: 0.55), value: active)
+            TimelineView(.animation) { timeline in
+                Canvas { ctx, size in
+                    draw(ctx, size, t: timeline.date.timeIntervalSinceReferenceDate)
+                }
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+            }
+            .opacity(active ? 1 : 0)
+            .animation(.easeInOut(duration: 0.6), value: active)
         }
         .overlay(alignment: .bottom) { caption }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear {
-            withAnimation(.linear(duration: 18).repeatForever(autoreverses: false)) { drift = 360 }
-            withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) { breathe = true }
+    }
+
+    // MARK: Aurora
+
+    /// Soft accent blobs ride around the screen perimeter; additive blending
+    /// layers them into a glowing aurora that hugs the edges and bleeds inward.
+    private func draw(_ context: GraphicsContext, _ size: CGSize, t: Double) {
+        var ctx = context
+        ctx.blendMode = .plusLighter
+        ctx.opacity = breathing(t)
+
+        let accent = viewModel.accent
+        let blobs = 9
+        // Listening makes the aurora swell and brighten with the voice.
+        let level = viewModel.state == .listening ? CGFloat(min(max(viewModel.audioLevel, 0), 1)) : 0
+        let thinking = viewModel.state == .thinking
+        let baseRadius = min(size.width, size.height) * (0.17 + level * 0.07)
+        let driftSpeed = thinking ? 0.045 : 0.026
+
+        for i in 0..<blobs {
+            let phase = Double(i) / Double(blobs)
+            let u = t * driftSpeed + phase
+            let p = perimeterPoint(u, size)
+            // Each blob wobbles in size for a living, non-mechanical feel.
+            let wobble = (sin(t * 0.6 + Double(i) * 1.3) + 1) / 2          // 0…1
+            let r = baseRadius * (0.75 + 0.45 * CGFloat(wobble))
+            let rect = CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)
+
+            let hot = accent.opacity(0.55 + 0.25 * Double(level))
+            let grad = Gradient(stops: [
+                .init(color: hot, location: 0.0),
+                .init(color: accent.opacity(0.18), location: 0.45),
+                .init(color: accent.opacity(0.0), location: 1.0),
+            ])
+            ctx.fill(
+                Path(ellipseIn: rect),
+                with: .radialGradient(grad, center: p, startRadius: 0, endRadius: r))
+        }
+
+        // A faint white core sheen on top adds a glassy, premium edge.
+        ctx.blendMode = .plusLighter
+        for i in 0..<blobs {
+            let phase = Double(i) / Double(blobs) + 0.5 / Double(blobs)
+            let u = t * driftSpeed + phase
+            let p = perimeterPoint(u, size)
+            let r = baseRadius * 0.5
+            let rect = CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)
+            let grad = Gradient(colors: [Color.white.opacity(0.10), Color.white.opacity(0.0)])
+            ctx.fill(
+                Path(ellipseIn: rect),
+                with: .radialGradient(grad, center: p, startRadius: 0, endRadius: r))
         }
     }
 
-    /// Three layered, blurred strokes give the glow depth: a wide soft halo, a
-    /// tighter brighter ring, and a faint white sheen for a glassy edge.
-    private var glow: some View {
-        let gradient = AngularGradient(gradient: Gradient(colors: bandColors),
-                                       center: .center, angle: .degrees(drift))
-        return ZStack {
-            RoundedRectangle(cornerRadius: 46, style: .continuous)
-                .strokeBorder(gradient, lineWidth: 72)
-                .blur(radius: 72)
-                .opacity(0.5 * intensity)
-            RoundedRectangle(cornerRadius: 42, style: .continuous)
-                .strokeBorder(gradient, lineWidth: 28)
-                .blur(radius: 26)
-                .opacity(0.9 * intensity)
-            RoundedRectangle(cornerRadius: 42, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.10), lineWidth: 9)
-                .blur(radius: 12)
-                .opacity(intensity)
-        }
-        .ignoresSafeArea()
-        .animation(.easeInOut(duration: 0.35), value: intensity)
+    /// Gentle global breathing of the whole aurora.
+    private func breathing(_ t: Double) -> Double {
+        0.82 + 0.18 * (sin(t * 1.1) + 1) / 2
     }
+
+    /// Map u (any real; fractional part used) to a point traveling clockwise
+    /// around the screen rectangle's perimeter. Blob centers sit on the edge so
+    /// only their inner half shows — the glow hugs the border.
+    private func perimeterPoint(_ u: Double, _ size: CGSize) -> CGPoint {
+        let w = size.width, h = size.height
+        let peri = 2 * (w + h)
+        var d = u.truncatingRemainder(dividingBy: 1)
+        if d < 0 { d += 1 }
+        d *= peri
+        if d < w { return CGPoint(x: d, y: 0) }            // top, L→R
+        d -= w
+        if d < h { return CGPoint(x: w, y: d) }            // right, T→B
+        d -= h
+        if d < w { return CGPoint(x: w - d, y: h) }        // bottom, R→L
+        d -= w
+        return CGPoint(x: 0, y: h - d)                     // left, B→T
+    }
+
+    // MARK: Caption
 
     private var caption: some View {
         Group {
@@ -85,7 +124,7 @@ struct IslandView: View {
                     .padding(.horizontal, 24).padding(.vertical, 15)
                     .background(.ultraThinMaterial, in: Capsule())
                     .overlay(Capsule().strokeBorder(viewModel.accent.opacity(0.4), lineWidth: 1))
-                    .shadow(color: viewModel.accent.opacity(0.25), radius: 22, y: 8)
+                    .shadow(color: viewModel.accent.opacity(0.3), radius: 24, y: 8)
                     .frame(maxWidth: 720)
                     .padding(.bottom, 96)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
