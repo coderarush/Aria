@@ -19,7 +19,7 @@ actor GeminiClient {
         var username: String
     }
 
-    private let model: String
+    private let models: [String]
     private let session: URLSession
     private let apiKeyProvider: () -> String?
 
@@ -28,12 +28,16 @@ actor GeminiClient {
     private var cache: [String: CacheEntry] = [:]
     private let cacheTTL: TimeInterval = 30
 
-    private let maxRetries = 3
+    private let maxRetries = 5
 
-    init(model: String = "gemini-flash-latest",
+    init(model: String = "gemini-2.5-flash",
          session: URLSession = .shared,
          apiKeyProvider: @escaping () -> String? = { KeychainManager.read(account: KeychainKey.geminiAPIKey) }) {
-        self.model = model
+        // Primary model first, then capable fallbacks (deduped). If one model is
+        // unavailable/overloaded for the user's key, requests fall through to the
+        // next instead of failing.
+        self.models = [model, "gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"]
+            .reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
         self.session = session
         self.apiKeyProvider = apiKeyProvider
     }
@@ -60,9 +64,7 @@ actor GeminiClient {
                                     history: history,
                                     context: context,
                                     toolCatalog: toolCatalog)
-        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent?key=\(apiKey)")!
-
-        let data = try await performWithRetry(url: url, body: body)
+        let data = try await performWithFallback(apiKey: apiKey, body: body)
         let response = try Self.decodeAriaResponse(from: data)
 
         cache[cacheKey] = CacheEntry(response: response, at: Date())
@@ -95,8 +97,7 @@ actor GeminiClient {
             "generationConfig": ["temperature": 0.2]
         ]
         let body = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
-        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent?key=\(apiKey)")!
-        let data = try await performWithRetry(url: url, body: body)
+        let data = try await performWithFallback(apiKey: apiKey, body: body)
         return Self.stripCodeFences(Self.extractText(from: data))
     }
 
@@ -125,6 +126,15 @@ actor GeminiClient {
 
     // MARK: Networking + retry
 
+    /// Transient statuses worth retrying: rate limiting (429), server/overload
+    /// (5xx), and — observed with newer "AQ." API keys — intermittent 404s from
+    /// the load balancer (the same model returns 200 on a retry).
+    private static let retryableStatuses: Set<Int> = [404, 408, 425, 429, 500, 502, 503, 504]
+
+    private func backoffSeconds(_ attempt: Int) -> Double {
+        min(pow(2.0, Double(attempt)) * 0.4, 6)  // 0.4, 0.8, 1.6, 3.2, 6 …
+    }
+
     private func performWithRetry(url: URL, body: Data) async throws -> Data {
         var attempt = 0
         while true {
@@ -133,21 +143,51 @@ actor GeminiClient {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = body
 
-            let (data, response) = try await session.data(for: request)
-            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-
-            if status == 200 {
-                return data
+            let data: Data
+            let status: Int
+            do {
+                let (d, response) = try await session.data(for: request)
+                data = d
+                status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            } catch {
+                // Network-level failure (timeout, dropped connection) — retry too.
+                guard attempt < self.maxRetries else { throw error }
+                try await Task.sleep(nanoseconds: UInt64(self.backoffSeconds(attempt) * 1_000_000_000))
+                attempt += 1
+                continue
             }
-            if status == 429, attempt < maxRetries {
-                let backoff = pow(2.0, Double(attempt)) * 0.5  // 0.5s, 1s, 2s
-                Log.gemini.warning("Rate limited (429); retrying in \(backoff)s")
+
+            if status == 200 { return data }
+
+            if Self.retryableStatuses.contains(status), attempt < self.maxRetries {
+                let backoff = self.backoffSeconds(attempt)
+                Log.gemini.warning("HTTP \(status); retry \(attempt + 1)/\(self.maxRetries) in \(backoff)s")
                 try await Task.sleep(nanoseconds: UInt64(backoff * 1_000_000_000))
                 attempt += 1
                 continue
             }
             throw GeminiError.http(status)
         }
+    }
+
+    /// Try each configured model in order; if one keeps failing after retries
+    /// (e.g. a model that 404s or stays overloaded for this key), fall through to
+    /// the next. Throws the last error only if every model fails.
+    private func performWithFallback(apiKey: String, body: Data) async throws -> Data {
+        var lastError: Error = GeminiError.emptyResponse
+        for model in models {
+            let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent?key=\(apiKey)")!
+            do {
+                let data = try await performWithRetry(url: url, body: body)
+                Log.trace("gemini: \(model) ok")
+                return data
+            } catch {
+                Log.trace("gemini: \(model) failed (\(error)); trying next model")
+                lastError = error
+                continue
+            }
+        }
+        throw lastError
     }
 
     // MARK: Request building
