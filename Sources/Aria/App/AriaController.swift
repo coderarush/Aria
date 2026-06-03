@@ -19,6 +19,7 @@ final class AriaController {
     /// True while Aria is speaking; keeps wake suspended even if the pill
     /// auto-hides mid-utterance, so she can't hear herself and re-trigger.
     private var isSpeaking = false
+    private var streamVoice: StreamingVoice!
 
     func start() {
         setupPanel()
@@ -216,6 +217,9 @@ final class AriaController {
             // If the pill already hid while Aria was talking, re-arm wake now.
             if !self.islandViewModel.isVisible { self.wakeEngine.isSuspended = false }
         }
+        streamVoice = StreamingVoice(speakChunk: { [weak self] in self?.voice.speakChunk($0) },
+                                     stopAll: { [weak self] in self?.voice.stop() })
+        voice.onChunkFinished = { [weak self] in self?.streamVoice.chunkDidFinish() }
         wakeEngine.onWake = { [weak self] in
             Log.trace("onWake — island listening")
             self?.islandViewModel.beginListening()
@@ -267,34 +271,35 @@ final class AriaController {
     // MARK: Command handling
 
     private func handleCommand(_ command: String) {
-        // Dismissal phrases.
         let lower = command.lowercased()
         if lower.contains("dismiss") || lower.contains("thanks aria") || lower.contains("never mind") {
-            voice.stop()
-            islandViewModel.dismiss()
-            return
+            streamVoice.stop(); islandViewModel.dismiss(); return
         }
-
-        // Stop listening for new wakes while we work, so a stray "aria" can't
-        // interrupt or dismiss the island mid-task. Resumed when the island hides
-        // (see onVisibilityChange in setupPanel).
         wakeEngine.isSuspended = true
-        islandViewModel.beginThinking()
-        let privacy = AppSettings.shared.privacyMode
-        Log.trace("handleCommand: '\(command)' privacy=\(privacy) — thinking")
-        Task {
-            await patternEngine.recordCommand(command)
-            Log.trace("calling orchestrator.handle")
-            let response = await orchestrator.handle(command: command, privacyMode: privacy)
-            Log.trace("orchestrator returned: type=\(response.type.rawValue) conf=\(response.confidence) msg=\(response.message.prefix(120))")
-            if response.confidence == 0 {
-                islandViewModel.showError(response.message)
-            } else {
-                islandViewModel.showResponse(response.message)
-                applyVoiceSettings()
-                voice.speak(response.message)
+        isSpeaking = true
+        applyVoiceSettings()
+        islandViewModel.beginListening()
+        islandViewModel.showResponse("")
+        var chunker = SentenceChunker()
+        streamVoice.onAllFinished = { [weak self] in
+            guard let self else { return }
+            self.isSpeaking = false
+            if !self.islandViewModel.isVisible { self.wakeEngine.isSuspended = false }
+        }
+        Task { [weak self] in
+            guard let self else { return }
+            await self.orchestrator.handleStreaming(command: command, privacyMode: AppSettings.shared.privacyMode) { delta in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.islandViewModel.responseText += delta
+                    for chunk in chunker.push(delta) { self.streamVoice.enqueue(chunk) }
+                }
             }
-            Log.trace("island updated, state=\(String(describing: islandViewModel.state))")
+            await MainActor.run {
+                let tail = chunker.flush()
+                if !tail.isEmpty { self.streamVoice.enqueue(tail) }
+                self.islandViewModel.showResponse(self.islandViewModel.responseText)
+            }
         }
     }
 

@@ -206,6 +206,27 @@ actor AgentOrchestrator {
                 "overwrite", "drop ", "kill"].contains { t.contains($0) }
     }
 
+    /// Streaming answer path (Phase 1: text only; tools come in Phase 2).
+    /// Calls `onText` with each text delta; returns when the stream ends.
+    func handleStreaming(command: String, privacyMode: Bool,
+                         onText: @escaping @Sendable (String) -> Void) async {
+        let screenshot: Data? = privacyMode ? nil : try? await screen.capturePrimaryJPEG()
+        let history = await memory.recentContext()
+        let context = await Self.currentSystemContext()
+        let catalog = await registry.catalog()
+        var full = ""
+        do {
+            let stream = await gemini.streamSend(transcript: command, screenshotJPEG: screenshot,
+                                                  history: history, context: context, toolCatalog: catalog)
+            for try await ev in stream {
+                if case let .text(t) = ev { full += t; onText(t) }
+            }
+        } catch {
+            onText("Something went wrong reaching my brain.")
+        }
+        await record(command: command, response: AriaResponse(type: .answer, message: full, confidence: 1.0))
+    }
+
     // MARK: Local shortcuts
 
     private func localShortcut(for command: String) -> AriaResponse? {
