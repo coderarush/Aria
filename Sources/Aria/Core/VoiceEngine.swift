@@ -20,6 +20,8 @@ final class VoiceEngine: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDel
 
     var onStart: (() -> Void)?
     var onFinish: (() -> Void)?
+    /// Fired when a single utterance/chunk finishes (used by StreamingVoice).
+    var onChunkFinished: (() -> Void)?
 
     override init() {
         super.init()
@@ -69,7 +71,7 @@ final class VoiceEngine: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDel
     }
 
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        Task { @MainActor in self.onFinish?() }
+        Task { @MainActor in self.onFinish?(); self.onChunkFinished?() }
     }
 
     func stop() {
@@ -124,11 +126,18 @@ final class VoiceEngine: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDel
     }
 
     nonisolated func speechSynthesizer(_ s: AVSpeechSynthesizer, didFinish u: AVSpeechUtterance) {
-        Task { @MainActor in self.onFinish?() }
+        Task { @MainActor in self.onFinish?(); self.onChunkFinished?() }
     }
 
     nonisolated func speechSynthesizer(_ s: AVSpeechSynthesizer, didCancel u: AVSpeechUtterance) {
-        Task { @MainActor in self.onFinish?() }
+        Task { @MainActor in self.onChunkFinished?() }
+    }
+
+    /// Speak a single chunk (no onStart). Routes completion to onChunkFinished.
+    func speakChunk(_ text: String) {
+        let clean = Self.spokenText(from: text)
+        guard !clean.isEmpty else { Task { @MainActor in self.onChunkFinished?() }; return }
+        if kind == .gemini { speakWithGemini(clean) } else { speakWithApple(clean) }
     }
 
     /// Gemini TTS → WAV bytes (24kHz mono 16-bit PCM wrapped in a WAV header).
