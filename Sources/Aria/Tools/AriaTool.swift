@@ -1,6 +1,6 @@
 import Foundation
 
-/// A unit of capability Friday can invoke. Static tools (Shell, Mail, …) and the
+/// A unit of capability Aria can invoke. Static tools (Shell, Mail, …) and the
 /// dynamic tool factory both ultimately produce a `ToolResult`.
 protocol AriaTool {
     /// Stable identifier the model references in `actions[].tool`.

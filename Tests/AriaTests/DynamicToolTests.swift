@@ -5,7 +5,7 @@ final class DynamicToolTests: XCTestCase {
 
     private func tempDir() -> URL {
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("friday-tools-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("aria-tools-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }
@@ -57,9 +57,9 @@ final class DynamicToolTests: XCTestCase {
         guard ScriptRunner.interpreter(for: .bash) != nil else {
             throw XCTSkip("bash not available")
         }
-        let out = try await ScriptRunner().run(code: "echo friday-ok", language: .bash, timeout: 10)
+        let out = try await ScriptRunner().run(code: "echo aria-ok", language: .bash, timeout: 10)
         XCTAssertTrue(out.success)
-        XCTAssertTrue(out.stdout.contains("friday-ok"))
+        XCTAssertTrue(out.stdout.contains("aria-ok"))
     }
 
     func testRunBashNonZeroExit() async throws {
@@ -80,7 +80,7 @@ final class DynamicToolTests: XCTestCase {
     }
 
     func testDynamicSettingsDefaults() {
-        let suite = UserDefaults(suiteName: "friday-test-\(UUID().uuidString)")!
+        let suite = UserDefaults(suiteName: "aria-test-\(UUID().uuidString)")!
         let s = DynamicToolSettings.load(suite)
         XCTAssertTrue(s.allowCodeExecution)
         XCTAssertFalse(s.showCodeBeforeRun)

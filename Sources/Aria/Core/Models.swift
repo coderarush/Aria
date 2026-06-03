@@ -1,6 +1,6 @@
 import Foundation
 
-/// Structured response Friday expects back from Gemini. The protocol is real
+/// Structured response Aria expects back from Gemini. The protocol is real
 /// from day 1 even though the slice only acts on `.answer` / `.clarify`.
 struct AriaResponse: Codable, Equatable {
     enum Kind: String, Codable {

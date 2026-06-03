@@ -70,7 +70,7 @@ final class ScriptRunner {
 
         // Isolated working directory.
         let workDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("friday-run-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("aria-run-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: workDir) }
 
@@ -84,7 +84,7 @@ final class ScriptRunner {
         process.environment = [
             "HOME": FileManager.default.homeDirectoryForCurrentUser.path,
             "PATH": "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin",
-            "FRIDAY_SANDBOX": "1"
+            "ARIA_SANDBOX": "1"
         ]
 
         let outPipe = Pipe(), errPipe = Pipe()

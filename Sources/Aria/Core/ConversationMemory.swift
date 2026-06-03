@@ -1,6 +1,6 @@
 import Foundation
 
-/// Persists conversation turns to `Application Support/Friday/conversation.json`.
+/// Persists conversation turns to `Application Support/Aria/conversation.json`.
 /// Keeps the last 50 on disk; exposes the last 6 for Gemini context.
 actor ConversationMemory {
     private(set) var turns: [ConversationTurn] = []
@@ -18,7 +18,7 @@ actor ConversationMemory {
     static func defaultFileURL() -> URL {
         let base = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Friday", isDirectory: true)
+            .appendingPathComponent("Aria", isDirectory: true)
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         return base.appendingPathComponent("conversation.json")
     }

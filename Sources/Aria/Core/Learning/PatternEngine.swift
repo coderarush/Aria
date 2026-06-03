@@ -31,7 +31,7 @@ actor PatternEngine {
     static func defaultURL() -> URL {
         let base = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Friday", isDirectory: true)
+            .appendingPathComponent("Aria", isDirectory: true)
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         return base.appendingPathComponent("patterns.json")
     }

@@ -16,7 +16,7 @@ struct OnboardingView: View {
 
     var body: some View {
         VStack(spacing: 24) {
-            Text("⬡ Friday").font(.system(size: 34, weight: .bold, design: .rounded))
+            Text("⬡ Aria").font(.system(size: 34, weight: .bold, design: .rounded))
             ProgressView(value: Double(step), total: Double(steps.count - 1))
                 .frame(width: 300)
 
@@ -50,7 +50,7 @@ struct OnboardingView: View {
         VStack(spacing: 10) {
             Text("Your personal AI agent that lives on your Mac.")
                 .font(.title3).multilineTextAlignment(.center)
-            Text("Say “Hey Friday” and it appears, listens, sees your screen, and gets things done.")
+            Text("Say “Hey Aria” and it appears, listens, sees your screen, and gets things done.")
                 .foregroundStyle(.secondary).multilineTextAlignment(.center)
         }
     }
@@ -58,7 +58,7 @@ struct OnboardingView: View {
     private var micStep: some View {
         VStack(spacing: 12) {
             Text("Microphone").font(.title2.bold())
-            Text("Required for the “Hey Friday” wake word. Listening is on-device.")
+            Text("Required for the “Hey Aria” wake word. Listening is on-device.")
                 .foregroundStyle(.secondary).multilineTextAlignment(.center)
             Button(micGranted ? "Granted ✓" : "Grant microphone access") {
                 Task {
@@ -72,7 +72,7 @@ struct OnboardingView: View {
     private var screenStep: some View {
         VStack(spacing: 12) {
             Text("Screen Recording").font(.title2.bold())
-            Text("Lets Friday see your screen when you ask. Captured only on command, never stored. You can skip this.")
+            Text("Lets Aria see your screen when you ask. Captured only on command, never stored. You can skip this.")
                 .foregroundStyle(.secondary).multilineTextAlignment(.center)
             Button("Open Privacy Settings") {
                 if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
@@ -85,7 +85,7 @@ struct OnboardingView: View {
     private var apiStep: some View {
         VStack(spacing: 12) {
             Text("Gemini API Key").font(.title2.bold())
-            Text("Friday uses your own key (free tier works). Stored in the Keychain.")
+            Text("Aria uses your own key (free tier works). Stored in the Keychain.")
                 .foregroundStyle(.secondary).multilineTextAlignment(.center)
             SecureField("Paste your key", text: $apiKey).frame(width: 300)
             if !apiStatus.isEmpty { Text(apiStatus).font(.caption).foregroundStyle(.secondary) }
@@ -95,7 +95,7 @@ struct OnboardingView: View {
     private var doneStep: some View {
         VStack(spacing: 10) {
             Text("You're set!").font(.title2.bold())
-            Text("Say “Hey Friday” any time, or use the ⬡ menu-bar icon.")
+            Text("Say “Hey Aria” any time, or use the ⬡ menu-bar icon.")
                 .foregroundStyle(.secondary).multilineTextAlignment(.center)
         }
     }

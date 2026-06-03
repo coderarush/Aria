@@ -5,7 +5,7 @@ final class ConversationMemoryTests: XCTestCase {
 
     private func tempURL() -> URL {
         FileManager.default.temporaryDirectory
-            .appendingPathComponent("friday-mem-\(UUID().uuidString).json")
+            .appendingPathComponent("aria-mem-\(UUID().uuidString).json")
     }
 
     func testAppendAndContextWindow() async {

@@ -1,6 +1,6 @@
 import Foundation
 
-/// A sub-agent runs a multi-step task on Friday's behalf. The orb shows the
+/// A sub-agent runs a multi-step task on Aria's behalf. The orb shows the
 /// `.acting` state (orblets) while one or more sub-agents run.
 protocol SubAgent {
     var name: String { get }

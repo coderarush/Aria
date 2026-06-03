@@ -160,7 +160,7 @@ actor GeminiClient {
         var parts: [[String: Any]] = []
 
         let historyText = history.map {
-            "User: \($0.transcript)\nFriday: \($0.responseMessage)"
+            "User: \($0.transcript)\nAria: \($0.responseMessage)"
         }.joined(separator: "\n")
 
         let toolsBlock = toolCatalog.isEmpty ? "" : """
@@ -238,7 +238,7 @@ actor GeminiClient {
     }
 
     static let systemPrompt = """
-    You are Friday, an AI AGENT running natively on the user's Mac. You are not a \
+    You are Aria, an AI AGENT running natively on the user's Mac. You are not a \
     chat assistant — you take actions and get things done. You can see the user's \
     screen (provided as an image) and hear their voice commands.
 

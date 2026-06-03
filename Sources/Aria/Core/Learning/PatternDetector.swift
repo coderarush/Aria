@@ -95,7 +95,7 @@ enum PatternDetector {
     static func describe(command: String, minute: Int, days: Set<Weekday>) -> String {
         let h = minute / 60, m = minute % 60
         let time = String(format: "%02d:%02d", h, m)
-        let weekdayOnly = days == Set([.monday, .tuesday, .wednesday, .thursday, .friday])
+        let weekdayOnly = days == Set([.monday, .tuesday, .wednesday, .thursday, .fri])
         let when = days.count >= 7 ? "every day"
             : weekdayOnly ? "every weekday"
             : "on some days"

@@ -1,7 +1,7 @@
 import Foundation
 
 enum Weekday: Int, Codable, CaseIterable {
-    case sunday = 1, monday, tuesday, wednesday, thursday, friday, saturday
+    case sunday = 1, monday, tuesday, wednesday, thursday, fri, saturday
 
     init(date: Date, calendar: Calendar = .current) {
         let comp = calendar.component(.weekday, from: date)
@@ -18,7 +18,7 @@ enum PatternTrigger: Codable, Equatable {
     indirect case compound([PatternTrigger])
 }
 
-/// What Friday does when a pattern fires.
+/// What Aria does when a pattern fires.
 enum PatternAction: Codable, Equatable {
     case runSavedCommand(String)
     case runGeneratedScript(toolID: UUID)

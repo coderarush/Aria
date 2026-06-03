@@ -3,7 +3,7 @@ import AVFoundation
 import Speech
 
 /// Always-on, on-device wake-word listener built on SFSpeechRecognizer +
-/// AVAudioEngine. Listens for "Hey Friday" (and common mishearings). On wake it
+/// AVAudioEngine. Listens for "Hey Aria" (and common mishearings). On wake it
 /// switches to command-capture mode, accumulates the spoken command, and fires
 /// `onCommand` after a short trailing silence.
 ///
@@ -48,16 +48,15 @@ final class WakeWordEngine {
     private var silenceTimer: Timer?
     private var rollingTimer: Timer?
 
-    private let wakeVariants = ["hey friday", "hey freddy", "hey frieda",
-                               "hey friday's", "hey friday.", "a friday",
-                               "hey, friday"]
+    private let wakeVariants = ["hey aria", "hey arya", "hey aria's",
+                               "hey, aria", "aria", "hey ariel"]
     private let commandSilence: TimeInterval = 1.4   // trailing silence once speaking
     private let commandLeadGrace: TimeInterval = 6.0 // time to START the command after wake
     private let rollingRestart: TimeInterval = 50
 
     private(set) var isRunning = false
     /// When true, incoming transcripts are ignored (used while a command is
-    /// being processed so a stray "friday" can't interrupt or dismiss the orb).
+    /// being processed so a stray "aria" can't interrupt or dismiss the orb).
     var isSuspended = false
 
     // MARK: Lifecycle
@@ -65,11 +64,11 @@ final class WakeWordEngine {
     func start() throws {
         guard !isRunning else { return }
         guard let recognizer else {
-            throw NSError(domain: "Friday.Wake", code: 1,
+            throw NSError(domain: "Aria.Wake", code: 1,
                           userInfo: [NSLocalizedDescriptionKey: "Speech recognizer unavailable for en-US."])
         }
         guard recognizer.isAvailable else {
-            throw NSError(domain: "Friday.Wake", code: 2,
+            throw NSError(domain: "Aria.Wake", code: 2,
                           userInfo: [NSLocalizedDescriptionKey: "Speech recognition is temporarily unavailable. Check your network or Siri/Dictation settings."])
         }
         isRunning = true
@@ -136,7 +135,7 @@ final class WakeWordEngine {
         let format = input.inputFormat(forBus: 0)
         // A zero sample rate means there is no usable input device.
         guard format.sampleRate > 0 else {
-            throw NSError(domain: "Friday.Wake", code: 3,
+            throw NSError(domain: "Aria.Wake", code: 3,
                           userInfo: [NSLocalizedDescriptionKey: "No microphone input available. Check your input device."])
         }
         input.removeTap(onBus: 0)
@@ -225,7 +224,7 @@ final class WakeWordEngine {
         committedCommand = ""
         // Keep the SAME recognition session running — its transcription is
         // cumulative, so a command spoken in the same breath as the wake phrase
-        // ("Hey Friday, open Spotify") is preserved. stripWakePhrase removes the
+        // ("Hey Aria, open Spotify") is preserved. stripWakePhrase removes the
         // wake words. Restarting here would discard the command already spoken.
         commandBuffer = stripWakePhrase(from: initialTranscript, original: initialTranscript)
         onWake?()

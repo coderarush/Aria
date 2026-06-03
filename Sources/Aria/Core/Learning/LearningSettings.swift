@@ -1,6 +1,6 @@
 import Foundation
 
-/// Toggles for behavioral learning ("Friday's Brain"), persisted in UserDefaults.
+/// Toggles for behavioral learning ("Aria's Brain"), persisted in UserDefaults.
 struct LearningSettings {
     var enabled: Bool
     /// Master kill switch — stops all automations instantly.

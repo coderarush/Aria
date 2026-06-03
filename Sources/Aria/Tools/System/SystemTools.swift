@@ -106,7 +106,7 @@ struct NotificationTool: AriaTool {
     static let description = "Show a macOS notification. Input: {title, message}."
 
     func run(input: [String: String]) async throws -> ToolResult {
-        let title = (input["title"] ?? "Friday").replacingOccurrences(of: "\"", with: "'")
+        let title = (input["title"] ?? "Aria").replacingOccurrences(of: "\"", with: "'")
         let message = (input["message"] ?? "").replacingOccurrences(of: "\"", with: "'")
         let script = "display notification \"\(message)\" with title \"\(title)\""
         return await AppleScriptTool.execute(script)

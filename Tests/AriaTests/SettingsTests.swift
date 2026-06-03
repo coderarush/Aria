@@ -5,7 +5,7 @@ final class SettingsTests: XCTestCase {
 
     @MainActor
     func testAppSettingsDefaultsAndPersistence() {
-        let suite = UserDefaults(suiteName: "friday-app-\(UUID().uuidString)")!
+        let suite = UserDefaults(suiteName: "aria-app-\(UUID().uuidString)")!
         let s = AppSettings(defaults: suite)
         XCTAssertEqual(s.orbPosition, .bottomCenter)
         XCTAssertEqual(s.orbSize, .medium)
@@ -30,7 +30,7 @@ final class SettingsTests: XCTestCase {
     }
 
     func testMirrorSettingsRoundTrip() {
-        let suite = UserDefaults(suiteName: "friday-mirror-\(UUID().uuidString)")!
+        let suite = UserDefaults(suiteName: "aria-mirror-\(UUID().uuidString)")!
         var s = MirrorSettings.load(suite)
         XCTAssertFalse(s.enabled)
         XCTAssertEqual(s.port, 8765)

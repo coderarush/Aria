@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Friday's settings window. Tabs map to the spec's settings sections.
+/// Aria's settings window. Tabs map to the spec's settings sections.
 struct SettingsView: View {
     var body: some View {
         TabView {
@@ -108,11 +108,11 @@ struct DynamicToolsTab: View {
 
     var body: some View {
         Form {
-            Toggle("Allow Friday to write and run code", isOn: $s.allowCodeExecution)
+            Toggle("Allow Aria to write and run code", isOn: $s.allowCodeExecution)
             Toggle("Show code before running", isOn: $s.showCodeBeforeRun)
             Toggle("Ask before saving new tools", isOn: $s.askBeforeSaving)
             Toggle("Sync community tools", isOn: $s.syncCommunityTools)
-            Text("Generated tools live in Application Support/Friday/tools.")
+            Text("Generated tools live in Application Support/Aria/tools.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .padding()

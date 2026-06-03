@@ -5,7 +5,7 @@ final class PatternEngineTests: XCTestCase {
 
     private func tempURL(_ name: String) -> URL {
         FileManager.default.temporaryDirectory
-            .appendingPathComponent("friday-\(name)-\(UUID().uuidString).json")
+            .appendingPathComponent("aria-\(name)-\(UUID().uuidString).json")
     }
 
     private func makeEngine(observationStart: Date) async -> PatternEngine {
@@ -81,7 +81,7 @@ final class PatternEngineTests: XCTestCase {
     }
 
     func testLearningSettingsDefaults() {
-        let suite = UserDefaults(suiteName: "friday-brain-\(UUID().uuidString)")!
+        let suite = UserDefaults(suiteName: "aria-brain-\(UUID().uuidString)")!
         let s = LearningSettings.load(suite)
         XCTAssertTrue(s.enabled)
         XCTAssertFalse(s.automationsPaused)

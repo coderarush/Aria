@@ -16,11 +16,11 @@ final class ToolTests: XCTestCase {
 
     func testFileWriteThenRead() async throws {
         let path = FileManager.default.temporaryDirectory
-            .appendingPathComponent("friday-file-\(UUID().uuidString).txt").path
-        let write = try await FileWriteTool().run(input: ["path": path, "content": "hello friday"])
+            .appendingPathComponent("aria-file-\(UUID().uuidString).txt").path
+        let write = try await FileWriteTool().run(input: ["path": path, "content": "hello aria"])
         XCTAssertTrue(write.success)
         let read = try await FileReadTool().run(input: ["path": path])
-        XCTAssertEqual(read.output, "hello friday")
+        XCTAssertEqual(read.output, "hello aria")
         try? FileManager.default.removeItem(atPath: path)
     }
 
@@ -68,7 +68,7 @@ final class ToolTests: XCTestCase {
     }
 
     func testClipboardRoundTrip() async throws {
-        let marker = "friday-clip-\(UUID().uuidString)"
+        let marker = "aria-clip-\(UUID().uuidString)"
         let write = try await ClipboardTool().run(input: ["action": "write", "text": marker])
         XCTAssertTrue(write.success)
         let read = try await ClipboardTool().run(input: ["action": "read"])

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Entry point. LSUIElement (set in Info.plist) keeps Friday out of the Dock;
+/// Entry point. LSUIElement (set in Info.plist) keeps Aria out of the Dock;
 /// all UI is the menu-bar item plus the floating orb panel, both managed by
 /// AppDelegate / AriaController. The empty Settings scene satisfies the
 /// SwiftUI App requirement without showing a window.

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Bridge between Friday on the Mac and a Raspberry Pi smart mirror over a local
+/// Bridge between Aria on the Mac and a Raspberry Pi smart mirror over a local
 /// WebSocket. The mirror sends transcripts; the Mac processes and returns
 /// responses for the mirror to display.
 ///

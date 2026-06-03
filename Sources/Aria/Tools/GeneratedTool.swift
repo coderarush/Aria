@@ -8,8 +8,8 @@ enum ToolSource: String, Codable {
     case generated, community, builtin
 }
 
-/// A self-contained script Friday wrote (or imported) to accomplish a task.
-/// Persisted as JSON under Application Support/Friday/tools/.
+/// A self-contained script Aria wrote (or imported) to accomplish a task.
+/// Persisted as JSON under Application Support/Aria/tools/.
 struct GeneratedTool: Codable, Identifiable, Equatable {
     let id: UUID
     var name: String

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Friday's core differentiator: when no existing tool fits, ask Gemini to write
+/// Aria's core differentiator: when no existing tool fits, ask Gemini to write
 /// a fresh script, run it safely, and optionally persist it as a reusable tool.
 actor DynamicToolFactory {
 
@@ -19,7 +19,7 @@ actor DynamicToolFactory {
 
     static func defaultToolsDir() -> URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Friday/tools", isDirectory: true)
+            .appendingPathComponent("Aria/tools", isDirectory: true)
     }
 
     // MARK: Generation

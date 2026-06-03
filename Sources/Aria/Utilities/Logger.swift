@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-/// Unified logging for Friday. Thin wrapper over `os.Logger` with per-subsystem
+/// Unified logging for Aria. Thin wrapper over `os.Logger` with per-subsystem
 /// categories so console filtering is easy (`subsystem:com.aria.agent`).
 enum Log {
     private static let subsystem = "com.aria.agent"
@@ -14,11 +14,11 @@ enum Log {
     static let ui     = Logger(subsystem: subsystem, category: "ui")
     static let memory = Logger(subsystem: subsystem, category: "memory")
 
-    /// Append a line to /tmp/friday.log for easy after-the-fact debugging.
+    /// Append a line to /tmp/aria.log for easy after-the-fact debugging.
     /// (os.Logger output is hard to retrieve; this file is trivial to read.)
     static func trace(_ message: String) {
         let line = "[\(Self.stamp())] \(message)\n"
-        let url = URL(fileURLWithPath: "/tmp/friday.log")
+        let url = URL(fileURLWithPath: "/tmp/aria.log")
         if let handle = try? FileHandle(forWritingTo: url) {
             handle.seekToEndOfFile()
             handle.write(Data(line.utf8))

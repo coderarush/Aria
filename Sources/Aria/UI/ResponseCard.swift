@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Frosted-glass card that floats above the orb and renders Friday's response.
+/// Frosted-glass card that floats above the orb and renders Aria's response.
 /// Uses the platform AttributedString markdown parser for headers/bold/code/lists.
 struct ResponseCard: View {
     let text: String

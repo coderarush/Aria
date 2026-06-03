@@ -12,15 +12,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var onboardingWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        Log.app.info("Friday launching")
-        Log.trace("=== Friday launched ===")
+        Log.app.info("Aria launching")
+        Log.trace("=== Aria launched ===")
         NSSetUncaughtExceptionHandler { exception in
             Log.trace("UNCAUGHT EXCEPTION: \(exception.name.rawValue) — \(exception.reason ?? "?")\n\(exception.callStackSymbols.joined(separator: "\n"))")
         }
         // Preview mode — handled first so it never touches the Keychain (which
         // can block on first run after an ad-hoc re-sign).
-        if ProcessInfo.processInfo.environment["FRIDAY_SHOW_ORB"] != nil
-            || FileManager.default.fileExists(atPath: "/tmp/friday_show_orb") {
+        if ProcessInfo.processInfo.environment["ARIA_SHOW_ORB"] != nil
+            || FileManager.default.fileExists(atPath: "/tmp/aria_show_orb") {
             setupStatusItem()
             controller.startForScreenshot()
             return
@@ -39,7 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             contentRect: NSRect(x: 0, y: 0, width: 520, height: 460),
             styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.center()
-        window.title = "Welcome to Friday"
+        window.title = "Welcome to Aria"
         window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(rootView: OnboardingView { [weak self] in
             AppSettings.shared.onboardingComplete = true
@@ -56,13 +56,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.title = "⬡"
-        item.button?.toolTip = "Friday"
+        item.button?.toolTip = "Aria"
 
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "Summon Friday", action: #selector(summon), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Summon Aria", action: #selector(summon), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Quit Friday", action: #selector(quit), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Quit Aria", action: #selector(quit), keyEquivalent: "q"))
         menu.items.forEach { $0.target = self }
         item.menu = menu
         statusItem = item
@@ -81,7 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 contentRect: NSRect(x: 0, y: 0, width: 480, height: 420),
                 styleMask: [.titled, .closable, .miniaturizable],
                 backing: .buffered, defer: false)
-            window.title = "Friday Settings"
+            window.title = "Aria Settings"
             window.contentView = NSHostingView(rootView: SettingsView())
             window.isReleasedWhenClosed = false
             window.center()
@@ -93,18 +93,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: API key migration
 
-    /// One-time migration: if a key sits in ~/Friday/.apikey and the Keychain is
+    /// One-time migration: if a key sits in ~/Aria/.apikey and the Keychain is
     /// empty, move it into the Keychain.
     private func migrateAPIKeyIfNeeded() {
         guard KeychainManager.read(account: KeychainKey.geminiAPIKey) == nil else { return }
         let legacy = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Friday/.apikey")
+            .appendingPathComponent("Aria/.apikey")
         guard let raw = try? String(contentsOf: legacy, encoding: .utf8) else { return }
         let key = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { return }
         do {
             try KeychainManager.save(key, account: KeychainKey.geminiAPIKey)
-            Log.app.info("Migrated Gemini API key from ~/Friday/.apikey to Keychain")
+            Log.app.info("Migrated Gemini API key from ~/Aria/.apikey to Keychain")
         } catch {
             Log.app.error("API key migration failed: \(error.localizedDescription)")
         }

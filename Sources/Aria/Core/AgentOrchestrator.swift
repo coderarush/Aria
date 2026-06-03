@@ -167,7 +167,7 @@ actor AgentOrchestrator {
         // Confirmation gate: destructive intent or "show code before run".
         if isDestructive(task) || settings.showCodeBeforeRun {
             let prompt = settings.showCodeBeforeRun
-                ? "Friday wants to run this \(language.rawValue):\n\n\(tool.code)"
+                ? "Aria wants to run this \(language.rawValue):\n\n\(tool.code)"
                 : "This may modify or send data. Run it?"
             let approved = await (confirmationHandler?(prompt) ?? false)
             guard approved else { return .fail("Cancelled — not approved.") }

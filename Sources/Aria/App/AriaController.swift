@@ -27,7 +27,7 @@ final class AriaController {
     /// window on a dark backdrop, without starting the mic so there is no TCC
     /// prompt. The production orb lives in a borderless non-activating panel,
     /// which doesn't capture cleanly; this window does. Triggered by the
-    /// `/tmp/friday_show_orb` sentinel or the `FRIDAY_SHOW_ORB` env var.
+    /// `/tmp/aria_show_orb` sentinel or the `ARIA_SHOW_ORB` env var.
     func startForScreenshot() {
         // Defer off the launch call stack so the runloop is up before building
         // the Metal-backed hosting view.
@@ -45,7 +45,7 @@ final class AriaController {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 420, height: 420),
             styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        window.title = "Friday — Orb Preview"
+        window.title = "Aria — Orb Preview"
         window.contentView = NSHostingView(rootView: root)
         window.isReleasedWhenClosed = false
         window.center()
@@ -56,10 +56,10 @@ final class AriaController {
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         // Publish the window number so a screenshot script can target it.
-        try? "\(window.windowNumber)".write(toFile: "/tmp/friday_window.txt", atomically: true, encoding: .utf8)
+        try? "\(window.windowNumber)".write(toFile: "/tmp/aria_window.txt", atomically: true, encoding: .utf8)
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
-            self?.orbViewModel.showResponse("**Friday** is online.\nSay *Hey Friday* to begin.")
+            self?.orbViewModel.showResponse("**Aria** is online.\nSay *Hey Aria* to begin.")
             self?.previewWindow?.orderFrontRegardless()
         }
     }
@@ -112,7 +112,7 @@ final class AriaController {
     private func presentSuggestion(_ pattern: BehaviorPattern) {
         orbViewModel.beginListening()
         orbViewModel.showResponse(pattern.description + " — want me to handle that automatically?")
-        let approved = Self.confirm("\(pattern.description).\n\nWant Friday to do this automatically from now on?")
+        let approved = Self.confirm("\(pattern.description).\n\nWant Aria to do this automatically from now on?")
         Task {
             if approved {
                 await patternEngine.approve(pattern.id, mode: .previewFirst)
@@ -136,7 +136,7 @@ final class AriaController {
     private static func confirm(_ message: String) -> Bool {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
-        alert.messageText = "Friday"
+        alert.messageText = "Aria"
         alert.informativeText = message
         alert.addButton(withTitle: "Allow")
         alert.addButton(withTitle: "Cancel")
@@ -219,12 +219,12 @@ final class AriaController {
                     .compactMap { $0 }.joined(separator: " + ")
                 Log.app.error("Permissions denied: \(missing)")
                 orbViewModel.beginListening()
-                orbViewModel.showError("\(missing) permission denied. Enable it in System Settings → Privacy & Security, then relaunch Friday.")
+                orbViewModel.showError("\(missing) permission denied. Enable it in System Settings → Privacy & Security, then relaunch Aria.")
                 return
             }
             do {
                 try wakeEngine.start()
-                Log.trace("wake engine started OK — listening for 'Hey Friday'")
+                Log.trace("wake engine started OK — listening for 'Hey Aria'")
             }
             catch {
                 Log.trace("wake engine start FAILED: \(error.localizedDescription)")
@@ -240,12 +240,12 @@ final class AriaController {
     private func handleCommand(_ command: String) {
         // Dismissal phrases.
         let lower = command.lowercased()
-        if lower.contains("dismiss") || lower.contains("thanks friday") || lower.contains("never mind") {
+        if lower.contains("dismiss") || lower.contains("thanks aria") || lower.contains("never mind") {
             orbViewModel.dismiss()
             return
         }
 
-        // Stop listening for new wakes while we work, so a stray "friday" can't
+        // Stop listening for new wakes while we work, so a stray "aria" can't
         // interrupt or dismiss the orb mid-task. Resumed when the orb hides
         // (see onVisibilityChange in setupPanel).
         wakeEngine.isSuspended = true
