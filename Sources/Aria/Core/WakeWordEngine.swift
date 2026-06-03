@@ -284,6 +284,17 @@ final class WakeWordEngine {
         do { try beginRecognition() } catch { scheduleRestart() }
     }
 
+    /// Start a CLEAN recognition session for the next conversation turn, discarding
+    /// any audio captured while Aria was speaking. Without echo cancellation the mic
+    /// hears her own voice during a reply; a fresh session ensures those words don't
+    /// leak into the next command (which caused a self-talking feedback loop).
+    func freshTurn() {
+        commandBuffer = ""; committedCommand = ""
+        silenceTimer?.invalidate()
+        mode = conversationActive ? .command : .wake
+        do { try beginRecognition() } catch { scheduleRestart() }
+    }
+
     private func stripWakePhrase(from lower: String, original: String) -> String {
         var result = lower
         for variant in wakeVariants.sorted(by: { $0.count > $1.count }) {

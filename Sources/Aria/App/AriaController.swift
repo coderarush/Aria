@@ -317,11 +317,18 @@ final class AriaController {
         applyVoiceSettings()
         islandViewModel.beginListening()
         islandViewModel.showResponse("")
+        // Apple voice streams per sentence (instant). The Gemini cloud voice speaks
+        // the whole reply in ONE call at the end — per-sentence Gemini calls burn
+        // quota fast and fall back to the robotic Apple voice.
+        let streamPerSentence = AppSettings.shared.voiceEngineKind != "gemini"
         var chunker = SentenceChunker()
         streamVoice.onAllFinished = { [weak self] in
             guard let self else { return }
             self.isSpeaking = false
-            self.wakeEngine.isSuspended = false        // resume listening for the next turn
+            // Fresh recognition session so Aria's own voice (heard by the mic while
+            // she spoke) doesn't leak into the next turn, then resume listening.
+            self.wakeEngine.freshTurn()
+            self.wakeEngine.isSuspended = false
             self.convSilenceTimer?.invalidate()
             self.convSilenceTimer = Timer.scheduledTimer(withTimeInterval: AppSettings.shared.conversationSilenceTimeout, repeats: false) { [weak self] _ in
                 Task { @MainActor in self?.session?.end() }
@@ -333,13 +340,23 @@ final class AriaController {
                 Task { @MainActor [weak self] in
                     guard let self else { return }
                     self.islandViewModel.responseText += delta
-                    for chunk in chunker.push(delta) { self.streamVoice.enqueue(chunk) }
+                    if streamPerSentence {
+                        for chunk in chunker.push(delta) { self.streamVoice.enqueue(chunk) }
+                    }
                 }
             }
             await MainActor.run {
-                let tail = chunker.flush()
-                if !tail.isEmpty { self.streamVoice.enqueue(tail) }
+                if streamPerSentence {
+                    let tail = chunker.flush()
+                    if !tail.isEmpty { self.streamVoice.enqueue(tail) }
+                } else {
+                    // Gemini voice: speak the whole reply in a single call.
+                    let full = self.islandViewModel.responseText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !full.isEmpty { self.streamVoice.enqueue(full) }
+                }
                 self.islandViewModel.showResponse(self.islandViewModel.responseText)
+                // Safety: if nothing was spoken (empty reply/error), re-arm anyway.
+                if !self.streamVoice.isSpeaking { self.streamVoice.onAllFinished?() }
             }
         }
     }
