@@ -5,3 +5,4 @@ DerivedData/
 .DS_Store
 *.apikey
 xcuserdata/
+ruvector.db
