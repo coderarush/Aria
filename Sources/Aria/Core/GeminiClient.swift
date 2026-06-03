@@ -79,7 +79,8 @@ actor GeminiClient {
                     screenshotJPEG: Data?,
                     history: [ConversationTurn],
                     context: SystemContext,
-                    toolCatalog: String = "") -> AsyncThrowingStream<StreamEvent, Error> {
+                    toolCatalog: String = "",
+                    tools: [[String: Any]]? = nil) -> AsyncThrowingStream<StreamEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
@@ -89,7 +90,8 @@ actor GeminiClient {
                     let body = buildRequestBody(transcript: transcript,
                                                 screenshotJPEG: screenshotJPEG,
                                                 history: history, context: context,
-                                                toolCatalog: toolCatalog)
+                                                toolCatalog: toolCatalog,
+                                                tools: tools)
                     var lastError: Error = GeminiError.emptyResponse
                     // 429 is a per-MINUTE free-tier quota shared across models, so
                     // switching models doesn't help — WAITING does. Back off between
@@ -258,7 +260,8 @@ actor GeminiClient {
                                  screenshotJPEG: Data?,
                                  history: [ConversationTurn],
                                  context: SystemContext,
-                                 toolCatalog: String) -> Data {
+                                 toolCatalog: String,
+                                 tools: [[String: Any]]? = nil) -> Data {
         var parts: [[String: Any]] = []
 
         let historyText = history.map {
@@ -297,7 +300,7 @@ actor GeminiClient {
             ])
         }
 
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "system_instruction": [
                 "parts": [["text": Self.systemPrompt]]
             ],
@@ -307,6 +310,10 @@ actor GeminiClient {
                 "response_mime_type": "application/json"
             ]
         ]
+
+        if let tools, !tools.isEmpty {
+            payload["tools"] = [["functionDeclarations": tools]]
+        }
 
         return (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
     }

@@ -5,6 +5,7 @@ import AppKit
 struct OpenAppTool: AriaTool {
     static let name = "open_app"
     static let description = "Open an application by name. Input: {name}."
+    static let paramHints: [String: String] = ["name": "The application name, e.g. Spotify"]
 
     func run(input: [String: String]) async throws -> ToolResult {
         guard let appName = input["name"], !appName.isEmpty else {
@@ -39,6 +40,7 @@ struct OpenAppTool: AriaTool {
 struct BrowserTool: AriaTool {
     static let name = "open_url"
     static let description = "Open a URL in the default browser. Input: {url}."
+    static let paramHints: [String: String] = ["url": "The URL to open, e.g. https://example.com"]
 
     func run(input: [String: String]) async throws -> ToolResult {
         guard let raw = input["url"], !raw.isEmpty else { throw ToolError.missingInput("url") }

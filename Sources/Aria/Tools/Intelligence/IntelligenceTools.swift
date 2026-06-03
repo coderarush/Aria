@@ -4,6 +4,7 @@ import Foundation
 struct WebSearchTool: AriaTool {
     static let name = "web_search"
     static let description = "Search the web (DuckDuckGo instant answers). Input: {query}."
+    static let paramHints: [String: String] = ["query": "The search query"]
 
     var session: URLSession = .shared
 
@@ -42,6 +43,7 @@ struct WebSearchTool: AriaTool {
 struct WebFetchTool: AriaTool {
     static let name = "web_fetch"
     static let description = "Fetch a webpage and return readable text. Input: {url}."
+    static let paramHints: [String: String] = ["url": "The URL to fetch"]
 
     var session: URLSession = .shared
     private let maxChars = 6000
