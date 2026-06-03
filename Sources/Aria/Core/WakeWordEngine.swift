@@ -135,6 +135,11 @@ final class WakeWordEngine {
     private func ensureAudioEngineRunning() throws {
         guard !audioEngine.isRunning else { return }
         let input = audioEngine.inputNode
+        // Echo cancellation + noise suppression so the open mic doesn't pick up
+        // Aria's own TTS — this is what makes barge-in possible. Some virtual
+        // audio devices don't support it, so failure is non-fatal (recognition
+        // still works, just without AEC-grade echo cancellation).
+        try? input.setVoiceProcessingEnabled(true)
         let format = input.inputFormat(forBus: 0)
         // A zero sample rate means there is no usable input device.
         guard format.sampleRate > 0 else {
