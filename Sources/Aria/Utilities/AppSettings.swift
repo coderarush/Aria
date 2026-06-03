@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import ServiceManagement
+import SwiftUI
 
 /// General app preferences (orb, privacy, onboarding), persisted in UserDefaults
 /// and observable by SwiftUI settings views.
@@ -56,6 +57,13 @@ final class AppSettings: ObservableObject {
     @Published var voiceEnabled: Bool { didSet { defaults.set(voiceEnabled, forKey: K.voiceEnabled) } }
     @Published var voiceIdentifier: String { didSet { defaults.set(voiceIdentifier, forKey: K.voiceIdentifier) } }
     @Published var voiceRate: Double { didSet { defaults.set(voiceRate, forKey: K.voiceRate) } }
+    @Published var accentChoiceRaw: String { didSet { defaults.set(accentChoiceRaw, forKey: K.accentChoice) } }
+
+    var accentChoice: AccentChoice {
+        get { Theme.decodeChoice(accentChoiceRaw) }
+        set { accentChoiceRaw = Theme.encode(newValue) }
+    }
+    var accentColor: Color { Theme.color(for: accentChoice) }
 
     private let defaults: UserDefaults
 
@@ -71,6 +79,7 @@ final class AppSettings: ObservableObject {
         voiceEnabled = defaults.object(forKey: K.voiceEnabled) as? Bool ?? true
         voiceIdentifier = defaults.string(forKey: K.voiceIdentifier) ?? ""
         voiceRate = defaults.object(forKey: K.voiceRate) as? Double ?? 0.5
+        accentChoiceRaw = defaults.string(forKey: K.accentChoice) ?? "system"
     }
 
     /// Register/unregister the app as a login item (SMAppService, macOS 13+).
@@ -97,5 +106,6 @@ final class AppSettings: ObservableObject {
         static let voiceEnabled = "app.voiceEnabled"
         static let voiceIdentifier = "app.voiceIdentifier"
         static let voiceRate = "app.voiceRate"
+        static let accentChoice = "app.accentChoice"
     }
 }
