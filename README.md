@@ -10,10 +10,10 @@ orb materializes, listens, sees your screen, and goes to work. It's built to be
 the most capable open-source AI agent for the Mac — extensible, private, and
 fully under your control.
 
-> **Status: early (v0.1, vertical slice).** The core spine works end to end —
-> wake word → orb → screen capture → Gemini → response. The big subsystems
-> (tools, dynamic tool generation, sub-agents, behavioral learning) are
-> architected with seams and land in upcoming releases. See the [roadmap](#roadmap).
+> **Status: v0.7.** All core subsystems are built and tested (54 tests): wake
+> word → orb → screen → Gemini, the full tool system, dynamic tool generation,
+> sub-agents, on-device behavioral learning, Settings, onboarding, and a
+> Metal-shader orb. See the [roadmap](#roadmap).
 
 ---
 
@@ -37,7 +37,7 @@ fully under your control.
 | Behavioral learning & proactive automation | ✅ v0.5 |
 | Onboarding + full Settings (General/API/Tools/Dynamic/Brain/Mirror) | ✅ v0.6 |
 | Smart-mirror bridge (interface stub) | ✅ v0.6 |
-| Metal-shader orb polish | 🔜 |
+| Metal-shader orb polish (runtime-compiled MSL glow/pulse/plasma) | ✅ v0.7 |
 
 ---
 

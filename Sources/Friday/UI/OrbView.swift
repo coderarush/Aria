@@ -40,7 +40,7 @@ struct OrbView: View {
                 }
         )
         .animation(.easeInOut(duration: 0.3), value: viewModel.state)
-        .onChange(of: viewModel.state) { _ in syncAnimations() }
+        .onChange(of: viewModel.state) { _, _ in syncAnimations() }
         .onAppear { syncAnimations() }
     }
 
@@ -48,26 +48,16 @@ struct OrbView: View {
 
     private var orb: some View {
         ZStack {
-            // Outer glow.
-            Circle()
-                .fill(stateColor)
-                .frame(width: orbSize * 1.5, height: orbSize * 1.5)
-                .blur(radius: 28)
-                .opacity(0.45)
+            // Metal-rendered procedural glow/pulse/plasma body.
+            OrbMetalView(color: stateColor, audioLevel: viewModel.audioLevel, pulse: metalPulse)
+                .frame(width: orbSize * 1.9, height: orbSize * 1.9)
+                .allowsHitTesting(false)
 
-            // Glass body.
+            // Rim highlight on top of the shader.
             Circle()
-                .fill(
-                    RadialGradient(
-                        colors: [stateColor.opacity(0.95), stateColor.opacity(0.55)],
-                        center: .topLeading, startRadius: 4, endRadius: orbSize)
-                )
-                .overlay(
-                    Circle().stroke(.white.opacity(0.35), lineWidth: 1)
-                )
+                .stroke(.white.opacity(0.25), lineWidth: 1)
                 .frame(width: orbSize, height: orbSize)
                 .scaleEffect(breathe && viewModel.state == .listening ? 1.06 : 1.0)
-                .shadow(color: stateColor.opacity(0.6), radius: 16)
 
             // Thinking arc.
             if viewModel.state == .thinking {
@@ -95,6 +85,17 @@ struct OrbView: View {
     }
 
     // MARK: State → visuals
+
+    /// Extra shader intensity per state (drives breathing/swirl strength).
+    private var metalPulse: Float {
+        switch viewModel.state {
+        case .listening: return 1.0
+        case .thinking, .acting: return 0.7
+        case .responding: return 0.4
+        case .error: return 0.9
+        case .hidden: return 0.2
+        }
+    }
 
     private var stateColor: Color {
         switch viewModel.state {
