@@ -71,6 +71,58 @@ actor GeminiClient {
         return response
     }
 
+    /// Stream a turn from Gemini, yielding text deltas + function calls as they
+    /// arrive (`streamGenerateContent?alt=sse`). On a transient non-200 before any
+    /// bytes are received, falls through to the next model in `models`. A mid-
+    /// stream failure surfaces via the stream's error (caller speaks a recovery).
+    func streamSend(transcript: String,
+                    screenshotJPEG: Data?,
+                    history: [ConversationTurn],
+                    context: SystemContext,
+                    toolCatalog: String = "") -> AsyncThrowingStream<StreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    guard let apiKey = apiKeyProvider(), !apiKey.isEmpty else {
+                        throw GeminiError.missingAPIKey
+                    }
+                    let body = buildRequestBody(transcript: transcript,
+                                                screenshotJPEG: screenshotJPEG,
+                                                history: history, context: context,
+                                                toolCatalog: toolCatalog)
+                    var lastError: Error = GeminiError.emptyResponse
+                    for model in models {
+                        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):streamGenerateContent?alt=sse&key=\(apiKey)")!
+                        var req = URLRequest(url: url)
+                        req.httpMethod = "POST"
+                        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                        req.httpBody = body
+                        do {
+                            let (bytes, resp) = try await session.bytes(for: req)
+                            let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+                            guard status == 200 else { throw GeminiError.http(status) }
+                            var parser = GeminiStreamParser()
+                            for try await line in bytes.lines {
+                                try Task.checkCancellation()
+                                for ev in parser.consume(line + "\n") { continuation.yield(ev) }
+                            }
+                            continuation.finish()
+                            return
+                        } catch let GeminiError.http(status) where [404, 408, 425, 429, 500, 502, 503, 504].contains(status) {
+                            Log.trace("streamSend: \(model) http(\(status)); trying next model")
+                            lastError = GeminiError.http(status)
+                            continue
+                        }
+                    }
+                    continuation.finish(throwing: lastError)
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     /// Ask Gemini to write a self-contained script in `language` that performs
     /// `task`. Returns raw code (fences stripped). Used by DynamicToolFactory.
     func generateScript(task: String,
