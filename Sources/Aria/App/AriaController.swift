@@ -22,6 +22,11 @@ final class AriaController {
     private var streamVoice: StreamingVoice!
     private var session: ConversationSession?
     private var convSilenceTimer: Timer?
+    /// The in-flight streaming turn task; cancelled on barge-in.
+    private var currentTurnTask: Task<Void, Never>?
+    /// When the current TTS turn started; used to enforce a 0.5 s arm-grace
+    /// so we don't immediately barge-in on the very first audio burst.
+    private var speechStartedAt = Date.distantPast
 
     func start() {
         setupPanel()
@@ -249,6 +254,20 @@ final class AriaController {
             self?.islandViewModel.beginListening()
             self?.islandViewModel.showError(message)
         }
+        wakeEngine.onSpeechOnset = { [weak self] in self?.handleBargeIn() }
+    }
+
+    // MARK: Barge-in
+
+    private func handleBargeIn() {
+        guard isSpeaking else { return }                                    // only while she's talking
+        guard Date().timeIntervalSince(speechStartedAt) > 0.5 else { return } // arm-grace
+        Log.trace("barge-in — user interrupted")
+        streamVoice.stop()                  // stop TTS + clear queue
+        currentTurnTask?.cancel()           // cancel the in-flight stream
+        isSpeaking = false
+        convSilenceTimer?.invalidate()
+        wakeEngine.isSuspended = false      // capture the user's interrupting utterance
     }
 
     private func startListening() {
@@ -286,6 +305,7 @@ final class AriaController {
         }
         wakeEngine.isSuspended = true
         isSpeaking = true
+        speechStartedAt = Date()
         applyVoiceSettings()
         islandViewModel.beginListening()
         islandViewModel.showResponse("")
@@ -299,7 +319,7 @@ final class AriaController {
                 Task { @MainActor in self?.session?.end() }
             }
         }
-        Task { [weak self] in
+        currentTurnTask = Task { [weak self] in
             guard let self else { return }
             await self.orchestrator.handleStreaming(command: command, privacyMode: AppSettings.shared.privacyMode) { delta in
                 Task { @MainActor [weak self] in

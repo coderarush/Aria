@@ -20,9 +20,12 @@ final class WakeWordEngine {
     /// Fired when the wake phrase was heard but no command followed.
     var onCommandEmpty: (() -> Void)?
     var onAudioLevel: ((Float) -> Void)?
+    /// Fired on the main actor when the VAD detects speech onset (used for barge-in).
+    var onSpeechOnset: (() -> Void)?
     /// Surfaced setup/recognition failures (shown on the orb).
     var onError: ((String) -> Void)?
 
+    private var bargeVAD = VoiceActivity(onsetFrames: 4)
     private var restartPending = false
 
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
@@ -297,6 +300,10 @@ final class WakeWordEngine {
         for i in 0..<frames { sum += channel[i] * channel[i] }
         let rms = (sum / Float(frames)).squareRoot()
         let level = min(1, max(0, rms * 12))  // normalize to ~0...1
-        Task { @MainActor in self.onAudioLevel?(level) }
+        Task { @MainActor in
+            let r = self.bargeVAD.process(level)
+            if r.didOnset { self.onSpeechOnset?() }
+            self.onAudioLevel?(level)
+        }
     }
 }
