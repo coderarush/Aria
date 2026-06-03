@@ -1,7 +1,7 @@
 import Foundation
 
 enum Weekday: Int, Codable, CaseIterable {
-    case sunday = 1, monday, tuesday, wednesday, thursday, fri, saturday
+    case sunday = 1, monday, tuesday, wednesday, thursday, friday, saturday
 
     init(date: Date, calendar: Calendar = .current) {
         let comp = calendar.component(.weekday, from: date)
