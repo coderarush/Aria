@@ -1,3 +1,4 @@
+import AppKit
 import AVFoundation
 
 /// On-device text-to-speech for Aria's spoken responses. Strips markdown so the
@@ -9,7 +10,7 @@ final class VoiceEngine: NSObject, AVSpeechSynthesizerDelegate {
 
     var enabled = true
     var voiceIdentifier: String?
-    var rate: Float = 0.5 * (AVSpeechUtteranceMaximumSpeechRate + AVSpeechUtteranceMinimumSpeechRate)
+    var rate: Float = 0.46 * (AVSpeechUtteranceMaximumSpeechRate + AVSpeechUtteranceMinimumSpeechRate)
 
     var onStart: (() -> Void)?
     var onFinish: (() -> Void)?
@@ -44,6 +45,19 @@ final class VoiceEngine: NSObject, AVSpeechSynthesizerDelegate {
             return enhanced
         }
         return AVSpeechSynthesisVoice(language: "en-US")
+    }
+
+    /// Open System Settings where the user can download free Enhanced/Premium
+    /// voices (Spoken Content). Best-effort across macOS versions.
+    static func openVoiceDownloadSettings() {
+        let candidates = [
+            "x-apple.systempreferences:com.apple.preference.universalaccess?SpokenContent",
+            "x-apple.systempreferences:com.apple.Accessibility-Settings.extension",
+            "x-apple.systempreferences:com.apple.preference.universalaccess"
+        ]
+        for s in candidates {
+            if let url = URL(string: s), NSWorkspace.shared.open(url) { return }
+        }
     }
 
     /// Remove markdown emphasis, code ticks, arrows, and URLs; collapse whitespace.

@@ -1,26 +1,54 @@
 import SwiftUI
 import AVFoundation
 
-/// Aria's settings window. Tabs map to the spec's settings sections.
+/// Aria's settings window — sidebar layout.
 struct SettingsView: View {
-    var body: some View {
-        TabView {
-            GeneralSettingsTab()
-                .tabItem { Label("General", systemImage: "gearshape") }
-            APIKeyTab()
-                .tabItem { Label("API Key", systemImage: "key") }
-            ToolsTab()
-                .tabItem { Label("Tools", systemImage: "wrench.and.screwdriver") }
-            DynamicToolsTab()
-                .tabItem { Label("Dynamic", systemImage: "sparkles") }
-            BrainTab()
-                .tabItem { Label("Brain", systemImage: "brain") }
-            MirrorTab()
-                .tabItem { Label("Mirror", systemImage: "rectangle.on.rectangle") }
-            VoiceSettingsTab()
-                .tabItem { Label("Voice", systemImage: "speaker.wave.2") }
+    enum Section: String, CaseIterable, Identifiable {
+        case general = "General", voice = "Voice", apiKey = "API Key",
+             tools = "Tools", dynamic = "Dynamic", brain = "Brain", mirror = "Mirror"
+        var id: String { rawValue }
+        var icon: String {
+            switch self {
+            case .general: return "gearshape"
+            case .voice:   return "speaker.wave.2"
+            case .apiKey:  return "key"
+            case .tools:   return "wrench.and.screwdriver"
+            case .dynamic: return "sparkles"
+            case .brain:   return "brain"
+            case .mirror:  return "rectangle.on.rectangle"
+            }
         }
-        .frame(width: 480, height: 420)
+    }
+
+    @State private var selection: Section = .general
+
+    var body: some View {
+        NavigationSplitView {
+            List(Section.allCases, selection: $selection) { section in
+                Label(section.rawValue, systemImage: section.icon).tag(section)
+            }
+            .navigationSplitViewColumnWidth(min: 170, ideal: 180, max: 220)
+        } detail: {
+            ScrollView {
+                detailView
+                    .padding(24)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .navigationTitle(selection.rawValue)
+        }
+        .frame(width: 720, height: 500)
+    }
+
+    @ViewBuilder private var detailView: some View {
+        switch selection {
+        case .general: GeneralSettingsTab()
+        case .voice:   VoiceSettingsTab()
+        case .apiKey:  APIKeyTab()
+        case .tools:   ToolsTab()
+        case .dynamic: DynamicToolsTab()
+        case .brain:   BrainTab()
+        case .mirror:  MirrorTab()
+        }
     }
 }
 
@@ -235,6 +263,7 @@ struct VoiceSettingsTab: View {
             }
             Text("Voices are on-device. Add Premium/Enhanced voices in System Settings → Accessibility → Spoken Content → System Voice → Manage Voices.")
                 .font(.caption).foregroundStyle(.secondary)
+            Button("Get more natural voices…") { VoiceEngine.openVoiceDownloadSettings() }
         }
         .padding()
     }
