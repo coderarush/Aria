@@ -47,6 +47,16 @@ final class VoiceEngine: NSObject, AVSpeechSynthesizerDelegate {
         return AVSpeechSynthesisVoice(language: "en-US")
     }
 
+    /// True if a natural (Premium/Enhanced) English voice is installed.
+    nonisolated static func hasNaturalVoiceInstalled() -> Bool {
+        AVSpeechSynthesisVoice.speechVoices().contains {
+            $0.language.hasPrefix("en") && ($0.quality == .premium || $0.quality == .enhanced)
+        }
+    }
+
+    /// Identifier of the best available voice (Premium/Enhanced preferred).
+    nonisolated static func bestVoiceIdentifier() -> String? { preferredVoice()?.identifier }
+
     /// Open System Settings where the user can download free Enhanced/Premium
     /// voices (Spoken Content). Best-effort across macOS versions.
     static func openVoiceDownloadSettings() {

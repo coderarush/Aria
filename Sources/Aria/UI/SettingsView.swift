@@ -58,33 +58,47 @@ struct GeneralSettingsTab: View {
     @StateObject private var settings = AppSettings.shared
 
     var body: some View {
-        Form {
-            Picker("Accent", selection: Binding(
-                get: { settings.accentChoiceRaw },
-                set: { settings.accentChoiceRaw = $0 })) {
-                Text("Follow system").tag("system")
-                ForEach(Theme.presets, id: \.id) { p in
-                    Text(p.name).tag("preset:\(p.id)")
-                }
-                Text("Custom…").tag(customTag)
-            }
-            if settings.accentChoiceRaw.hasPrefix("custom:") || settings.accentChoiceRaw == customTag {
-                ColorPicker("Custom color", selection: customColorBinding, supportsOpacity: false)
-            }
-            HStack(spacing: 8) {
-                Text("Preview").foregroundStyle(.secondary)
-                Capsule().fill(settings.accentColor).frame(width: 60, height: 10)
-            }
-            Divider()
-            HStack {
-                Text("Response duration")
-                Slider(value: $settings.responseDuration, in: 3...20, step: 1)
-                Text("\(Int(settings.responseDuration))s").monospacedDigit()
-            }
-            Toggle("Privacy mode (disable screen capture)", isOn: $settings.privacyMode)
-            Toggle("Launch at login", isOn: $settings.launchAtLogin)
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Appearance & Behavior")
+                .font(.title3.bold())
+            Text("Customize Aria\u{2019}s look and runtime behavior.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
-        .padding()
+        .padding(.horizontal, 4)
+        .padding(.bottom, 8)
+
+        Form {
+            Section {
+                Picker("Accent", selection: Binding(
+                    get: { settings.accentChoiceRaw },
+                    set: { settings.accentChoiceRaw = $0 })) {
+                    Text("Follow system").tag("system")
+                    ForEach(Theme.presets, id: \.id) { p in
+                        Text(p.name).tag("preset:\(p.id)")
+                    }
+                    Text("Custom\u{2026}").tag(customTag)
+                }
+                if settings.accentChoiceRaw.hasPrefix("custom:") || settings.accentChoiceRaw == customTag {
+                    ColorPicker("Custom color", selection: customColorBinding, supportsOpacity: false)
+                }
+                HStack(spacing: 8) {
+                    Text("Preview").foregroundStyle(.secondary)
+                    Capsule().fill(settings.accentColor).frame(width: 60, height: 10)
+                }
+            } header: { Text("Accent Color") }
+
+            Section {
+                HStack {
+                    Text("Response duration")
+                    Slider(value: $settings.responseDuration, in: 3...20, step: 1)
+                    Text("\(Int(settings.responseDuration))s").monospacedDigit()
+                }
+                Toggle("Privacy mode (disable screen capture)", isOn: $settings.privacyMode)
+                Toggle("Launch at login", isOn: $settings.launchAtLogin)
+            } header: { Text("Behavior") }
+        }
+        .formStyle(.grouped)
     }
 
     private let customTag = "custom:#3B82F6"
@@ -110,20 +124,35 @@ struct APIKeyTab: View {
     @State private var status: String = ""
 
     var body: some View {
-        Form {
-            SecureField("Gemini API key", text: $key)
-            HStack {
-                Button("Save") { save() }
-                Button("Clear") {
-                    KeychainManager.delete(account: KeychainKey.geminiAPIKey)
-                    key = ""; status = "Cleared."
-                }
-            }
-            if !status.isEmpty { Text(status).foregroundStyle(.secondary).font(.caption) }
-            Text("Stored in the macOS Keychain. Get a key at aistudio.google.com.")
-                .font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Your Gemini Key")
+                .font(.title3.bold())
+            Text("Stored securely in the macOS Keychain. Never transmitted by Aria.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
-        .padding()
+        .padding(.horizontal, 4)
+        .padding(.bottom, 8)
+
+        Form {
+            Section {
+                SecureField("Gemini API key", text: $key)
+                HStack {
+                    Button("Save") { save() }
+                    Button("Clear") {
+                        KeychainManager.delete(account: KeychainKey.geminiAPIKey)
+                        key = ""; status = "Cleared."
+                    }
+                }
+                if !status.isEmpty { Text(status).foregroundStyle(.secondary).font(.caption) }
+            } header: { Text("API Key") }
+
+            Section {
+                Text("Get a free key at aistudio.google.com. The free tier is sufficient for most use.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } header: { Text("About") }
+        }
+        .formStyle(.grouped)
         .onAppear { key = KeychainManager.read(account: KeychainKey.geminiAPIKey) ?? "" }
     }
 
@@ -143,18 +172,29 @@ struct ToolsTab: View {
     private let toolNames = ToolRegistry.builtins().map { type(of: $0).name }.sorted()
 
     var body: some View {
-        Form {
-            Text("Enabled tools").font(.headline)
-            ForEach(toolNames, id: \.self) { name in
-                Toggle(name, isOn: Binding(
-                    get: { !settings.disabledTools.contains(name) },
-                    set: { on in
-                        if on { settings.disabledTools.remove(name) }
-                        else { settings.disabledTools.insert(name) }
-                    }))
-            }
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Tool Permissions")
+                .font(.title3.bold())
+            Text("Choose which built-in tools Aria can use on your behalf.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
-        .padding()
+        .padding(.horizontal, 4)
+        .padding(.bottom, 8)
+
+        Form {
+            Section {
+                ForEach(toolNames, id: \.self) { name in
+                    Toggle(name, isOn: Binding(
+                        get: { !settings.disabledTools.contains(name) },
+                        set: { on in
+                            if on { settings.disabledTools.remove(name) }
+                            else { settings.disabledTools.insert(name) }
+                        }))
+                }
+            } header: { Text("Enabled Tools") }
+        }
+        .formStyle(.grouped)
     }
 }
 
@@ -164,15 +204,30 @@ struct DynamicToolsTab: View {
     @State private var s = DynamicToolSettings.load()
 
     var body: some View {
-        Form {
-            Toggle("Allow Aria to write and run code", isOn: $s.allowCodeExecution)
-            Toggle("Show code before running", isOn: $s.showCodeBeforeRun)
-            Toggle("Ask before saving new tools", isOn: $s.askBeforeSaving)
-            Toggle("Sync community tools", isOn: $s.syncCommunityTools)
-            Text("Generated tools live in Application Support/Aria/tools.")
-                .font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Dynamic Tools")
+                .font(.title3.bold())
+            Text("Let Aria generate and run code to extend its own capabilities.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
-        .padding()
+        .padding(.horizontal, 4)
+        .padding(.bottom, 8)
+
+        Form {
+            Section {
+                Toggle("Allow Aria to write and run code", isOn: $s.allowCodeExecution)
+                Toggle("Show code before running", isOn: $s.showCodeBeforeRun)
+                Toggle("Ask before saving new tools", isOn: $s.askBeforeSaving)
+                Toggle("Sync community tools", isOn: $s.syncCommunityTools)
+            } header: { Text("Execution") }
+
+            Section {
+                Text("Generated tools live in Application Support/Aria/tools.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } header: { Text("Storage") }
+        }
+        .formStyle(.grouped)
         .onChange(of: s.allowCodeExecution) { _, _ in s.save() }
         .onChange(of: s.showCodeBeforeRun) { _, _ in s.save() }
         .onChange(of: s.askBeforeSaving) { _, _ in s.save() }
@@ -186,20 +241,35 @@ struct BrainTab: View {
     @State private var s = LearningSettings.load()
 
     var body: some View {
-        Form {
-            Toggle("Learning enabled", isOn: $s.enabled)
-            Toggle("Pause all automations", isOn: $s.automationsPaused)
-            HStack {
-                Text("Sensitivity")
-                Slider(value: $s.sensitivity, in: 0.6...0.9, step: 0.05)
-                Text(label(for: s.sensitivity)).font(.caption).frame(width: 90, alignment: .trailing)
-            }
-            Text("Conservative requires more confidence before suggesting; Aggressive suggests sooner.")
-                .font(.caption).foregroundStyle(.secondary)
-            Text("All learning happens on-device. Nothing is sent anywhere.")
-                .font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 4) {
+            Text("On-Device Learning")
+                .font(.title3.bold())
+            Text("Aria observes your patterns locally to get smarter over time.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
-        .padding()
+        .padding(.horizontal, 4)
+        .padding(.bottom, 8)
+
+        Form {
+            Section {
+                Toggle("Learning enabled", isOn: $s.enabled)
+                Toggle("Pause all automations", isOn: $s.automationsPaused)
+                HStack {
+                    Text("Sensitivity")
+                    Slider(value: $s.sensitivity, in: 0.6...0.9, step: 0.05)
+                    Text(label(for: s.sensitivity)).font(.caption).frame(width: 90, alignment: .trailing)
+                }
+            } header: { Text("Behavior") }
+
+            Section {
+                Text("Conservative requires more confidence before suggesting; Aggressive suggests sooner.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("All learning happens on-device. Nothing is sent anywhere.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } header: { Text("About") }
+        }
+        .formStyle(.grouped)
         .onChange(of: s.enabled) { _, _ in s.save() }
         .onChange(of: s.automationsPaused) { _, _ in s.save() }
         .onChange(of: s.sensitivity) { _, _ in s.save() }
@@ -217,17 +287,32 @@ struct MirrorTab: View {
     @State private var portText = "8765"
 
     var body: some View {
-        Form {
-            Toggle("Enable Mirror Bridge", isOn: $s.enabled)
-            TextField("Port", text: $portText)
-            HStack {
-                Circle().fill(s.enabled ? .green : .gray).frame(width: 8, height: 8)
-                Text(s.enabled ? MirrorBridge.ConnectionState.notConnected.rawValue : "Disabled")
-                    .foregroundStyle(.secondary)
-            }
-            Text("Set-up guide coming soon.").font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Mirror Bridge")
+                .font(.title3.bold())
+            Text("Stream Aria\u{2019}s context to companion apps on your local network.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
-        .padding()
+        .padding(.horizontal, 4)
+        .padding(.bottom, 8)
+
+        Form {
+            Section {
+                Toggle("Enable Mirror Bridge", isOn: $s.enabled)
+                TextField("Port", text: $portText)
+                HStack {
+                    Circle().fill(s.enabled ? .green : .gray).frame(width: 8, height: 8)
+                    Text(s.enabled ? MirrorBridge.ConnectionState.notConnected.rawValue : "Disabled")
+                        .foregroundStyle(.secondary)
+                }
+            } header: { Text("Connection") }
+
+            Section {
+                Text("Set-up guide coming soon.").font(.caption).foregroundStyle(.secondary)
+            } header: { Text("Help") }
+        }
+        .formStyle(.grouped)
         .onAppear { portText = String(s.port) }
         .onChange(of: s.enabled) { _, _ in persist() }
         .onChange(of: portText) { _, _ in persist() }
@@ -248,23 +333,38 @@ struct VoiceSettingsTab: View {
         .sorted { $0.name < $1.name }
 
     var body: some View {
-        Form {
-            Toggle("Speak responses aloud", isOn: $settings.voiceEnabled)
-            Picker("Voice", selection: $settings.voiceIdentifier) {
-                Text("Automatic (best installed)").tag("")
-                ForEach(voices, id: \.identifier) { v in
-                    Text("\(v.name) (\(v.quality == .premium ? "Premium" : v.quality == .enhanced ? "Enhanced" : "Default"))")
-                        .tag(v.identifier)
-                }
-            }
-            HStack {
-                Text("Speaking rate")
-                Slider(value: $settings.voiceRate, in: 0...1, step: 0.05)
-            }
-            Text("Voices are on-device. Add Premium/Enhanced voices in System Settings → Accessibility → Spoken Content → System Voice → Manage Voices.")
-                .font(.caption).foregroundStyle(.secondary)
-            Button("Get more natural voices…") { VoiceEngine.openVoiceDownloadSettings() }
+        VStack(alignment: .leading, spacing: 4) {
+            Text("How Aria Speaks")
+                .font(.title3.bold())
+            Text("Configure Aria\u{2019}s text-to-speech voice and speaking rate.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
-        .padding()
+        .padding(.horizontal, 4)
+        .padding(.bottom, 8)
+
+        Form {
+            Section {
+                Toggle("Speak responses aloud", isOn: $settings.voiceEnabled)
+                Picker("Voice", selection: $settings.voiceIdentifier) {
+                    Text("Automatic (best installed)").tag("")
+                    ForEach(voices, id: \.identifier) { v in
+                        Text("\(v.name) (\(v.quality == .premium ? "Premium" : v.quality == .enhanced ? "Enhanced" : "Default"))")
+                            .tag(v.identifier)
+                    }
+                }
+                HStack {
+                    Text("Speaking rate")
+                    Slider(value: $settings.voiceRate, in: 0...1, step: 0.05)
+                }
+            } header: { Text("Voice") }
+
+            Section {
+                Text("Voices are on-device. Add Premium/Enhanced voices in System Settings \u{2192} Accessibility \u{2192} Spoken Content \u{2192} System Voice \u{2192} Manage Voices.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button("Get more natural voices\u{2026}") { VoiceEngine.openVoiceDownloadSettings() }
+            } header: { Text("More Voices") }
+        }
+        .formStyle(.grouped)
     }
 }

@@ -6,107 +6,289 @@ struct OnboardingView: View {
     /// Called when onboarding finishes (or is skipped to the minimum).
     var onComplete: () -> Void
 
+    @StateObject private var settings = AppSettings.shared
     @State private var step = 0
     @State private var micGranted = false
-    @State private var screenNote = ""
     @State private var apiKey = ""
     @State private var apiStatus = ""
+    @State private var naturalVoiceInstalled = false
 
-    private let steps = ["Welcome", "Microphone", "Screen", "API Key", "Done"]
+    // Steps: 0=Welcome 1=Mic 2=Screen 3=APIKey 4=Voice 5=Done
+    private let totalSteps = 6
 
-    var body: some View {
-        VStack(spacing: 24) {
-            Text("⬡ Aria").font(.system(size: 34, weight: .bold, design: .rounded))
-            ProgressView(value: Double(step), total: Double(steps.count - 1))
-                .frame(width: 300)
-
-            Group {
-                switch step {
-                case 0: welcome
-                case 1: micStep
-                case 2: screenStep
-                case 3: apiStep
-                default: doneStep
-                }
-            }
-            .frame(maxWidth: 380, minHeight: 140)
-
-            HStack {
-                if step > 0 && step < steps.count - 1 {
-                    Button("Back") { step -= 1 }
-                }
-                Spacer()
-                Button(step == steps.count - 1 ? "Finish" : "Next") { advance() }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(step == 1 && !micGranted)
-            }
-            .frame(width: 380)
+    private var stepIcon: String {
+        switch step {
+        case 0: return "hand.wave.fill"
+        case 1: return "mic.fill"
+        case 2: return "rectangle.dashed.badge.record"
+        case 3: return "key.fill"
+        case 4: return "speaker.wave.2.fill"
+        default: return "checkmark.seal.fill"
         }
-        .padding(40)
-        .frame(width: 520, height: 460)
     }
 
+    var body: some View {
+        ZStack {
+            // Soft gradient backdrop
+            LinearGradient(
+                colors: [
+                    settings.accentColor.opacity(0.12),
+                    Color(NSColor.windowBackgroundColor).opacity(0.95)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                // Header: logo
+                VStack(spacing: 6) {
+                    Text("⬡ Aria")
+                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .foregroundStyle(settings.accentColor)
+                }
+                .padding(.top, 36)
+                .padding(.bottom, 20)
+
+                // Dot progress indicator
+                HStack(spacing: 8) {
+                    ForEach(0..<totalSteps, id: \.self) { i in
+                        Circle()
+                            .fill(i <= step ? settings.accentColor : Color.secondary.opacity(0.3))
+                            .frame(width: i == step ? 10 : 7, height: i == step ? 10 : 7)
+                            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: step)
+                    }
+                }
+                .padding(.bottom, 28)
+
+                // Step icon
+                Image(systemName: stepIcon)
+                    .font(.system(size: 42, weight: .medium))
+                    .foregroundStyle(settings.accentColor)
+                    .padding(.bottom, 16)
+                    .transition(.scale.combined(with: .opacity))
+                    .id("icon-\(step)")
+                    .animation(.spring(response: 0.4, dampingFraction: 0.75), value: step)
+
+                // Step content
+                Group {
+                    switch step {
+                    case 0: welcome
+                    case 1: micStep
+                    case 2: screenStep
+                    case 3: apiStep
+                    case 4: voiceStep
+                    default: doneStep
+                    }
+                }
+                .transition(.asymmetric(
+                    insertion: .move(edge: .trailing).combined(with: .opacity),
+                    removal: .move(edge: .leading).combined(with: .opacity)
+                ))
+                .id("step-\(step)")
+                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: step)
+                .frame(maxWidth: 400, minHeight: 130)
+                .padding(.horizontal, 24)
+
+                Spacer(minLength: 20)
+
+                // Navigation buttons
+                HStack(spacing: 12) {
+                    if step > 0 && step < totalSteps - 1 {
+                        Button {
+                            withAnimation { step -= 1 }
+                        } label: {
+                            Text("Back")
+                                .frame(minWidth: 72)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                    }
+
+                    Spacer()
+
+                    Button {
+                        withAnimation { advance() }
+                    } label: {
+                        Text(step == totalSteps - 1 ? "Finish" : "Continue")
+                            .fontWeight(.semibold)
+                            .frame(minWidth: 110)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(settings.accentColor)
+                    .controlSize(.large)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(step == 1 && !micGranted)
+                }
+                .padding(.horizontal, 40)
+                .padding(.bottom, 32)
+            }
+        }
+        .frame(width: 560, height: 500)
+        .onAppear { naturalVoiceInstalled = VoiceEngine.hasNaturalVoiceInstalled() }
+    }
+
+    // MARK: Step views
+
     private var welcome: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 12) {
+            Text("Welcome to Aria")
+                .font(.system(size: 24, weight: .bold, design: .rounded))
             Text("Your personal AI agent that lives on your Mac.")
-                .font(.title3).multilineTextAlignment(.center)
-            Text("Say “Hey Aria” and it appears, listens, sees your screen, and gets things done.")
-                .foregroundStyle(.secondary).multilineTextAlignment(.center)
+                .font(.title3)
+                .multilineTextAlignment(.center)
+            Text("Say \u{201C}Hey Aria\u{201D} and it appears, listens, sees your screen, and gets things done.")
+                .foregroundStyle(.secondary)
+                .font(.callout)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 8)
         }
     }
 
     private var micStep: some View {
         VStack(spacing: 12) {
-            Text("Microphone").font(.title2.bold())
-            Text("Required for the “Hey Aria” wake word. Listening is on-device.")
-                .foregroundStyle(.secondary).multilineTextAlignment(.center)
-            Button(micGranted ? "Granted ✓" : "Grant microphone access") {
-                Task {
-                    micGranted = await PermissionsManager.requestCorePermissions()
-                }
+            Text("Microphone Access")
+                .font(.system(size: 22, weight: .bold, design: .rounded))
+            Text("Required to hear \u{201C}Hey Aria.\u{201D} All wake-word detection runs on-device \u{2014} nothing is sent to the cloud.")
+                .foregroundStyle(.secondary)
+                .font(.callout)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 8)
+            Button {
+                Task { micGranted = await PermissionsManager.requestCorePermissions() }
+            } label: {
+                Label(
+                    micGranted ? "Microphone granted" : "Grant microphone access",
+                    systemImage: micGranted ? "checkmark.circle.fill" : "mic.badge.plus"
+                )
+                .fontWeight(.medium)
             }
             .disabled(micGranted)
+            .tint(micGranted ? .green : settings.accentColor)
+            .buttonStyle(.borderedProminent)
+            .controlSize(.regular)
+            .padding(.top, 4)
         }
     }
 
     private var screenStep: some View {
         VStack(spacing: 12) {
-            Text("Screen Recording").font(.title2.bold())
-            Text("Lets Aria see your screen when you ask. Captured only on command, never stored. You can skip this.")
-                .foregroundStyle(.secondary).multilineTextAlignment(.center)
-            Button("Open Privacy Settings") {
+            Text("Screen Recording")
+                .font(.system(size: 22, weight: .bold, design: .rounded))
+            Text("Lets Aria see your screen when you ask. Captured only on command, never stored continuously. You can skip this and enable it later.")
+                .foregroundStyle(.secondary)
+                .font(.callout)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 8)
+            Button {
                 if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
                     NSWorkspace.shared.open(url)
                 }
+            } label: {
+                Label("Open Privacy Settings", systemImage: "arrow.up.right.square")
+                    .fontWeight(.medium)
             }
+            .buttonStyle(.bordered)
+            .controlSize(.regular)
+            .padding(.top, 4)
         }
     }
 
     private var apiStep: some View {
         VStack(spacing: 12) {
-            Text("Gemini API Key").font(.title2.bold())
-            Text("Aria uses your own key (free tier works). Stored in the Keychain.")
-                .foregroundStyle(.secondary).multilineTextAlignment(.center)
-            SecureField("Paste your key", text: $apiKey).frame(width: 300)
-            if !apiStatus.isEmpty { Text(apiStatus).font(.caption).foregroundStyle(.secondary) }
+            Text("Gemini API Key")
+                .font(.system(size: 22, weight: .bold, design: .rounded))
+            Text("Aria uses your own key \u{2014} the free tier works. Stored securely in the macOS Keychain, never transmitted elsewhere.")
+                .foregroundStyle(.secondary)
+                .font(.callout)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 8)
+            SecureField("Paste your API key", text: $apiKey)
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 320)
+                .padding(.top, 4)
+            if !apiStatus.isEmpty {
+                Text(apiStatus)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
+    }
+
+    private var voiceStep: some View {
+        VStack(spacing: 12) {
+            Text("Voice Setup")
+                .font(.system(size: 22, weight: .bold, design: .rounded))
+
+            if naturalVoiceInstalled {
+                VStack(spacing: 8) {
+                    Label("Natural voice installed", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .font(.callout.bold())
+                    Text("Aria will use the best available voice automatically.")
+                        .foregroundStyle(.secondary)
+                        .font(.callout)
+                        .multilineTextAlignment(.center)
+                }
+            } else {
+                VStack(spacing: 10) {
+                    Text("The default macOS voice sounds robotic. Installing a free Premium voice makes Aria far more pleasant to use.")
+                        .foregroundStyle(.secondary)
+                        .font(.callout)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 8)
+                    Button {
+                        VoiceEngine.openVoiceDownloadSettings()
+                    } label: {
+                        Label("Install a free voice\u{2026}", systemImage: "arrow.down.circle")
+                            .fontWeight(.medium)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(settings.accentColor)
+                    .controlSize(.regular)
+                    Text("System Settings \u{2192} Spoken Content \u{2192} Manage Voices \u{2192} English \u{2192} Premium (e.g. Ava, Zoe, Evan).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 4)
+                }
+            }
+        }
+        .onAppear { naturalVoiceInstalled = VoiceEngine.hasNaturalVoiceInstalled() }
     }
 
     private var doneStep: some View {
-        VStack(spacing: 10) {
-            Text("You're set!").font(.title2.bold())
-            Text("Say “Hey Aria” any time, or use the ⬡ menu-bar icon.")
-                .foregroundStyle(.secondary).multilineTextAlignment(.center)
+        VStack(spacing: 12) {
+            Text("You\u{2019}re all set!")
+                .font(.system(size: 24, weight: .bold, design: .rounded))
+            Text("Say \u{201C}Hey Aria\u{201D} any time, or tap the \u{2B21} menu-bar icon to get started.")
+                .foregroundStyle(.secondary)
+                .font(.callout)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 8)
+        }
+        .onAppear {
+            AppSettings.shared.voiceIdentifier = VoiceEngine.bestVoiceIdentifier() ?? ""
         }
     }
 
+    // MARK: Navigation
+
     private func advance() {
+        // Save API key when leaving API step
         if step == 3, !apiKey.trimmingCharacters(in: .whitespaces).isEmpty {
             try? KeychainManager.save(apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
                                       account: KeychainKey.geminiAPIKey)
             apiStatus = "Saved."
         }
-        if step >= steps.count - 1 { onComplete() }
-        else { step += 1 }
+        // Auto-select best voice when leaving Voice step
+        if step == 4 {
+            AppSettings.shared.voiceIdentifier = VoiceEngine.bestVoiceIdentifier() ?? ""
+        }
+        if step >= totalSteps - 1 {
+            onComplete()
+        } else {
+            step += 1
+        }
     }
 }
