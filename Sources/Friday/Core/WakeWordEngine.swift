@@ -31,14 +31,28 @@ final class WakeWordEngine {
     private var task: SFSpeechRecognitionTask?
 
     private var mode: Mode = .wake
+    /// Bumped on every (re)start. A recognition task's completion callback only
+    /// acts if its id still matches — so deliberately cancelling the previous
+    /// task (which fires its callback with a cancellation error) does NOT
+    /// trigger another restart. Without this, each restart's cancel scheduled
+    /// the next restart: an infinite ~0.4s loop where recognition never lived
+    /// long enough to hear the wake word.
+    private var sessionID = 0
     private var commandBuffer = ""
+    /// Command text finalized from PRIOR recognition sessions in this capture.
+    /// SFSpeechRecognizer ends a session on silence; without carrying this
+    /// forward, a command spoken AFTER the wake word (not in the same breath)
+    /// is lost when the session restarts. Combined with the live session's
+    /// transcript to form `commandBuffer`.
+    private var committedCommand = ""
     private var silenceTimer: Timer?
     private var rollingTimer: Timer?
 
     private let wakeVariants = ["hey friday", "hey freddy", "hey frieda",
                                "hey friday's", "hey friday.", "a friday",
                                "hey, friday"]
-    private let commandSilence: TimeInterval = 1.4
+    private let commandSilence: TimeInterval = 1.4   // trailing silence once speaking
+    private let commandLeadGrace: TimeInterval = 6.0 // time to START the command after wake
     private let rollingRestart: TimeInterval = 50
 
     private(set) var isRunning = false
@@ -75,7 +89,18 @@ final class WakeWordEngine {
     // MARK: Recognition session
 
     private func beginRecognition() throws {
-        teardownRecognition()
+        // Recycle ONLY the speech request + task; keep the AVAudioEngine and its
+        // input tap alive across restarts. Tearing the engine down on every
+        // silence-restart is what killed wake: one failed audioEngine.start()
+        // used to leave no task → no completion → no further restart, silently
+        // dead after the first command. Throwing here lets scheduleRestart retry.
+        // Supersede the previous session FIRST so its cancellation callback is
+        // ignored (see sessionID). Then tear down the old request/task.
+        sessionID &+= 1
+        let myID = sessionID
+        request?.endAudio()
+        task?.cancel()
+        task = nil
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
@@ -84,55 +109,68 @@ final class WakeWordEngine {
         request.requiresOnDeviceRecognition = recognizer?.supportsOnDeviceRecognition ?? false
         self.request = request
 
+        try ensureAudioEngineRunning()
+
+        task = recognizer?.recognitionTask(with: request) { [weak self] result, error in
+            guard let self, myID == self.sessionID else { return }  // ignore superseded sessions
+            if let result {
+                self.handleTranscript(result.bestTranscription.formattedString)
+            }
+            if let error {
+                // Genuine session end (silence / 1-min cap). Restart to keep
+                // listening. Superseded-session cancellations are filtered above,
+                // so this can't cascade into a tight loop.
+                Log.wake.debug("Recognition ended: \(error.localizedDescription)")
+                Log.trace("recognition ended (mode=\(self.mode)): \(error.localizedDescription)")
+                self.scheduleRestart()
+            }
+        }
+    }
+
+    /// Install the mic tap and start the audio engine once; reused across all
+    /// recognition restarts (the tap appends to whatever `self.request` currently
+    /// is). Throws so callers retry instead of leaving wake permanently dead.
+    private func ensureAudioEngineRunning() throws {
+        guard !audioEngine.isRunning else { return }
         let input = audioEngine.inputNode
         let format = input.inputFormat(forBus: 0)
         // A zero sample rate means there is no usable input device.
         guard format.sampleRate > 0 else {
-            onError?("No microphone input available. Check your input device.")
-            Log.wake.error("Input format sample rate is 0 — no mic")
-            return
+            throw NSError(domain: "Friday.Wake", code: 3,
+                          userInfo: [NSLocalizedDescriptionKey: "No microphone input available. Check your input device."])
         }
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             self?.request?.append(buffer)
             self?.reportLevel(buffer)
         }
-
         audioEngine.prepare()
-        do {
-            try audioEngine.start()
-        } catch {
-            onError?("Couldn't start the microphone: \(error.localizedDescription)")
-            Log.wake.error("audioEngine.start failed: \(error.localizedDescription)")
-            return
-        }
-
-        task = recognizer?.recognitionTask(with: request) { [weak self] result, error in
-            guard let self else { return }
-            if let result {
-                self.handleTranscript(result.bestTranscription.formattedString)
-            }
-            if let error {
-                // "No speech detected" and normal session ends are benign — just
-                // restart (throttled) instead of spinning in a tight loop.
-                Log.wake.debug("Recognition ended: \(error.localizedDescription)")
-                self.scheduleRestart()
-            }
-        }
+        try audioEngine.start()
     }
 
     /// Restart recognition once, after a short delay, coalescing rapid retries
-    /// so a failing recognizer can't spin the CPU.
+    /// so a failing recognizer can't spin the CPU. Runs in BOTH modes: in
+    /// command mode a session can end mid-command (silence), and we must keep
+    /// listening instead of dropping what the user is saying.
     private func scheduleRestart() {
-        guard isRunning, mode == .wake, !restartPending else { return }
+        guard isRunning, !restartPending else { return }
+        // Commit the in-progress command so it survives the new session; the
+        // fresh session's transcript starts empty and is appended to this.
+        if mode == .command { committedCommand = commandBuffer }
         restartPending = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
             guard let self, self.isRunning else { return }
             self.restartPending = false
-            do { try self.beginRecognition() }
+            do {
+                try self.beginRecognition()
+                Log.trace("recognition restarted (mode=\(self.mode))")
+            }
             catch {
-                self.onError?("Wake listening stopped: \(error.localizedDescription)")
-                Log.wake.error("Restart failed: \(error.localizedDescription)")
+                // Keep retrying instead of dying — a transient engine-start
+                // failure must not permanently kill wake detection.
+                Log.wake.error("Restart failed: \(error.localizedDescription) — retrying")
+                Log.trace("recognition restart FAILED: \(error.localizedDescription) — retrying")
+                self.scheduleRestart()
             }
         }
     }
@@ -167,25 +205,38 @@ final class WakeWordEngine {
                 enterCommandMode(initialTranscript: lower)
             }
         case .command:
-            commandBuffer = stripWakePhrase(from: lower, original: text)
-            resetSilenceTimer()
+            // The live session's transcript is cumulative within that session;
+            // prepend anything committed from earlier (restarted) sessions.
+            let sessionText = stripWakePhrase(from: lower, original: text)
+            let combined = committedCommand.isEmpty
+                ? sessionText
+                : (committedCommand + " " + sessionText)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            let grew = combined.count > commandBuffer.count
+            commandBuffer = combined
+            // Once the user is actually speaking the command, use the short
+            // trailing-silence window; otherwise keep waiting out the lead grace.
+            if grew { resetSilenceTimer(commandSilence) }
         }
     }
 
     private func enterCommandMode(initialTranscript: String) {
         mode = .command
+        committedCommand = ""
         // Keep the SAME recognition session running — its transcription is
         // cumulative, so a command spoken in the same breath as the wake phrase
         // ("Hey Friday, open Spotify") is preserved. stripWakePhrase removes the
         // wake words. Restarting here would discard the command already spoken.
         commandBuffer = stripWakePhrase(from: initialTranscript, original: initialTranscript)
         onWake?()
-        resetSilenceTimer()
+        // If the command came in the same breath, finish on short silence;
+        // otherwise give a longer grace for the user to start speaking it.
+        resetSilenceTimer(commandBuffer.isEmpty ? commandLeadGrace : commandSilence)
     }
 
-    private func resetSilenceTimer() {
+    private func resetSilenceTimer(_ timeout: TimeInterval) {
         silenceTimer?.invalidate()
-        silenceTimer = Timer.scheduledTimer(withTimeInterval: commandSilence, repeats: false) { [weak self] _ in
+        silenceTimer = Timer.scheduledTimer(withTimeInterval: timeout, repeats: false) { [weak self] _ in
             Task { @MainActor in self?.finishCommand() }
         }
     }
@@ -194,13 +245,21 @@ final class WakeWordEngine {
         let command = commandBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
         mode = .wake
         commandBuffer = ""
+        committedCommand = ""
+        Log.trace("finishCommand: '\(command)' → restarting wake session")
         if command.isEmpty {
             onCommandEmpty?()          // let the UI dismiss the idle orb
         } else {
             onCommand?(command)
         }
         // Fresh session so the next wake doesn't see this command's transcript.
-        try? beginRecognition()
+        // Retry on failure — swallowing the error here would leave wake dead
+        // after a command (the "works once then won't wake again" bug).
+        do { try beginRecognition() }
+        catch {
+            Log.trace("finishCommand beginRecognition failed: \(error.localizedDescription) — retrying")
+            scheduleRestart()
+        }
     }
 
     private func stripWakePhrase(from lower: String, original: String) -> String {

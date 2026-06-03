@@ -13,6 +13,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.app.info("Friday launching")
+        Log.trace("=== Friday launched ===")
+        NSSetUncaughtExceptionHandler { exception in
+            Log.trace("UNCAUGHT EXCEPTION: \(exception.name.rawValue) — \(exception.reason ?? "?")\n\(exception.callStackSymbols.joined(separator: "\n"))")
+        }
         // Preview mode — handled first so it never touches the Keychain (which
         // can block on first run after an ad-hoc re-sign).
         if ProcessInfo.processInfo.environment["FRIDAY_SHOW_ORB"] != nil

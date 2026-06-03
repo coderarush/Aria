@@ -30,7 +30,7 @@ actor GeminiClient {
 
     private let maxRetries = 3
 
-    init(model: String = "gemini-1.5-flash",
+    init(model: String = "gemini-flash-latest",
          session: URLSession = .shared,
          apiKeyProvider: @escaping () -> String? = { KeychainManager.read(account: KeychainKey.geminiAPIKey) }) {
         self.model = model

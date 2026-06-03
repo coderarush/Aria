@@ -47,7 +47,9 @@ actor AgentOrchestrator {
             return local
         }
 
+        Log.trace("orchestrator: capturing screen (privacy=\(privacyMode))")
         let screenshot: Data? = privacyMode ? nil : try? await screen.capturePrimaryJPEG()
+        Log.trace("orchestrator: screenshot=\(screenshot?.count ?? -1) bytes; building catalog")
         let history = await memory.recentContext()
         let context = await Self.currentSystemContext()
 
@@ -55,24 +57,29 @@ actor AgentOrchestrator {
             let catalog = await registry.catalog()
                 + "\n\nSUB-AGENTS (dispatch via action tool = the agent name, input.task = the goal):\n"
                 + (await subAgents.catalog())
+            Log.trace("orchestrator: sending to Gemini")
             let response = try await gemini.send(
                 transcript: command,
                 screenshotJPEG: screenshot,
                 history: history,
                 context: context,
                 toolCatalog: catalog)
+            Log.trace("orchestrator: Gemini ok, type=\(response.type.rawValue) actions=\(response.actions.count)")
 
             let final = await routeActions(response, context: context)
+            Log.trace("orchestrator: routeActions done")
             await record(command: command, response: final)
             return final
         } catch GeminiClient.GeminiError.missingAPIKey {
+            Log.trace("orchestrator: MISSING API KEY")
             return FridayResponse(type: .answer,
                 message: "I don't have a Gemini API key yet. Add one in Settings.",
                 confidence: 1.0)
         } catch {
+            Log.trace("orchestrator: Gemini FAILED: \(error)")
             Log.agent.error("Gemini request failed: \(error.localizedDescription)")
             return FridayResponse(type: .answer,
-                message: "Something went wrong reaching my brain. Try again in a moment.",
+                message: "Something went wrong: \(error.localizedDescription)",
                 confidence: 0.0)
         }
     }

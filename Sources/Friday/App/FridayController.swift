@@ -156,7 +156,10 @@ final class FridayController {
         orbViewModel.onVisibilityChange = { [weak self] visible in
             self?.setPanelVisible(visible)
             // Resume wake detection once the orb is fully hidden again.
-            if !visible { self?.wakeEngine.isSuspended = false }
+            if !visible {
+                self?.wakeEngine.isSuspended = false
+                Log.trace("orb hidden → wake re-armed (isSuspended=false)")
+            }
         }
     }
 
@@ -184,12 +187,14 @@ final class FridayController {
 
     private func wireEngine() {
         wakeEngine.onWake = { [weak self] in
+            Log.trace("onWake — orb listening")
             self?.orbViewModel.beginListening()
         }
         wakeEngine.onAudioLevel = { [weak self] level in
             self?.orbViewModel.updateAudioLevel(level)
         }
         wakeEngine.onCommand = { [weak self] command in
+            Log.trace("onCommand fired: '\(command)'")
             self?.handleCommand(command)
         }
         wakeEngine.onCommandEmpty = { [weak self] in
@@ -208,6 +213,7 @@ final class FridayController {
         Task {
             let micOK = await PermissionsManager.requestMicrophone()
             let speechOK = await PermissionsManager.requestSpeech()
+            Log.trace("permissions: mic=\(micOK) speech=\(speechOK)")
             guard micOK, speechOK else {
                 let missing = [micOK ? nil : "Microphone", speechOK ? nil : "Speech Recognition"]
                     .compactMap { $0 }.joined(separator: " + ")
@@ -216,8 +222,12 @@ final class FridayController {
                 orbViewModel.showError("\(missing) permission denied. Enable it in System Settings → Privacy & Security, then relaunch Friday.")
                 return
             }
-            do { try wakeEngine.start() }
+            do {
+                try wakeEngine.start()
+                Log.trace("wake engine started OK — listening for 'Hey Friday'")
+            }
             catch {
+                Log.trace("wake engine start FAILED: \(error.localizedDescription)")
                 Log.app.error("Wake engine failed to start: \(error.localizedDescription)")
                 orbViewModel.beginListening()
                 orbViewModel.showError(error.localizedDescription)
@@ -241,14 +251,18 @@ final class FridayController {
         wakeEngine.isSuspended = true
         orbViewModel.beginThinking()
         let privacy = AppSettings.shared.privacyMode
+        Log.trace("handleCommand: '\(command)' privacy=\(privacy) — thinking")
         Task {
             await patternEngine.recordCommand(command)
+            Log.trace("calling orchestrator.handle")
             let response = await orchestrator.handle(command: command, privacyMode: privacy)
+            Log.trace("orchestrator returned: type=\(response.type.rawValue) conf=\(response.confidence) msg=\(response.message.prefix(120))")
             if response.confidence == 0 {
                 orbViewModel.showError(response.message)
             } else {
                 orbViewModel.showResponse(response.message)
             }
+            Log.trace("orb updated, state=\(String(describing: orbViewModel.state))")
         }
     }
 
