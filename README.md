@@ -34,7 +34,7 @@ fully under your control.
 | Dynamic tool generation (Friday writes + runs + saves its own tools) | ✅ v0.2 |
 | Tool system + registry (Shell, AppleScript, Files, Clipboard, Notify, OpenApp, Browser, WebSearch, WebFetch) | ✅ v0.3 |
 | Sub-agents (Research, CodeWriter, TaskPlanner) | ✅ v0.4 |
-| Behavioral learning & proactive automation | 🔜 |
+| Behavioral learning & proactive automation | ✅ v0.5 |
 | Onboarding + full Settings | 🔜 |
 | Metal-shader orb polish | 🔜 |
 | Smart-mirror bridge | 🔜 (stub) |

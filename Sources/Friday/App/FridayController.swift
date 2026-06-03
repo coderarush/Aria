@@ -9,13 +9,74 @@ final class FridayController {
     let orbViewModel = OrbViewModel()
     private let wakeEngine = WakeWordEngine()
     private let orchestrator = AgentOrchestrator()
+    private let patternEngine = PatternEngine()
     private var panel: OrbPanel?
+    private var learningTimer: Timer?
 
     func start() {
         setupPanel()
         wireEngine()
         configureConfirmation()
+        configureLearning()
         startListening()
+    }
+
+    // MARK: Behavioral learning
+
+    private func configureLearning() {
+        observeAppEvents()
+        Task {
+            await patternEngine.setSuggestionHandler { [weak self] pattern in
+                Task { @MainActor in self?.presentSuggestion(pattern) }
+            }
+        }
+        // Hourly: re-detect, surface suggestions, fire approved automations.
+        learningTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.runLearningCycle() }
+        }
+    }
+
+    private func observeAppEvents() {
+        let nc = NSWorkspace.shared.notificationCenter
+        nc.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { [weak self] note in
+            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  let bundle = app.bundleIdentifier else { return }
+            Task { await self?.patternEngine.recordAppEvent(AppEvent(bundleId: bundle, kind: .launched, timestamp: Date())) }
+        }
+        nc.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { [weak self] note in
+            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  let bundle = app.bundleIdentifier else { return }
+            Task { await self?.patternEngine.recordAppEvent(AppEvent(bundleId: bundle, kind: .quit, timestamp: Date())) }
+        }
+    }
+
+    private func runLearningCycle() async {
+        let sensitivity = LearningSettings.load().sensitivity
+        _ = await patternEngine.analyzePatterns(sensitivity: sensitivity)
+        _ = await patternEngine.patternsToSuggest()
+        let firing = await patternEngine.automationsToFire()
+        for pattern in firing {
+            if case let .runSavedCommand(command) = pattern.action {
+                Log.app.info("Firing automation: \(command, privacy: .public)")
+                orbViewModel.beginThinking()
+                let response = await orchestrator.handle(command: command)
+                orbViewModel.showResponse("⚡️ " + response.message)
+            }
+        }
+    }
+
+    @MainActor
+    private func presentSuggestion(_ pattern: BehaviorPattern) {
+        orbViewModel.beginListening()
+        orbViewModel.showResponse(pattern.description + " — want me to handle that automatically?")
+        let approved = Self.confirm("\(pattern.description).\n\nWant Friday to do this automatically from now on?")
+        Task {
+            if approved {
+                await patternEngine.approve(pattern.id, mode: .previewFirst)
+            } else {
+                await patternEngine.deferSuggestion(pattern.id)
+            }
+        }
     }
 
     /// Route the orchestrator's confirmation requests (run destructive code,
@@ -112,6 +173,7 @@ final class FridayController {
 
         orbViewModel.beginThinking()
         Task {
+            await patternEngine.recordCommand(command)
             let response = await orchestrator.handle(command: command)
             if response.confidence == 0 {
                 orbViewModel.showError(response.message)
