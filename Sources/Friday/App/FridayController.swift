@@ -172,9 +172,10 @@ final class FridayController {
         }
 
         orbViewModel.beginThinking()
+        let privacy = AppSettings.shared.privacyMode
         Task {
             await patternEngine.recordCommand(command)
-            let response = await orchestrator.handle(command: command)
+            let response = await orchestrator.handle(command: command, privacyMode: privacy)
             if response.confidence == 0 {
                 orbViewModel.showError(response.message)
             } else {

@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 
 /// Sets up the menu-bar status item and owns the FridayController. The app has
 /// `LSUIElement = true`, so there is no Dock icon — the ⬡ menu-bar item is the
@@ -8,12 +9,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var statusItem: NSStatusItem?
     private let controller = FridayController()
+    private var onboardingWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.app.info("Friday launching")
         migrateAPIKeyIfNeeded()
         setupStatusItem()
         controller.start()
+        showOnboardingIfNeeded()
+    }
+
+    // MARK: Onboarding
+
+    private func showOnboardingIfNeeded() {
+        guard !AppSettings.shared.onboardingComplete else { return }
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 460),
+            styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.center()
+        window.title = "Welcome to Friday"
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: OnboardingView { [weak self] in
+            AppSettings.shared.onboardingComplete = true
+            self?.onboardingWindow?.close()
+            self?.onboardingWindow = nil
+        })
+        onboardingWindow = window
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
     }
 
     // MARK: Menu bar
@@ -25,6 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "Summon Friday", action: #selector(summon), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Friday", action: #selector(quit), keyEquivalent: "q"))
         menu.items.forEach { $0.target = self }
@@ -34,6 +58,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func summon() { controller.toggleManually() }
     @objc private func quit() { NSApp.terminate(nil) }
+
+    @objc private func openSettings() {
+        NSApp.activate(ignoringOtherApps: true)
+        // macOS 14 settings action.
+        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+    }
 
     // MARK: API key migration
 

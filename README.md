@@ -35,9 +35,9 @@ fully under your control.
 | Tool system + registry (Shell, AppleScript, Files, Clipboard, Notify, OpenApp, Browser, WebSearch, WebFetch) | ✅ v0.3 |
 | Sub-agents (Research, CodeWriter, TaskPlanner) | ✅ v0.4 |
 | Behavioral learning & proactive automation | ✅ v0.5 |
-| Onboarding + full Settings | 🔜 |
+| Onboarding + full Settings (General/API/Tools/Dynamic/Brain/Mirror) | ✅ v0.6 |
+| Smart-mirror bridge (interface stub) | ✅ v0.6 |
 | Metal-shader orb polish | 🔜 |
-| Smart-mirror bridge | 🔜 (stub) |
 
 ---
 
