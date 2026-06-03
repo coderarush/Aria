@@ -91,7 +91,13 @@ actor GeminiClient {
                                                 history: history, context: context,
                                                 toolCatalog: toolCatalog)
                     var lastError: Error = GeminiError.emptyResponse
-                    for model in models {
+                    // 429 is a per-MINUTE free-tier quota shared across models, so
+                    // switching models doesn't help — WAITING does. Back off between
+                    // attempts (the API's own message says "retry in ~1.2s").
+                    let maxAttempts = 4
+                    var attempt = 0
+                    while attempt < maxAttempts {
+                        let model = models[min(attempt, models.count - 1)]
                         let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):streamGenerateContent?alt=sse&key=\(apiKey)")!
                         var req = URLRequest(url: url)
                         req.httpMethod = "POST"
@@ -109,8 +115,12 @@ actor GeminiClient {
                             continuation.finish()
                             return
                         } catch let GeminiError.http(status) where [404, 408, 425, 429, 500, 502, 503, 504].contains(status) {
-                            Log.trace("streamSend: \(model) http(\(status)); trying next model")
                             lastError = GeminiError.http(status)
+                            attempt += 1
+                            guard attempt < maxAttempts else { break }
+                            let backoff = min(1.2 * pow(2.0, Double(attempt - 1)), 6)  // 1.2, 2.4, 4.8s
+                            Log.trace("streamSend: \(model) http(\(status)); backoff \(backoff)s (attempt \(attempt)/\(maxAttempts))")
+                            try? await Task.sleep(nanoseconds: UInt64(backoff * 1_000_000_000))
                             continue
                         }
                     }
