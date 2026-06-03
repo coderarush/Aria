@@ -4,18 +4,19 @@ import AVFoundation
 /// Aria's settings window — sidebar layout.
 struct SettingsView: View {
     enum Section: String, CaseIterable, Identifiable {
-        case general = "General", voice = "Voice", apiKey = "API Key",
-             tools = "Tools", dynamic = "Dynamic", brain = "Brain", mirror = "Mirror"
+        case general = "General", voice = "Voice", conversation = "Conversation",
+             apiKey = "API Key", tools = "Tools", dynamic = "Dynamic", brain = "Brain", mirror = "Mirror"
         var id: String { rawValue }
         var icon: String {
             switch self {
-            case .general: return "gearshape"
-            case .voice:   return "speaker.wave.2"
-            case .apiKey:  return "key"
-            case .tools:   return "wrench.and.screwdriver"
-            case .dynamic: return "sparkles"
-            case .brain:   return "brain"
-            case .mirror:  return "rectangle.on.rectangle"
+            case .general:      return "gearshape"
+            case .voice:        return "speaker.wave.2"
+            case .conversation: return "bubble.left.and.bubble.right"
+            case .apiKey:       return "key"
+            case .tools:        return "wrench.and.screwdriver"
+            case .dynamic:      return "sparkles"
+            case .brain:        return "brain"
+            case .mirror:       return "rectangle.on.rectangle"
             }
         }
     }
@@ -41,13 +42,14 @@ struct SettingsView: View {
 
     @ViewBuilder private var detailView: some View {
         switch selection {
-        case .general: GeneralSettingsTab()
-        case .voice:   VoiceSettingsTab()
-        case .apiKey:  APIKeyTab()
-        case .tools:   ToolsTab()
-        case .dynamic: DynamicToolsTab()
-        case .brain:   BrainTab()
-        case .mirror:  MirrorTab()
+        case .general:      GeneralSettingsTab()
+        case .voice:        VoiceSettingsTab()
+        case .conversation: ConversationSettingsTab()
+        case .apiKey:       APIKeyTab()
+        case .tools:        ToolsTab()
+        case .dynamic:      DynamicToolsTab()
+        case .brain:        BrainTab()
+        case .mirror:       MirrorTab()
         }
     }
 }
@@ -117,6 +119,41 @@ struct GeneralSettingsTab: View {
                                  Int(ns.blueComponent * 255))
                 settings.accentChoiceRaw = "custom:\(hex)"
             })
+    }
+}
+
+// MARK: Conversation
+
+struct ConversationSettingsTab: View {
+    @StateObject private var settings = AppSettings.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Conversation")
+                .font(.title3.bold())
+            Text("How Aria listens and lets you interrupt.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 4)
+        .padding(.bottom, 8)
+
+        Form {
+            Section {
+                Toggle("Let me interrupt Aria (barge-in)", isOn: $settings.bargeInEnabled)
+                HStack {
+                    Text("Barge-in sensitivity")
+                    Slider(value: $settings.bargeInSensitivity, in: 0...1)
+                }
+                .disabled(!settings.bargeInEnabled)
+                HStack {
+                    Text("End conversation after silence")
+                    Slider(value: $settings.conversationSilenceTimeout, in: 5...20, step: 1)
+                    Text("\(Int(settings.conversationSilenceTimeout))s").monospacedDigit()
+                }
+            }
+        }
+        .formStyle(.grouped)
     }
 }
 

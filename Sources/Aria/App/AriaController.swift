@@ -192,6 +192,12 @@ final class AriaController {
 
     // MARK: Engine wiring
 
+    private func applyConversationSettings() {
+        // sensitivity 0…1 (1 = most sensitive) → threshold ~0.20 (loud) … 0.04 (sensitive)
+        let s = AppSettings.shared.bargeInSensitivity
+        wakeEngine.bargeInThreshold = Float(0.20 - s * 0.16)
+    }
+
     private func applyVoiceSettings() {
         let s = AppSettings.shared
         voice.enabled = s.voiceEnabled
@@ -214,6 +220,7 @@ final class AriaController {
             .receive(on: RunLoop.main)
             .sink { _ in refreshTheme() }
         applyVoiceSettings()
+        applyConversationSettings()
         voice.onStart = { [weak self] in
             self?.isSpeaking = true
             self?.wakeEngine.isSuspended = true
@@ -260,6 +267,7 @@ final class AriaController {
     // MARK: Barge-in
 
     private func handleBargeIn() {
+        guard AppSettings.shared.bargeInEnabled else { return }
         guard isSpeaking else { return }                                    // only while she's talking
         guard Date().timeIntervalSince(speechStartedAt) > 0.5 else { return } // arm-grace
         Log.trace("barge-in — user interrupted")
@@ -315,7 +323,7 @@ final class AriaController {
             self.isSpeaking = false
             self.wakeEngine.isSuspended = false        // resume listening for the next turn
             self.convSilenceTimer?.invalidate()
-            self.convSilenceTimer = Timer.scheduledTimer(withTimeInterval: 9, repeats: false) { [weak self] _ in
+            self.convSilenceTimer = Timer.scheduledTimer(withTimeInterval: AppSettings.shared.conversationSilenceTimeout, repeats: false) { [weak self] _ in
                 Task { @MainActor in self?.session?.end() }
             }
         }

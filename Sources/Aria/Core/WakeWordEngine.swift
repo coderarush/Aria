@@ -26,6 +26,10 @@ final class WakeWordEngine {
     var onError: ((String) -> Void)?
 
     private var bargeVAD = VoiceActivity(onsetFrames: 4)
+    /// Higher = less sensitive (needs louder speech to barge in).
+    var bargeInThreshold: Float = 0.08 {
+        didSet { bargeVAD = VoiceActivity(threshold: bargeInThreshold, onsetFrames: 4) }
+    }
     private var restartPending = false
 
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))

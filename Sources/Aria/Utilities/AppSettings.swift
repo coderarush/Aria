@@ -61,6 +61,9 @@ final class AppSettings: ObservableObject {
     @Published var geminiVoiceName: String { didSet { defaults.set(geminiVoiceName, forKey: K.geminiVoiceName) } }
     @Published var accentChoiceRaw: String { didSet { defaults.set(accentChoiceRaw, forKey: K.accentChoice) } }
     @Published var glowPaletteID: String { didSet { defaults.set(glowPaletteID, forKey: K.glowPaletteID) } }
+    @Published var bargeInEnabled: Bool { didSet { defaults.set(bargeInEnabled, forKey: K.bargeInEnabled) } }
+    @Published var bargeInSensitivity: Double { didSet { defaults.set(bargeInSensitivity, forKey: K.bargeInSensitivity) } }
+    @Published var conversationSilenceTimeout: Double { didSet { defaults.set(conversationSilenceTimeout, forKey: K.conversationSilenceTimeout) } }
 
     var accentChoice: AccentChoice {
         get { Theme.decodeChoice(accentChoiceRaw) }
@@ -86,6 +89,9 @@ final class AppSettings: ObservableObject {
         geminiVoiceName = defaults.string(forKey: K.geminiVoiceName) ?? "Kore"
         accentChoiceRaw = defaults.string(forKey: K.accentChoice) ?? "system"
         glowPaletteID = defaults.string(forKey: K.glowPaletteID) ?? "accent"
+        bargeInEnabled = defaults.object(forKey: K.bargeInEnabled) as? Bool ?? true
+        bargeInSensitivity = defaults.object(forKey: K.bargeInSensitivity) as? Double ?? 0.5
+        conversationSilenceTimeout = defaults.object(forKey: K.conversationSilenceTimeout) as? Double ?? 9
     }
 
     /// Register/unregister the app as a login item (SMAppService, macOS 13+).
@@ -116,5 +122,8 @@ final class AppSettings: ObservableObject {
         static let geminiVoiceName = "app.geminiVoiceName"
         static let accentChoice = "app.accentChoice"
         static let glowPaletteID = "app.glowPaletteID"
+        static let bargeInEnabled = "app.bargeInEnabled"
+        static let bargeInSensitivity = "app.bargeInSensitivity"
+        static let conversationSilenceTimeout = "app.conversationSilenceTimeout"
     }
 }
