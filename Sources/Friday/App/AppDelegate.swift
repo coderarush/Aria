@@ -13,6 +13,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.app.info("Friday launching")
+        // Preview mode — handled first so it never touches the Keychain (which
+        // can block on first run after an ad-hoc re-sign).
+        if ProcessInfo.processInfo.environment["FRIDAY_SHOW_ORB"] != nil
+            || FileManager.default.fileExists(atPath: "/tmp/friday_show_orb") {
+            setupStatusItem()
+            controller.startForScreenshot()
+            return
+        }
         migrateAPIKeyIfNeeded()
         setupStatusItem()
         controller.start()

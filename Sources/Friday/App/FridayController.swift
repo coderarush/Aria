@@ -21,6 +21,49 @@ final class FridayController {
         startListening()
     }
 
+    private var previewWindow: NSWindow?
+
+    /// Preview mode (used for screenshots/docs): shows the orb in a plain titled
+    /// window on a dark backdrop, without starting the mic so there is no TCC
+    /// prompt. The production orb lives in a borderless non-activating panel,
+    /// which doesn't capture cleanly; this window does. Triggered by the
+    /// `/tmp/friday_show_orb` sentinel or the `FRIDAY_SHOW_ORB` env var.
+    func startForScreenshot() {
+        // Defer off the launch call stack so the runloop is up before building
+        // the Metal-backed hosting view.
+        DispatchQueue.main.async { [weak self] in self?.buildPreviewWindow() }
+    }
+
+    private func buildPreviewWindow() {
+        orbViewModel.beginListening()
+        orbViewModel.updateAudioLevel(0.6)
+
+        let root = ZStack {
+            Color.black
+            OrbView(viewModel: orbViewModel)
+        }
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 420),
+            styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.title = "Friday — Orb Preview"
+        window.contentView = NSHostingView(rootView: root)
+        window.isReleasedWhenClosed = false
+        window.center()
+        window.level = .floating
+        previewWindow = window
+
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        // Publish the window number so a screenshot script can target it.
+        try? "\(window.windowNumber)".write(toFile: "/tmp/friday_window.txt", atomically: true, encoding: .utf8)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+            self?.orbViewModel.showResponse("**Friday** is online.\nSay *Hey Friday* to begin.")
+            self?.previewWindow?.orderFrontRegardless()
+        }
+    }
+
     // MARK: Behavioral learning
 
     private func configureLearning() {
@@ -126,7 +169,7 @@ final class FridayController {
     }
 
     private func positionPanel(_ panel: NSPanel) {
-        guard let screen = NSScreen.main else { return }
+        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
         let frame = screen.visibleFrame
         let size = panel.frame.size
         // Bottom-center.

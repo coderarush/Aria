@@ -48,6 +48,16 @@ struct OrbView: View {
 
     private var orb: some View {
         ZStack {
+            // SwiftUI base body — guarantees a visible orb even if the Metal
+            // layer fails to draw; the shader glow sits on top of this.
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [stateColor.opacity(0.95), stateColor.opacity(0.4)],
+                        center: .center, startRadius: 2, endRadius: orbSize * 0.6))
+                .frame(width: orbSize, height: orbSize)
+                .shadow(color: stateColor.opacity(0.6), radius: 18)
+
             // Metal-rendered procedural glow/pulse/plasma body.
             OrbMetalView(color: stateColor, audioLevel: viewModel.audioLevel, pulse: metalPulse)
                 .frame(width: orbSize * 1.9, height: orbSize * 1.9)
