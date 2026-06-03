@@ -58,6 +58,9 @@ final class WakeWordEngine {
     /// When true, incoming transcripts are ignored (used while a command is
     /// being processed so a stray "aria" can't interrupt or dismiss the orb).
     var isSuspended = false
+    /// When true, after a non-empty command finishes the engine stays in
+    /// .command mode (no re-wake required) for continuous multi-turn conversation.
+    var conversationActive = false
 
     // MARK: Lifecycle
 
@@ -242,23 +245,30 @@ final class WakeWordEngine {
 
     private func finishCommand() {
         let command = commandBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
-        mode = .wake
-        commandBuffer = ""
-        committedCommand = ""
-        Log.trace("finishCommand: '\(command)' → restarting wake session")
+        Log.trace("finishCommand: '\(command)' → conversationActive=\(conversationActive)")
         if command.isEmpty {
             onCommandEmpty?()          // let the UI dismiss the idle orb
         } else {
             onCommand?(command)
         }
-        // Fresh session so the next wake doesn't see this command's transcript.
-        // Retry on failure — swallowing the error here would leave wake dead
-        // after a command (the "works once then won't wake again" bug).
-        do { try beginRecognition() }
-        catch {
-            Log.trace("finishCommand beginRecognition failed: \(error.localizedDescription) — retrying")
-            scheduleRestart()
+        if conversationActive && !command.isEmpty {
+            mode = .command          // stay listening for the next turn, no re-wake
+        } else {
+            mode = .wake
         }
+        commandBuffer = ""
+        committedCommand = ""
+        do { try beginRecognition() }
+        catch { Log.trace("finishCommand beginRecognition failed: \(error.localizedDescription)"); scheduleRestart() }
+    }
+
+    /// Leave conversation mode and go back to wake-word listening.
+    func endConversation() {
+        conversationActive = false
+        mode = .wake
+        commandBuffer = ""; committedCommand = ""
+        silenceTimer?.invalidate()
+        do { try beginRecognition() } catch { scheduleRestart() }
     }
 
     private func stripWakePhrase(from lower: String, original: String) -> String {

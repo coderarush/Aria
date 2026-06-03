@@ -20,6 +20,8 @@ final class AriaController {
     /// auto-hides mid-utterance, so she can't hear herself and re-trigger.
     private var isSpeaking = false
     private var streamVoice: StreamingVoice!
+    private var session: ConversationSession?
+    private var convSilenceTimer: Timer?
 
     func start() {
         setupPanel()
@@ -221,15 +223,22 @@ final class AriaController {
                                      stopAll: { [weak self] in self?.voice.stop() })
         voice.onChunkFinished = { [weak self] in self?.streamVoice.chunkDidFinish() }
         wakeEngine.onWake = { [weak self] in
-            Log.trace("onWake — island listening")
-            self?.islandViewModel.beginListening()
+            guard let self else { return }
+            Log.trace("onWake — conversation start")
+            self.wakeEngine.conversationActive = true
+            self.session = ConversationSession(
+                onEnd: { [weak self] in self?.endConversation() },
+                onTurn: { [weak self] in self?.handleCommand($0) })
+            self.session?.start()
+            self.islandViewModel.beginListening()
         }
         wakeEngine.onAudioLevel = { [weak self] level in
             self?.islandViewModel.updateAudioLevel(level)
         }
         wakeEngine.onCommand = { [weak self] command in
-            Log.trace("onCommand fired: '\(command)'")
-            self?.handleCommand(command)
+            Log.trace("onCommand: '\(command)'")
+            self?.convSilenceTimer?.invalidate()      // user engaged; cancel end timer
+            self?.session?.userSaid(command)
         }
         wakeEngine.onCommandEmpty = { [weak self] in
             // Heard the wake word but no command — dismiss only if still listening.
@@ -273,7 +282,7 @@ final class AriaController {
     private func handleCommand(_ command: String) {
         let lower = command.lowercased()
         if lower.contains("dismiss") || lower.contains("thanks aria") || lower.contains("never mind") {
-            streamVoice.stop(); islandViewModel.dismiss(); return
+            streamVoice.stop(); session?.end(); return
         }
         wakeEngine.isSuspended = true
         isSpeaking = true
@@ -284,7 +293,11 @@ final class AriaController {
         streamVoice.onAllFinished = { [weak self] in
             guard let self else { return }
             self.isSpeaking = false
-            if !self.islandViewModel.isVisible { self.wakeEngine.isSuspended = false }
+            self.wakeEngine.isSuspended = false        // resume listening for the next turn
+            self.convSilenceTimer?.invalidate()
+            self.convSilenceTimer = Timer.scheduledTimer(withTimeInterval: 9, repeats: false) { [weak self] _ in
+                Task { @MainActor in self?.session?.end() }
+            }
         }
         Task { [weak self] in
             guard let self else { return }
@@ -301,6 +314,12 @@ final class AriaController {
                 self.islandViewModel.showResponse(self.islandViewModel.responseText)
             }
         }
+    }
+
+    private func endConversation() {
+        convSilenceTimer?.invalidate(); convSilenceTimer = nil
+        wakeEngine.endConversation()
+        islandViewModel.dismiss()
     }
 
     func toggleManually() {
