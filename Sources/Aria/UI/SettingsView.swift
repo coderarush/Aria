@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 
 /// Aria's settings window. Tabs map to the spec's settings sections.
 struct SettingsView: View {
@@ -16,6 +17,8 @@ struct SettingsView: View {
                 .tabItem { Label("Brain", systemImage: "brain") }
             MirrorTab()
                 .tabItem { Label("Mirror", systemImage: "rectangle.on.rectangle") }
+            VoiceSettingsTab()
+                .tabItem { Label("Voice", systemImage: "speaker.wave.2") }
         }
         .frame(width: 480, height: 420)
     }
@@ -179,5 +182,34 @@ struct MirrorTab: View {
     private func persist() {
         s.port = Int(portText) ?? 8765
         s.save()
+    }
+}
+
+// MARK: Voice
+
+struct VoiceSettingsTab: View {
+    @StateObject private var settings = AppSettings.shared
+    private let voices = AVSpeechSynthesisVoice.speechVoices()
+        .filter { $0.language.hasPrefix("en") }
+        .sorted { $0.name < $1.name }
+
+    var body: some View {
+        Form {
+            Toggle("Speak responses aloud", isOn: $settings.voiceEnabled)
+            Picker("Voice", selection: $settings.voiceIdentifier) {
+                Text("Automatic (best installed)").tag("")
+                ForEach(voices, id: \.identifier) { v in
+                    Text("\(v.name) (\(v.quality == .premium ? "Premium" : v.quality == .enhanced ? "Enhanced" : "Default"))")
+                        .tag(v.identifier)
+                }
+            }
+            HStack {
+                Text("Speaking rate")
+                Slider(value: $settings.voiceRate, in: 0...1, step: 0.05)
+            }
+            Text("Voices are on-device. Add Premium/Enhanced voices in System Settings → Accessibility → Spoken Content → System Voice → Manage Voices.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding()
     }
 }

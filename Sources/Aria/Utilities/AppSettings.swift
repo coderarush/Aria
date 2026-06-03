@@ -53,6 +53,9 @@ final class AppSettings: ObservableObject {
     @Published var disabledTools: Set<String> {
         didSet { defaults.set(Array(disabledTools), forKey: K.disabledTools) }
     }
+    @Published var voiceEnabled: Bool { didSet { defaults.set(voiceEnabled, forKey: K.voiceEnabled) } }
+    @Published var voiceIdentifier: String { didSet { defaults.set(voiceIdentifier, forKey: K.voiceIdentifier) } }
+    @Published var voiceRate: Double { didSet { defaults.set(voiceRate, forKey: K.voiceRate) } }
 
     private let defaults: UserDefaults
 
@@ -65,6 +68,9 @@ final class AppSettings: ObservableObject {
         launchAtLogin = defaults.bool(forKey: K.launchAtLogin)
         onboardingComplete = defaults.bool(forKey: K.onboardingComplete)
         disabledTools = Set(defaults.stringArray(forKey: K.disabledTools) ?? [])
+        voiceEnabled = defaults.object(forKey: K.voiceEnabled) as? Bool ?? true
+        voiceIdentifier = defaults.string(forKey: K.voiceIdentifier) ?? ""
+        voiceRate = defaults.object(forKey: K.voiceRate) as? Double ?? 0.5
     }
 
     /// Register/unregister the app as a login item (SMAppService, macOS 13+).
@@ -88,5 +94,8 @@ final class AppSettings: ObservableObject {
         static let launchAtLogin = "app.launchAtLogin"
         static let onboardingComplete = "app.onboardingComplete"
         static let disabledTools = "app.disabledTools"
+        static let voiceEnabled = "app.voiceEnabled"
+        static let voiceIdentifier = "app.voiceIdentifier"
+        static let voiceRate = "app.voiceRate"
     }
 }

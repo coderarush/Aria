@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import AVFoundation
 
 /// Top-level coordinator that owns the runtime engines and the Island panel, and
 /// wires wake → listen → think → respond. Lives for the app's lifetime.
@@ -177,7 +178,15 @@ final class AriaController {
 
     // MARK: Engine wiring
 
+    private func applyVoiceSettings() {
+        let s = AppSettings.shared
+        voice.enabled = s.voiceEnabled
+        voice.voiceIdentifier = s.voiceIdentifier.isEmpty ? nil : s.voiceIdentifier
+        voice.rate = Float(s.voiceRate) * (AVSpeechUtteranceMaximumSpeechRate - AVSpeechUtteranceMinimumSpeechRate) + AVSpeechUtteranceMinimumSpeechRate
+    }
+
     private func wireEngine() {
+        applyVoiceSettings()
         voice.onStart = { [weak self] in self?.wakeEngine.isSuspended = true }
         voice.onFinish = { [weak self] in
             guard let self else { return }
@@ -259,6 +268,7 @@ final class AriaController {
                 islandViewModel.showError(response.message)
             } else {
                 islandViewModel.showResponse(response.message)
+                applyVoiceSettings()
                 voice.speak(response.message)
             }
             Log.trace("island updated, state=\(String(describing: islandViewModel.state))")
