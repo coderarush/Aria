@@ -3,13 +3,13 @@ import Foundation
 /// Central registry of built-in static tools, keyed by `name`. The orchestrator
 /// looks tools up here first; misses fall back to the DynamicToolFactory.
 actor ToolRegistry {
-    private var tools: [String: FridayTool] = [:]
+    private var tools: [String: AriaTool] = [:]
 
-    init(tools: [FridayTool] = ToolRegistry.builtins()) {
+    init(tools: [AriaTool] = ToolRegistry.builtins()) {
         for tool in tools { self.tools[type(of: tool).name] = tool }
     }
 
-    func tool(named name: String) -> FridayTool? { tools[name] }
+    func tool(named name: String) -> AriaTool? { tools[name] }
     func contains(_ name: String) -> Bool { tools[name] != nil }
     func allNames() -> [String] { tools.keys.sorted() }
 
@@ -22,7 +22,7 @@ actor ToolRegistry {
     }
 
     /// The default built-in tool set.
-    static func builtins() -> [FridayTool] {
+    static func builtins() -> [AriaTool] {
         [
             ShellTool(),
             AppleScriptTool(),

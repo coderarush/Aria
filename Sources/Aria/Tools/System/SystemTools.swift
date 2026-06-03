@@ -2,7 +2,7 @@ import Foundation
 import AppKit
 
 /// Run a bash command and capture output. 30s timeout.
-struct ShellTool: FridayTool {
+struct ShellTool: AriaTool {
     static let name = "shell"
     static let description = "Run a bash command. Input: {command}. Returns stdout/stderr."
 
@@ -18,7 +18,7 @@ struct ShellTool: FridayTool {
 }
 
 /// Execute AppleScript and return its result.
-struct AppleScriptTool: FridayTool {
+struct AppleScriptTool: AriaTool {
     static let name = "applescript"
     static let description = "Run AppleScript to control Mac apps. Input: {script}."
 
@@ -42,7 +42,7 @@ struct AppleScriptTool: FridayTool {
 }
 
 /// Create or overwrite a file. Destructive (overwrite).
-struct FileWriteTool: FridayTool {
+struct FileWriteTool: AriaTool {
     static let name = "file_write"
     static let description = "Write text to a file (creates/overwrites). Input: {path, content}."
     var isDestructive: Bool { true }
@@ -63,7 +63,7 @@ struct FileWriteTool: FridayTool {
 }
 
 /// Read a file's contents.
-struct FileReadTool: FridayTool {
+struct FileReadTool: AriaTool {
     static let name = "file_read"
     static let description = "Read a text file. Input: {path}. Returns contents."
 
@@ -80,7 +80,7 @@ struct FileReadTool: FridayTool {
 }
 
 /// Read or write the system clipboard.
-struct ClipboardTool: FridayTool {
+struct ClipboardTool: AriaTool {
     static let name = "clipboard"
     static let description = "Read or write the clipboard. Input: {action: read|write, text?}."
 
@@ -101,7 +101,7 @@ struct ClipboardTool: FridayTool {
 }
 
 /// Post a macOS notification (via osascript, no entitlement needed).
-struct NotificationTool: FridayTool {
+struct NotificationTool: AriaTool {
     static let name = "notify"
     static let description = "Show a macOS notification. Input: {title, message}."
 

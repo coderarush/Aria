@@ -3,21 +3,21 @@ import XCTest
 
 final class ModelsTests: XCTestCase {
 
-    func testFridayResponseRoundTrip() throws {
-        let original = FridayResponse(
+    func testAriaResponseRoundTrip() throws {
+        let original = AriaResponse(
             type: .action,
             message: "Opening Safari",
             confidence: 0.77,
             actions: [AgentAction(tool: "open_app", input: ["name": "Safari"])],
             followup: "Anything else?")
         let data = try JSONEncoder().encode(original)
-        let decoded = try JSONDecoder().decode(FridayResponse.self, from: data)
+        let decoded = try JSONDecoder().decode(AriaResponse.self, from: data)
         XCTAssertEqual(decoded, original)
     }
 
     func testKindRawValues() {
-        XCTAssertEqual(FridayResponse.Kind.multiAction.rawValue, "multi_action")
-        XCTAssertEqual(FridayResponse.Kind.answer.rawValue, "answer")
+        XCTAssertEqual(AriaResponse.Kind.multiAction.rawValue, "multi_action")
+        XCTAssertEqual(AriaResponse.Kind.answer.rawValue, "answer")
     }
 
     func testConversationTurnCodable() throws {

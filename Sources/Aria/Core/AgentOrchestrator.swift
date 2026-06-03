@@ -38,7 +38,7 @@ actor AgentOrchestrator {
     }
 
     /// Process a spoken command and return what to display.
-    func handle(command: String, privacyMode: Bool = false) async -> FridayResponse {
+    func handle(command: String, privacyMode: Bool = false) async -> AriaResponse {
         Log.agent.info("Handling command: \(command, privacy: .public)")
 
         // Local fast-paths that don't need the model.
@@ -72,13 +72,13 @@ actor AgentOrchestrator {
             return final
         } catch GeminiClient.GeminiError.missingAPIKey {
             Log.trace("orchestrator: MISSING API KEY")
-            return FridayResponse(type: .answer,
+            return AriaResponse(type: .answer,
                 message: "I don't have a Gemini API key yet. Add one in Settings.",
                 confidence: 1.0)
         } catch {
             Log.trace("orchestrator: Gemini FAILED: \(error)")
             Log.agent.error("Gemini request failed: \(error.localizedDescription)")
-            return FridayResponse(type: .answer,
+            return AriaResponse(type: .answer,
                 message: "Something went wrong: \(error.localizedDescription)",
                 confidence: 0.0)
         }
@@ -89,8 +89,8 @@ actor AgentOrchestrator {
     /// Execute the actions Gemini requested. Each step's output feeds the next
     /// step's context (sequential pipeline). Unknown tools fall back to dynamic
     /// code generation. Static tools land in a later pass.
-    private func routeActions(_ response: FridayResponse,
-                              context: GeminiClient.SystemContext) async -> FridayResponse {
+    private func routeActions(_ response: AriaResponse,
+                              context: GeminiClient.SystemContext) async -> AriaResponse {
         switch response.type {
         case .answer, .clarify:
             return response
@@ -103,7 +103,7 @@ actor AgentOrchestrator {
                 priorOutput = result.output
                 if !result.success { break }
             }
-            return FridayResponse(
+            return AriaResponse(
                 type: .answer,
                 message: transcript,
                 confidence: response.confidence,
@@ -202,7 +202,7 @@ actor AgentOrchestrator {
 
     // MARK: Local shortcuts
 
-    private func localShortcut(for command: String) -> FridayResponse? {
+    private func localShortcut(for command: String) -> AriaResponse? {
         let c = command.lowercased()
         if c.contains("what did i ask") || c.contains("earlier") {
             return nil  // handled by Gemini with history context for now
@@ -212,7 +212,7 @@ actor AgentOrchestrator {
 
     // MARK: Persistence
 
-    private func record(command: String, response: FridayResponse) async {
+    private func record(command: String, response: AriaResponse) async {
         await memory.append(ConversationTurn(
             transcript: command,
             responseMessage: response.message,

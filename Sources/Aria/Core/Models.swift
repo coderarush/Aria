@@ -2,7 +2,7 @@ import Foundation
 
 /// Structured response Friday expects back from Gemini. The protocol is real
 /// from day 1 even though the slice only acts on `.answer` / `.clarify`.
-struct FridayResponse: Codable, Equatable {
+struct AriaResponse: Codable, Equatable {
     enum Kind: String, Codable {
         case answer
         case action
@@ -44,7 +44,7 @@ struct FridayResponse: Codable, Equatable {
 }
 
 /// A single requested action. In the slice these are parsed but routed to a
-/// "not yet implemented" stub; later passes map `tool` to real FridayTools.
+/// "not yet implemented" stub; later passes map `tool` to real AriaTools.
 struct AgentAction: Codable, Equatable {
     let tool: String
     let input: [String: String]
@@ -61,13 +61,13 @@ struct ConversationTurn: Codable, Identifiable, Equatable {
     let timestamp: Date
     let transcript: String
     let responseMessage: String
-    let responseType: FridayResponse.Kind
+    let responseType: AriaResponse.Kind
 
     init(id: UUID = UUID(),
          timestamp: Date = Date(),
          transcript: String,
          responseMessage: String,
-         responseType: FridayResponse.Kind) {
+         responseType: AriaResponse.Kind) {
         self.id = id
         self.timestamp = timestamp
         self.transcript = transcript

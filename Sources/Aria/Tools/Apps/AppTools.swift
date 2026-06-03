@@ -2,7 +2,7 @@ import Foundation
 import AppKit
 
 /// Open an application by name.
-struct OpenAppTool: FridayTool {
+struct OpenAppTool: AriaTool {
     static let name = "open_app"
     static let description = "Open an application by name. Input: {name}."
 
@@ -36,7 +36,7 @@ struct OpenAppTool: FridayTool {
 }
 
 /// Open a URL in the default browser.
-struct BrowserTool: FridayTool {
+struct BrowserTool: AriaTool {
     static let name = "open_url"
     static let description = "Open a URL in the default browser. Input: {url}."
 

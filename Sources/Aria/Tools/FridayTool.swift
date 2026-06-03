@@ -2,7 +2,7 @@ import Foundation
 
 /// A unit of capability Friday can invoke. Static tools (Shell, Mail, …) and the
 /// dynamic tool factory both ultimately produce a `ToolResult`.
-protocol FridayTool {
+protocol AriaTool {
     /// Stable identifier the model references in `actions[].tool`.
     static var name: String { get }
     /// One line the model reads to decide when to use this tool.
@@ -13,7 +13,7 @@ protocol FridayTool {
     func run(input: [String: String]) async throws -> ToolResult
 }
 
-extension FridayTool {
+extension AriaTool {
     var isDestructive: Bool { false }
 }
 

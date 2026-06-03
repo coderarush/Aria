@@ -1,7 +1,7 @@
 import Foundation
 
 /// Search the web via DuckDuckGo's free Instant Answer API (no key).
-struct WebSearchTool: FridayTool {
+struct WebSearchTool: AriaTool {
     static let name = "web_search"
     static let description = "Search the web (DuckDuckGo instant answers). Input: {query}."
 
@@ -39,7 +39,7 @@ struct WebSearchTool: FridayTool {
 }
 
 /// Fetch a webpage and return readable text (HTML stripped).
-struct WebFetchTool: FridayTool {
+struct WebFetchTool: AriaTool {
     static let name = "web_fetch"
     static let description = "Fetch a webpage and return readable text. Input: {url}."
 

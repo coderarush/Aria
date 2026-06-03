@@ -3,14 +3,14 @@ import XCTest
 
 final class GeminiClientTests: XCTestCase {
 
-    /// Gemini envelope wrapping a well-formed FridayResponse JSON string.
+    /// Gemini envelope wrapping a well-formed AriaResponse JSON string.
     func testDecodeWellFormedResponse() throws {
         let inner = #"{"type":"answer","message":"Hello there","confidence":0.9,"actions":[],"followup":null}"#
         let envelope = """
         { "candidates": [ { "content": { "parts": [ { "text": \(jsonString(inner)) } ] } } ] }
         """
         let data = Data(envelope.utf8)
-        let response = try GeminiClient.decodeFridayResponse(from: data)
+        let response = try GeminiClient.decodeAriaResponse(from: data)
         XCTAssertEqual(response.type, .answer)
         XCTAssertEqual(response.message, "Hello there")
         XCTAssertEqual(response.confidence, 0.9, accuracy: 0.0001)
@@ -22,7 +22,7 @@ final class GeminiClientTests: XCTestCase {
         let envelope = """
         { "candidates": [ { "content": { "parts": [ { "text": \(jsonString(inner)) } ] } } ] }
         """
-        let response = try GeminiClient.decodeFridayResponse(from: Data(envelope.utf8))
+        let response = try GeminiClient.decodeAriaResponse(from: Data(envelope.utf8))
         XCTAssertEqual(response.type, .multiAction)
         XCTAssertEqual(response.actions.first?.tool, "open_app")
         XCTAssertEqual(response.actions.first?.input["name"], "Safari")
@@ -33,7 +33,7 @@ final class GeminiClientTests: XCTestCase {
         let envelope = """
         { "candidates": [ { "content": { "parts": [ { "text": "just some text" } ] } } ] }
         """
-        let response = try GeminiClient.decodeFridayResponse(from: Data(envelope.utf8))
+        let response = try GeminiClient.decodeAriaResponse(from: Data(envelope.utf8))
         XCTAssertEqual(response.type, .answer)
         XCTAssertEqual(response.message, "just some text")
     }
@@ -44,7 +44,7 @@ final class GeminiClientTests: XCTestCase {
         let envelope = """
         { "candidates": [ { "content": { "parts": [ { "text": \(jsonString(inner)) } ] } } ] }
         """
-        let response = try GeminiClient.decodeFridayResponse(from: Data(envelope.utf8))
+        let response = try GeminiClient.decodeAriaResponse(from: Data(envelope.utf8))
         XCTAssertEqual(response.type, .clarify)
         XCTAssertEqual(response.confidence, 1.0)
         XCTAssertTrue(response.actions.isEmpty)
@@ -52,7 +52,7 @@ final class GeminiClientTests: XCTestCase {
 
     func testEmptyEnvelopeThrows() {
         let data = Data("{}".utf8)
-        XCTAssertThrowsError(try GeminiClient.decodeFridayResponse(from: data))
+        XCTAssertThrowsError(try GeminiClient.decodeAriaResponse(from: data))
     }
 
     // Encode a string as a JSON string literal (with quotes + escaping).

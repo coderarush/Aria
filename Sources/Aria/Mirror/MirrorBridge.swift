@@ -36,7 +36,7 @@ final class MirrorBridge {
     }
 
     /// Push a response to the connected mirror for display.
-    func sendResponse(_ response: FridayResponse) {
+    func sendResponse(_ response: AriaResponse) {
         // TODO: encode `response` and send it over the active WebSocket so the
         // mirror can render the orb animation + response text.
         Log.app.debug("MirrorBridge.sendResponse — not yet implemented")

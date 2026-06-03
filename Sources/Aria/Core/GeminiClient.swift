@@ -24,7 +24,7 @@ actor GeminiClient {
     private let apiKeyProvider: () -> String?
 
     // 30-second identical-request cache.
-    private struct CacheEntry { let response: FridayResponse; let at: Date }
+    private struct CacheEntry { let response: AriaResponse; let at: Date }
     private var cache: [String: CacheEntry] = [:]
     private let cacheTTL: TimeInterval = 30
 
@@ -38,12 +38,12 @@ actor GeminiClient {
         self.apiKeyProvider = apiKeyProvider
     }
 
-    /// Send a turn to Gemini and decode the structured FridayResponse.
+    /// Send a turn to Gemini and decode the structured AriaResponse.
     func send(transcript: String,
               screenshotJPEG: Data?,
               history: [ConversationTurn],
               context: SystemContext,
-              toolCatalog: String = "") async throws -> FridayResponse {
+              toolCatalog: String = "") async throws -> AriaResponse {
 
         guard let apiKey = apiKeyProvider(), !apiKey.isEmpty else {
             throw GeminiError.missingAPIKey
@@ -63,7 +63,7 @@ actor GeminiClient {
         let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent?key=\(apiKey)")!
 
         let data = try await performWithRetry(url: url, body: body)
-        let response = try Self.decodeFridayResponse(from: data)
+        let response = try Self.decodeAriaResponse(from: data)
 
         cache[cacheKey] = CacheEntry(response: response, at: Date())
         return response
@@ -212,8 +212,8 @@ actor GeminiClient {
     // MARK: Response decoding
 
     /// Extract the model text from Gemini's envelope, then decode the inner
-    /// FridayResponse JSON. Falls back to wrapping raw text as an `.answer`.
-    static func decodeFridayResponse(from data: Data) throws -> FridayResponse {
+    /// AriaResponse JSON. Falls back to wrapping raw text as an `.answer`.
+    static func decodeAriaResponse(from data: Data) throws -> AriaResponse {
         guard
             let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let candidates = root["candidates"] as? [[String: Any]],
@@ -226,11 +226,11 @@ actor GeminiClient {
         }
 
         if let inner = text.data(using: .utf8),
-           let decoded = try? JSONDecoder().decode(FridayResponse.self, from: inner) {
+           let decoded = try? JSONDecoder().decode(AriaResponse.self, from: inner) {
             return decoded
         }
         // Model didn't honor JSON mode — surface its text as a plain answer.
-        return FridayResponse(type: .answer, message: text)
+        return AriaResponse(type: .answer, message: text)
     }
 
     private static func cacheKey(transcript: String, image: Data?) -> String {
