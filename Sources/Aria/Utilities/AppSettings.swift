@@ -89,7 +89,10 @@ final class AppSettings: ObservableObject {
         geminiVoiceName = defaults.string(forKey: K.geminiVoiceName) ?? "Kore"
         accentChoiceRaw = defaults.string(forKey: K.accentChoice) ?? "system"
         glowPaletteID = defaults.string(forKey: K.glowPaletteID) ?? "accent"
-        bargeInEnabled = defaults.object(forKey: K.bargeInEnabled) as? Bool ?? true
+        // Default OFF: barge-in needs echo cancellation (currently disabled because
+        // it broke mic recognition); without AEC the mic hears Aria's own voice and
+        // would false-trigger. Re-enable once AEC is robust.
+        bargeInEnabled = defaults.object(forKey: K.bargeInEnabled) as? Bool ?? false
         bargeInSensitivity = defaults.object(forKey: K.bargeInSensitivity) as? Double ?? 0.5
         conversationSilenceTimeout = defaults.object(forKey: K.conversationSilenceTimeout) as? Double ?? 9
     }
