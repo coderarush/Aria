@@ -4,7 +4,7 @@ import AppKit
 /// Top-level coordinator that owns the runtime engines and the orb panel, and
 /// wires wake → listen → think → respond. Lives for the app's lifetime.
 @MainActor
-final class FridayController {
+final class AriaController {
 
     let orbViewModel = OrbViewModel()
     private let wakeEngine = WakeWordEngine()

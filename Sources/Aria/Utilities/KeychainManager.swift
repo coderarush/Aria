@@ -8,7 +8,7 @@ enum KeychainManager {
         case dataEncodingFailed
     }
 
-    private static let service = "com.friday.agent"
+    private static let service = "com.aria.agent"
 
     /// Save (or overwrite) a string value for `account`.
     static func save(_ value: String, account: String) throws {

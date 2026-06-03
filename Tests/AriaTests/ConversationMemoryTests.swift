@@ -1,5 +1,5 @@
 import XCTest
-@testable import Friday
+@testable import Aria
 
 final class ConversationMemoryTests: XCTestCase {
 

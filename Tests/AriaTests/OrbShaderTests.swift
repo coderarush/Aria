@@ -1,7 +1,7 @@
 import XCTest
 import Metal
 import SwiftUI
-@testable import Friday
+@testable import Aria
 
 final class OrbShaderTests: XCTestCase {
 

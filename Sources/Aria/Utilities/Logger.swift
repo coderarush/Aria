@@ -2,9 +2,9 @@ import Foundation
 import os
 
 /// Unified logging for Friday. Thin wrapper over `os.Logger` with per-subsystem
-/// categories so console filtering is easy (`subsystem:com.friday.agent`).
+/// categories so console filtering is easy (`subsystem:com.aria.agent`).
 enum Log {
-    private static let subsystem = "com.friday.agent"
+    private static let subsystem = "com.aria.agent"
 
     static let app    = Logger(subsystem: subsystem, category: "app")
     static let wake   = Logger(subsystem: subsystem, category: "wake")

@@ -1,14 +1,14 @@
 import AppKit
 import SwiftUI
 
-/// Sets up the menu-bar status item and owns the FridayController. The app has
+/// Sets up the menu-bar status item and owns the AriaController. The app has
 /// `LSUIElement = true`, so there is no Dock icon — the ⬡ menu-bar item is the
 /// only chrome.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var statusItem: NSStatusItem?
-    private let controller = FridayController()
+    private let controller = AriaController()
     private var onboardingWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
