@@ -192,10 +192,17 @@ final class AriaController {
     }
 
     private func wireEngine() {
-        islandViewModel.accent = AppSettings.shared.accentColor
-        settingsCancellable = AppSettings.shared.$accentChoiceRaw
+        func refreshTheme() {
+            islandViewModel.accent = AppSettings.shared.accentColor
+            islandViewModel.glowColors = Theme.glowColors(id: AppSettings.shared.glowPaletteID,
+                                                          accent: AppSettings.shared.accentColor)
+        }
+        refreshTheme()
+        settingsCancellable = Publishers.Merge(
+            AppSettings.shared.$accentChoiceRaw.map { _ in () },
+            AppSettings.shared.$glowPaletteID.map { _ in () })
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.islandViewModel.accent = AppSettings.shared.accentColor }
+            .sink { _ in refreshTheme() }
         applyVoiceSettings()
         voice.onStart = { [weak self] in
             self?.isSpeaking = true

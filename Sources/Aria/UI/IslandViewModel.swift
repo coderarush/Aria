@@ -14,6 +14,7 @@ final class IslandViewModel: ObservableObject {
     @Published var audioLevel: Float = 0
     @Published var isVisible: Bool = false
     @Published var accent: Color = .accentColor
+    @Published var glowColors: [Color] = []
 
     /// Fired when the pill wants the hosting panel to show/hide.
     var onVisibilityChange: ((Bool) -> Void)?

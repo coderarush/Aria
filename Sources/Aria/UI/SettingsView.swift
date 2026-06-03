@@ -86,6 +86,9 @@ struct GeneralSettingsTab: View {
                     Text("Preview").foregroundStyle(.secondary)
                     Capsule().fill(settings.accentColor).frame(width: 60, height: 10)
                 }
+                Picker("Aurora palette", selection: $settings.glowPaletteID) {
+                    ForEach(Theme.glowPalettes, id: \.id) { Text($0.name).tag($0.id) }
+                }
             } header: { Text("Accent Color") }
 
             Section {

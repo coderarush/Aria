@@ -58,6 +58,7 @@ final class AppSettings: ObservableObject {
     @Published var voiceIdentifier: String { didSet { defaults.set(voiceIdentifier, forKey: K.voiceIdentifier) } }
     @Published var voiceRate: Double { didSet { defaults.set(voiceRate, forKey: K.voiceRate) } }
     @Published var accentChoiceRaw: String { didSet { defaults.set(accentChoiceRaw, forKey: K.accentChoice) } }
+    @Published var glowPaletteID: String { didSet { defaults.set(glowPaletteID, forKey: K.glowPaletteID) } }
 
     var accentChoice: AccentChoice {
         get { Theme.decodeChoice(accentChoiceRaw) }
@@ -80,6 +81,7 @@ final class AppSettings: ObservableObject {
         voiceIdentifier = defaults.string(forKey: K.voiceIdentifier) ?? ""
         voiceRate = defaults.object(forKey: K.voiceRate) as? Double ?? 0.5
         accentChoiceRaw = defaults.string(forKey: K.accentChoice) ?? "system"
+        glowPaletteID = defaults.string(forKey: K.glowPaletteID) ?? "accent"
     }
 
     /// Register/unregister the app as a login item (SMAppService, macOS 13+).
@@ -107,5 +109,6 @@ final class AppSettings: ObservableObject {
         static let voiceIdentifier = "app.voiceIdentifier"
         static let voiceRate = "app.voiceRate"
         static let accentChoice = "app.accentChoice"
+        static let glowPaletteID = "app.glowPaletteID"
     }
 }

@@ -58,4 +58,28 @@ enum Theme {
         if raw.hasPrefix("custom:") { return .custom(hex: String(raw.dropFirst(7))) }
         return .system
     }
+
+    /// Multi-color glow palettes for the aurora. "accent" (empty) uses the single
+    /// accent color; the others are curated harmonious multi-hue sets.
+    static let glowPalettes: [(id: String, name: String, colors: [Color])] = [
+        ("accent", "Accent", []),
+        ("aurora", "Aurora", [
+            Color(red: 0.13, green: 0.85, blue: 0.66), Color(red: 0.25, green: 0.55, blue: 1.0),
+            Color(red: 0.55, green: 0.40, blue: 0.95), Color(red: 0.20, green: 0.85, blue: 0.55)]),
+        ("sunset", "Sunset", [
+            Color(red: 1.0, green: 0.55, blue: 0.25), Color(red: 0.98, green: 0.35, blue: 0.55),
+            Color(red: 0.70, green: 0.30, blue: 0.85), Color(red: 1.0, green: 0.72, blue: 0.32)]),
+        ("ocean", "Ocean", [
+            Color(red: 0.10, green: 0.55, blue: 0.95), Color(red: 0.10, green: 0.80, blue: 0.85),
+            Color(red: 0.25, green: 0.45, blue: 0.90), Color(red: 0.15, green: 0.70, blue: 0.78)]),
+        ("mono", "Mono", [
+            Color(red: 0.95, green: 0.96, blue: 1.0), Color(red: 0.62, green: 0.66, blue: 0.78),
+            Color(red: 0.85, green: 0.88, blue: 0.96)]),
+    ]
+
+    /// Resolve the blob colors for a palette id; "accent" → the single accent.
+    static func glowColors(id: String, accent: Color) -> [Color] {
+        if let p = glowPalettes.first(where: { $0.id == id }), !p.colors.isEmpty { return p.colors }
+        return [accent]
+    }
 }
