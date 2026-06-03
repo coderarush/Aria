@@ -113,7 +113,7 @@ Grant these in **System Settings → Privacy & Security**.
 |---|---|
 | "Hey Aria, what's on my screen?" | Captures screen, describes it |
 | "Hey Aria, summarize this page" | Reads the screen, summarizes |
-| "Hey Aria, dismiss" / "thanks Aria" | Hides the orb |
+| "Hey Aria, dismiss" / "thanks Aria" | Hides the pill |
 
 As the tool system lands, Aria will open apps, write files, send mail, run
 code, search the web, and more.
@@ -127,7 +127,7 @@ Sources/Aria/
 ├── App/        AriaApp, AppDelegate (menu bar), AriaController (wiring)
 ├── Core/       WakeWordEngine, ScreenCaptureEngine, GeminiClient,
 │               AgentOrchestrator, ConversationMemory, Models
-├── UI/         OrbView, OrbViewModel (state machine), ResponseCard, WaveformView
+├── UI/         IslandView, IslandViewModel (state machine), IslandPanel, NotchGeometry, WaveformView
 └── Utilities/  KeychainManager, PermissionsManager, Logger
 ```
 

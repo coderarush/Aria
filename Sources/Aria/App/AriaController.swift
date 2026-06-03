@@ -16,6 +16,9 @@ final class AriaController {
     private var panel: IslandPanel?
     private var learningTimer: Timer?
     private var settingsCancellable: AnyCancellable?
+    /// True while Aria is speaking; keeps wake suspended even if the pill
+    /// auto-hides mid-utterance, so she can't hear herself and re-trigger.
+    private var isSpeaking = false
 
     func start() {
         setupPanel()
@@ -158,9 +161,12 @@ final class AriaController {
         self.panel = panel
 
         islandViewModel.onVisibilityChange = { [weak self] visible in
-            self?.setPanelVisible(visible)
-            if !visible {
-                self?.wakeEngine.isSuspended = false
+            guard let self else { return }
+            self.setPanelVisible(visible)
+            // Re-arm wake only when the pill is hidden AND Aria isn't still
+            // speaking — otherwise a long spoken reply could re-trigger her.
+            if !visible && !self.isSpeaking {
+                self.wakeEngine.isSuspended = false
                 Log.trace("island hidden → wake re-armed (isSuspended=false)")
             }
         }
@@ -193,11 +199,14 @@ final class AriaController {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.islandViewModel.accent = AppSettings.shared.accentColor }
         applyVoiceSettings()
-        voice.onStart = { [weak self] in self?.wakeEngine.isSuspended = true }
+        voice.onStart = { [weak self] in
+            self?.isSpeaking = true
+            self?.wakeEngine.isSuspended = true
+        }
         voice.onFinish = { [weak self] in
             guard let self else { return }
-            // Resume listening only if the pill has gone idle; otherwise the
-            // normal visibility handler re-arms on dismiss.
+            self.isSpeaking = false
+            // If the pill already hid while Aria was talking, re-arm wake now.
             if !self.islandViewModel.isVisible { self.wakeEngine.isSuspended = false }
         }
         wakeEngine.onWake = { [weak self] in
@@ -254,6 +263,7 @@ final class AriaController {
         // Dismissal phrases.
         let lower = command.lowercased()
         if lower.contains("dismiss") || lower.contains("thanks aria") || lower.contains("never mind") {
+            voice.stop()
             islandViewModel.dismiss()
             return
         }
