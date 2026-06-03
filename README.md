@@ -17,6 +17,21 @@ for the Mac — extensible, private, and fully under your control.
 
 ---
 
+## Install
+
+macOS (Apple Silicon or Intel). One line in Terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/coderarush/Aria/main/install.sh | bash
+```
+
+This builds Aria from source, installs it to `/Applications`, and registers a
+login agent so it **auto-starts and runs in the background** — no terminal kept
+open. Requires Xcode Command Line Tools (`xcode-select --install`). On first
+launch, allow Microphone / Speech Recognition / Screen Recording, then open
+Settings to add a free [Gemini API key](https://aistudio.google.com) and install
+a free **Premium** voice from the Voice tab for the most natural speech.
+
 ## ✨ Features
 
 - 🎙️ **"Hey Aria" wake word** — always-on, on-device (`SFSpeechRecognizer`), zero cloud listening
