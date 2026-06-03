@@ -8,6 +8,7 @@ final class AriaController {
 
     let islandViewModel = IslandViewModel()
     private let wakeEngine = WakeWordEngine()
+    private let voice = VoiceEngine()
     private let orchestrator = AgentOrchestrator()
     private let patternEngine = PatternEngine()
     private var panel: IslandPanel?
@@ -177,6 +178,13 @@ final class AriaController {
     // MARK: Engine wiring
 
     private func wireEngine() {
+        voice.onStart = { [weak self] in self?.wakeEngine.isSuspended = true }
+        voice.onFinish = { [weak self] in
+            guard let self else { return }
+            // Resume listening only if the pill has gone idle; otherwise the
+            // normal visibility handler re-arms on dismiss.
+            if !self.islandViewModel.isVisible { self.wakeEngine.isSuspended = false }
+        }
         wakeEngine.onWake = { [weak self] in
             Log.trace("onWake — island listening")
             self?.islandViewModel.beginListening()
@@ -251,6 +259,7 @@ final class AriaController {
                 islandViewModel.showError(response.message)
             } else {
                 islandViewModel.showResponse(response.message)
+                voice.speak(response.message)
             }
             Log.trace("island updated, state=\(String(describing: islandViewModel.state))")
         }
