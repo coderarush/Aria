@@ -190,6 +190,10 @@ final class FridayController {
         wakeEngine.onCommand = { [weak self] command in
             self?.handleCommand(command)
         }
+        wakeEngine.onCommandEmpty = { [weak self] in
+            // Heard the wake word but no command — fade the orb back out.
+            self?.orbViewModel.dismiss()
+        }
         wakeEngine.onError = { [weak self] message in
             self?.orbViewModel.beginListening()
             self?.orbViewModel.showError(message)

@@ -17,6 +17,8 @@ final class WakeWordEngine {
     // Callbacks (delivered on the main actor).
     var onWake: (() -> Void)?
     var onCommand: ((String) -> Void)?
+    /// Fired when the wake phrase was heard but no command followed.
+    var onCommandEmpty: (() -> Void)?
     var onAudioLevel: ((Float) -> Void)?
     /// Surfaced setup/recognition failures (shown on the orb).
     var onError: ((String) -> Void)?
@@ -167,10 +169,12 @@ final class WakeWordEngine {
 
     private func enterCommandMode(initialTranscript: String) {
         mode = .command
+        // Keep the SAME recognition session running — its transcription is
+        // cumulative, so a command spoken in the same breath as the wake phrase
+        // ("Hey Friday, open Spotify") is preserved. stripWakePhrase removes the
+        // wake words. Restarting here would discard the command already spoken.
         commandBuffer = stripWakePhrase(from: initialTranscript, original: initialTranscript)
         onWake?()
-        // Fresh recognition session so leftover wake audio doesn't pollute the command.
-        try? beginRecognition()
         resetSilenceTimer()
     }
 
@@ -185,10 +189,12 @@ final class WakeWordEngine {
         let command = commandBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
         mode = .wake
         commandBuffer = ""
-        if !command.isEmpty {
+        if command.isEmpty {
+            onCommandEmpty?()          // let the UI dismiss the idle orb
+        } else {
             onCommand?(command)
         }
-        // Resume plain wake listening.
+        // Fresh session so the next wake doesn't see this command's transcript.
         try? beginRecognition()
     }
 
