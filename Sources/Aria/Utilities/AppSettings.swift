@@ -57,6 +57,8 @@ final class AppSettings: ObservableObject {
     @Published var voiceEnabled: Bool { didSet { defaults.set(voiceEnabled, forKey: K.voiceEnabled) } }
     @Published var voiceIdentifier: String { didSet { defaults.set(voiceIdentifier, forKey: K.voiceIdentifier) } }
     @Published var voiceRate: Double { didSet { defaults.set(voiceRate, forKey: K.voiceRate) } }
+    @Published var voiceEngineKind: String { didSet { defaults.set(voiceEngineKind, forKey: K.voiceEngineKind) } }
+    @Published var geminiVoiceName: String { didSet { defaults.set(geminiVoiceName, forKey: K.geminiVoiceName) } }
     @Published var accentChoiceRaw: String { didSet { defaults.set(accentChoiceRaw, forKey: K.accentChoice) } }
     @Published var glowPaletteID: String { didSet { defaults.set(glowPaletteID, forKey: K.glowPaletteID) } }
 
@@ -80,6 +82,8 @@ final class AppSettings: ObservableObject {
         voiceEnabled = defaults.object(forKey: K.voiceEnabled) as? Bool ?? true
         voiceIdentifier = defaults.string(forKey: K.voiceIdentifier) ?? ""
         voiceRate = defaults.object(forKey: K.voiceRate) as? Double ?? 0.5
+        voiceEngineKind = defaults.string(forKey: K.voiceEngineKind) ?? "apple"
+        geminiVoiceName = defaults.string(forKey: K.geminiVoiceName) ?? "Kore"
         accentChoiceRaw = defaults.string(forKey: K.accentChoice) ?? "system"
         glowPaletteID = defaults.string(forKey: K.glowPaletteID) ?? "accent"
     }
@@ -108,6 +112,8 @@ final class AppSettings: ObservableObject {
         static let voiceEnabled = "app.voiceEnabled"
         static let voiceIdentifier = "app.voiceIdentifier"
         static let voiceRate = "app.voiceRate"
+        static let voiceEngineKind = "app.voiceEngineKind"
+        static let geminiVoiceName = "app.geminiVoiceName"
         static let accentChoice = "app.accentChoice"
         static let glowPaletteID = "app.glowPaletteID"
     }

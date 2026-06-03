@@ -349,6 +349,20 @@ struct VoiceSettingsTab: View {
         Form {
             Section {
                 Toggle("Speak responses aloud", isOn: $settings.voiceEnabled)
+                Picker("Voice engine", selection: $settings.voiceEngineKind) {
+                    Text("On-device (Apple)").tag("apple")
+                    Text("Gemini (cloud)").tag("gemini")
+                }
+                if settings.voiceEngineKind == "gemini" {
+                    Picker("Gemini voice", selection: $settings.geminiVoiceName) {
+                        ForEach(["Kore","Puck","Charon","Fenrir","Aoede","Leda","Orus","Zephyr"], id: \.self) { Text($0).tag($0) }
+                    }
+                    Text("Cloud voices are more natural but add a little latency and use your Gemini key. Aria falls back to the on-device voice if the key is busy.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            } header: { Text("Engine") }
+
+            Section {
                 Picker("Voice", selection: $settings.voiceIdentifier) {
                     Text("Automatic (best installed)").tag("")
                     ForEach(voices, id: \.identifier) { v in
@@ -360,7 +374,7 @@ struct VoiceSettingsTab: View {
                     Text("Speaking rate")
                     Slider(value: $settings.voiceRate, in: 0...1, step: 0.05)
                 }
-            } header: { Text("Voice") }
+            } header: { Text("On-Device Voice") }
 
             Section {
                 Text("Voices are on-device. Add Premium/Enhanced voices in System Settings \u{2192} Accessibility \u{2192} Spoken Content \u{2192} System Voice \u{2192} Manage Voices.")

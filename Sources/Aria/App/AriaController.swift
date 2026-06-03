@@ -189,6 +189,8 @@ final class AriaController {
         voice.enabled = s.voiceEnabled
         voice.voiceIdentifier = s.voiceIdentifier.isEmpty ? nil : s.voiceIdentifier
         voice.rate = Float(s.voiceRate) * (AVSpeechUtteranceMaximumSpeechRate - AVSpeechUtteranceMinimumSpeechRate) + AVSpeechUtteranceMinimumSpeechRate
+        voice.kind = VoiceEngine.Kind(rawValue: s.voiceEngineKind) ?? .apple
+        voice.geminiVoiceName = s.geminiVoiceName
     }
 
     private func wireEngine() {
