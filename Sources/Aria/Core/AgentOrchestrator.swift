@@ -95,17 +95,28 @@ actor AgentOrchestrator {
         case .answer, .clarify:
             return response
         case .action, .multiAction:
-            var transcript = response.message
             var priorOutput = ""
+            var failure: String? = nil
             for action in response.actions {
                 let result = await execute(action, priorOutput: priorOutput, context: context)
-                transcript += "\n\n**\(action.tool)** → \(result.output)"
+                // Tool plumbing stays in the log, never in what Aria shows/speaks.
+                Log.trace("orchestrator: tool \(action.tool) success=\(result.success) → \(result.output)")
                 priorOutput = result.output
-                if !result.success { break }
+                if !result.success { failure = result.output; break }
+            }
+            // The user hears only Aria's natural reply. On failure, say so plainly
+            // (graceful, not silent) instead of pretending it worked.
+            if let failure {
+                return AriaResponse(
+                    type: .answer,
+                    message: "\(response.message)… actually, that didn't go through: \(failure)",
+                    confidence: 0.0,
+                    actions: response.actions,
+                    followup: response.followup)
             }
             return AriaResponse(
                 type: .answer,
-                message: transcript,
+                message: response.message,
                 confidence: response.confidence,
                 actions: response.actions,
                 followup: response.followup)
