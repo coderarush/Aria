@@ -190,17 +190,30 @@ final class FridayController {
         wakeEngine.onCommand = { [weak self] command in
             self?.handleCommand(command)
         }
+        wakeEngine.onError = { [weak self] message in
+            self?.orbViewModel.beginListening()
+            self?.orbViewModel.showError(message)
+        }
     }
 
     private func startListening() {
         Task {
-            let ok = await PermissionsManager.requestCorePermissions()
-            guard ok else {
-                Log.app.error("Core permissions denied — wake word disabled")
+            let micOK = await PermissionsManager.requestMicrophone()
+            let speechOK = await PermissionsManager.requestSpeech()
+            guard micOK, speechOK else {
+                let missing = [micOK ? nil : "Microphone", speechOK ? nil : "Speech Recognition"]
+                    .compactMap { $0 }.joined(separator: " + ")
+                Log.app.error("Permissions denied: \(missing)")
+                orbViewModel.beginListening()
+                orbViewModel.showError("\(missing) permission denied. Enable it in System Settings → Privacy & Security, then relaunch Friday.")
                 return
             }
             do { try wakeEngine.start() }
-            catch { Log.app.error("Wake engine failed to start: \(error.localizedDescription)") }
+            catch {
+                Log.app.error("Wake engine failed to start: \(error.localizedDescription)")
+                orbViewModel.beginListening()
+                orbViewModel.showError(error.localizedDescription)
+            }
         }
     }
 

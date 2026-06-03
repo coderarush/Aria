@@ -18,6 +18,10 @@ final class WakeWordEngine {
     var onWake: (() -> Void)?
     var onCommand: ((String) -> Void)?
     var onAudioLevel: ((Float) -> Void)?
+    /// Surfaced setup/recognition failures (shown on the orb).
+    var onError: ((String) -> Void)?
+
+    private var restartPending = false
 
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     private let audioEngine = AVAudioEngine()
@@ -40,14 +44,18 @@ final class WakeWordEngine {
 
     func start() throws {
         guard !isRunning else { return }
-        guard let recognizer, recognizer.isAvailable else {
-            Log.wake.error("Speech recognizer unavailable")
-            throw NSError(domain: "Friday.Wake", code: 1)
+        guard let recognizer else {
+            throw NSError(domain: "Friday.Wake", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "Speech recognizer unavailable for en-US."])
+        }
+        guard recognizer.isAvailable else {
+            throw NSError(domain: "Friday.Wake", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: "Speech recognition is temporarily unavailable. Check your network or Siri/Dictation settings."])
         }
         isRunning = true
         try beginRecognition()
         scheduleRollingRestart()
-        Log.wake.info("Wake word engine started")
+        Log.wake.info("Wake word engine started (onDevice: \(recognizer.supportsOnDeviceRecognition))")
     }
 
     func stop() {
@@ -65,11 +73,19 @@ final class WakeWordEngine {
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
-        request.requiresOnDeviceRecognition = true
+        // Only require on-device if the model is actually available; otherwise
+        // fall back to server recognition instead of failing silently.
+        request.requiresOnDeviceRecognition = recognizer?.supportsOnDeviceRecognition ?? false
         self.request = request
 
         let input = audioEngine.inputNode
-        let format = input.outputFormat(forBus: 0)
+        let format = input.inputFormat(forBus: 0)
+        // A zero sample rate means there is no usable input device.
+        guard format.sampleRate > 0 else {
+            onError?("No microphone input available. Check your input device.")
+            Log.wake.error("Input format sample rate is 0 — no mic")
+            return
+        }
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             self?.request?.append(buffer)
@@ -77,17 +93,40 @@ final class WakeWordEngine {
         }
 
         audioEngine.prepare()
-        try audioEngine.start()
+        do {
+            try audioEngine.start()
+        } catch {
+            onError?("Couldn't start the microphone: \(error.localizedDescription)")
+            Log.wake.error("audioEngine.start failed: \(error.localizedDescription)")
+            return
+        }
 
         task = recognizer?.recognitionTask(with: request) { [weak self] result, error in
             guard let self else { return }
             if let result {
-                let text = result.bestTranscription.formattedString
-                self.handleTranscript(text)
+                self.handleTranscript(result.bestTranscription.formattedString)
             }
-            if error != nil {
-                // Restart cleanly on transient errors while running.
-                if self.isRunning { try? self.beginRecognition() }
+            if let error {
+                // "No speech detected" and normal session ends are benign — just
+                // restart (throttled) instead of spinning in a tight loop.
+                Log.wake.debug("Recognition ended: \(error.localizedDescription)")
+                self.scheduleRestart()
+            }
+        }
+    }
+
+    /// Restart recognition once, after a short delay, coalescing rapid retries
+    /// so a failing recognizer can't spin the CPU.
+    private func scheduleRestart() {
+        guard isRunning, mode == .wake, !restartPending else { return }
+        restartPending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            guard let self, self.isRunning else { return }
+            self.restartPending = false
+            do { try self.beginRecognition() }
+            catch {
+                self.onError?("Wake listening stopped: \(error.localizedDescription)")
+                Log.wake.error("Restart failed: \(error.localizedDescription)")
             }
         }
     }
