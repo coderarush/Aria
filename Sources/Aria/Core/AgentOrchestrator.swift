@@ -37,89 +37,84 @@ actor AgentOrchestrator {
         confirmationHandler = handler
     }
 
-    /// Process a spoken command and return what to display.
     func handle(command: String, privacyMode: Bool = false) async -> AriaResponse {
         Log.agent.info("Handling command: \(command, privacy: .public)")
 
-        // Local fast-paths that don't need the model.
         if let local = localShortcut(for: command) {
             await record(command: command, response: local)
             return local
         }
 
-        Log.trace("orchestrator: capturing screen (privacy=\(privacyMode))")
         let screenshot: Data? = privacyMode ? nil : try? await screen.capturePrimaryJPEG()
-        Log.trace("orchestrator: screenshot=\(screenshot?.count ?? -1) bytes; building catalog")
-        let history = await memory.recentContext()
+        var history = await memory.recentContext()
         let context = await Self.currentSystemContext()
+        let maxSteps = 4
 
         do {
             let catalog = await registry.catalog()
                 + "\n\nSUB-AGENTS (dispatch via action tool = the agent name, input.task = the goal):\n"
                 + (await subAgents.catalog())
-            Log.trace("orchestrator: sending to Gemini")
-            let response = try await gemini.send(
-                transcript: command,
-                screenshotJPEG: screenshot,
-                history: history,
-                context: context,
-                toolCatalog: catalog)
-            Log.trace("orchestrator: Gemini ok, type=\(response.type.rawValue) actions=\(response.actions.count)")
 
-            let final = await routeActions(response, context: context)
-            Log.trace("orchestrator: routeActions done")
-            await record(command: command, response: final)
-            return final
-        } catch GeminiClient.GeminiError.missingAPIKey {
-            Log.trace("orchestrator: MISSING API KEY")
-            return AriaResponse(type: .answer,
-                message: "I don't have a Gemini API key yet. Add one in Settings.",
+            var transcript = command
+            var turnScreenshot = screenshot
+            var lastMessage = ""
+
+            for step in 0..<maxSteps {
+                Log.trace("orchestrator: step \(step) — sending to Gemini")
+                let response = try await gemini.send(
+                    transcript: transcript,
+                    screenshotJPEG: turnScreenshot,
+                    history: history,
+                    context: context,
+                    toolCatalog: catalog)
+                lastMessage = response.message
+                Log.trace("orchestrator: step \(step) type=\(response.type.rawValue) actions=\(response.actions.count)")
+
+                switch response.type {
+                case .answer, .clarify:
+                    await record(command: command, response: response)
+                    return response
+
+                case .action, .multiAction:
+                    var results = ""
+                    var priorOutput = ""
+                    for action in response.actions {
+                        let r = await execute(action, priorOutput: priorOutput, context: context)
+                        let line = r.success ? r.output : "FAILED: \(r.output)"
+                        results += "\n- \(action.tool): \(line)"
+                        Log.trace("orchestrator: step \(step) \(action.tool) success=\(r.success)")
+                        priorOutput = r.output
+                        if !r.success { break }
+                    }
+                    // Feed results back so the model decides the next step or the
+                    // final spoken answer.
+                    history.append(ConversationTurn(
+                        transcript: transcript,
+                        responseMessage: response.message,
+                        responseType: response.type))
+                    transcript = """
+                    Results of the tool calls you just requested:\(results)
+
+                    If the user's request is now complete, respond with type "answer" and a short, natural spoken message (no tool names or plumbing). If more steps are needed, respond with the next action(s).
+                    """
+                    turnScreenshot = nil
+                }
+            }
+
+            let capped = AriaResponse(
+                type: .answer,
+                message: lastMessage.isEmpty ? "I wasn't able to finish that one." : lastMessage,
                 confidence: 1.0)
+            await record(command: command, response: capped)
+            return capped
+
+        } catch GeminiClient.GeminiError.missingAPIKey {
+            return AriaResponse(type: .answer,
+                message: "I don't have a Gemini API key yet. Add one in Settings.", confidence: 1.0)
         } catch {
-            Log.trace("orchestrator: Gemini FAILED: \(error)")
             Log.agent.error("Gemini request failed: \(error.localizedDescription)")
             return AriaResponse(type: .answer,
-                message: "Something went wrong: \(error.localizedDescription)",
-                confidence: 0.0)
-        }
-    }
-
-    // MARK: Action routing
-
-    /// Execute the actions Gemini requested. Each step's output feeds the next
-    /// step's context (sequential pipeline). Unknown tools fall back to dynamic
-    /// code generation. Static tools land in a later pass.
-    private func routeActions(_ response: AriaResponse,
-                              context: GeminiClient.SystemContext) async -> AriaResponse {
-        switch response.type {
-        case .answer, .clarify:
-            return response
-        case .action, .multiAction:
-            var priorOutput = ""
-            var failure: String? = nil
-            for action in response.actions {
-                let result = await execute(action, priorOutput: priorOutput, context: context)
-                // Tool plumbing stays in the log, never in what Aria shows/speaks.
-                Log.trace("orchestrator: tool \(action.tool) success=\(result.success) → \(result.output)")
-                priorOutput = result.output
-                if !result.success { failure = result.output; break }
-            }
-            // The user hears only Aria's natural reply. On failure, say so plainly
-            // (graceful, not silent) instead of pretending it worked.
-            if let failure {
-                return AriaResponse(
-                    type: .answer,
-                    message: "\(response.message)… actually, that didn't go through: \(failure)",
-                    confidence: 0.0,
-                    actions: response.actions,
-                    followup: response.followup)
-            }
-            return AriaResponse(
-                type: .answer,
-                message: response.message,
-                confidence: response.confidence,
-                actions: response.actions,
-                followup: response.followup)
+                message: "Something went wrong reaching my brain. Try again in a moment.", confidence: 0.0)
         }
     }
 
