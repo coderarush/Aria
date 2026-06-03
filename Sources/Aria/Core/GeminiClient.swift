@@ -94,7 +94,8 @@ actor GeminiClient {
                                                 screenshotJPEG: screenshotJPEG,
                                                 history: history, context: context,
                                                 toolCatalog: toolCatalog,
-                                                tools: tools)
+                                                tools: tools,
+                                                jsonMode: false)
                     let effectiveModels = ([preferredModel].compactMap { $0 } + models)
                         .reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
                     var lastError: Error = GeminiError.emptyResponse
@@ -267,7 +268,8 @@ actor GeminiClient {
                                  history: [ConversationTurn],
                                  context: SystemContext,
                                  toolCatalog: String,
-                                 tools: [[String: Any]]? = nil) -> Data {
+                                 tools: [[String: Any]]? = nil,
+                                 jsonMode: Bool = true) -> Data {
         var parts: [[String: Any]] = []
 
         let historyText = history.map {
@@ -306,15 +308,17 @@ actor GeminiClient {
             ])
         }
 
+        // JSON response mode is for the structured (non-streaming) path only. The
+        // streaming voice path must emit natural prose + function calls, so it
+        // passes jsonMode:false (forcing JSON would make her speak JSON).
+        var generationConfig: [String: Any] = ["temperature": 0.4]
+        if jsonMode { generationConfig["response_mime_type"] = "application/json" }
         var payload: [String: Any] = [
             "system_instruction": [
                 "parts": [["text": Self.systemPrompt]]
             ],
             "contents": [["role": "user", "parts": parts]],
-            "generationConfig": [
-                "temperature": 0.4,
-                "response_mime_type": "application/json"
-            ]
+            "generationConfig": generationConfig
         ]
 
         if let tools, !tools.isEmpty {
