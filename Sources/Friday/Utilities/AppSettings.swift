@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import ServiceManagement
 
 /// General app preferences (orb, privacy, onboarding), persisted in UserDefaults
 /// and observable by SwiftUI settings views.
@@ -40,7 +41,10 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(privacyMode, forKey: K.privacyMode) }
     }
     @Published var launchAtLogin: Bool {
-        didSet { defaults.set(launchAtLogin, forKey: K.launchAtLogin) }
+        didSet {
+            defaults.set(launchAtLogin, forKey: K.launchAtLogin)
+            Self.applyLaunchAtLogin(launchAtLogin)
+        }
     }
     @Published var onboardingComplete: Bool {
         didSet { defaults.set(onboardingComplete, forKey: K.onboardingComplete) }
@@ -61,6 +65,19 @@ final class AppSettings: ObservableObject {
         launchAtLogin = defaults.bool(forKey: K.launchAtLogin)
         onboardingComplete = defaults.bool(forKey: K.onboardingComplete)
         disabledTools = Set(defaults.stringArray(forKey: K.disabledTools) ?? [])
+    }
+
+    /// Register/unregister the app as a login item (SMAppService, macOS 13+).
+    static func applyLaunchAtLogin(_ enabled: Bool) {
+        do {
+            if enabled {
+                if SMAppService.mainApp.status != .enabled { try SMAppService.mainApp.register() }
+            } else {
+                if SMAppService.mainApp.status == .enabled { try SMAppService.mainApp.unregister() }
+            }
+        } catch {
+            Log.app.error("Launch-at-login update failed: \(error.localizedDescription)")
+        }
     }
 
     private enum K {

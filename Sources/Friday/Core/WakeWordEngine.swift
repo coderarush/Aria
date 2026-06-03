@@ -36,11 +36,15 @@ final class WakeWordEngine {
     private var rollingTimer: Timer?
 
     private let wakeVariants = ["hey friday", "hey freddy", "hey frieda",
-                               "hey friday's", "friday", "a friday"]
+                               "hey friday's", "hey friday.", "a friday",
+                               "hey, friday"]
     private let commandSilence: TimeInterval = 1.4
     private let rollingRestart: TimeInterval = 50
 
     private(set) var isRunning = false
+    /// When true, incoming transcripts are ignored (used while a command is
+    /// being processed so a stray "friday" can't interrupt or dismiss the orb).
+    var isSuspended = false
 
     // MARK: Lifecycle
 
@@ -154,6 +158,7 @@ final class WakeWordEngine {
     // MARK: Transcript handling
 
     private func handleTranscript(_ text: String) {
+        guard !isSuspended else { return }
         let lower = text.lowercased()
         switch mode {
         case .wake:

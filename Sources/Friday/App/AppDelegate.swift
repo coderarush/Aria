@@ -67,10 +67,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func summon() { controller.toggleManually() }
     @objc private func quit() { NSApp.terminate(nil) }
 
+    private var settingsWindow: NSWindow?
+
     @objc private func openSettings() {
+        NSApp.setActivationPolicy(.regular)   // ensure the window can come forward
         NSApp.activate(ignoringOtherApps: true)
-        // macOS 14 settings action.
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        if settingsWindow == nil {
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 480, height: 420),
+                styleMask: [.titled, .closable, .miniaturizable],
+                backing: .buffered, defer: false)
+            window.title = "Friday Settings"
+            window.contentView = NSHostingView(rootView: SettingsView())
+            window.isReleasedWhenClosed = false
+            window.center()
+            settingsWindow = window
+        }
+        settingsWindow?.makeKeyAndOrderFront(nil)
+        settingsWindow?.orderFrontRegardless()
     }
 
     // MARK: API key migration

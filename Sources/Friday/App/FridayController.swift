@@ -155,6 +155,8 @@ final class FridayController {
 
         orbViewModel.onVisibilityChange = { [weak self] visible in
             self?.setPanelVisible(visible)
+            // Resume wake detection once the orb is fully hidden again.
+            if !visible { self?.wakeEngine.isSuspended = false }
         }
     }
 
@@ -191,8 +193,10 @@ final class FridayController {
             self?.handleCommand(command)
         }
         wakeEngine.onCommandEmpty = { [weak self] in
-            // Heard the wake word but no command — fade the orb back out.
-            self?.orbViewModel.dismiss()
+            // Heard the wake word but no command — fade the orb out only if it's
+            // still idle (don't kill an orb that's already thinking/responding).
+            guard let self, self.orbViewModel.state == .listening else { return }
+            self.orbViewModel.dismiss()
         }
         wakeEngine.onError = { [weak self] message in
             self?.orbViewModel.beginListening()
@@ -231,6 +235,10 @@ final class FridayController {
             return
         }
 
+        // Stop listening for new wakes while we work, so a stray "friday" can't
+        // interrupt or dismiss the orb mid-task. Resumed when the orb hides
+        // (see onVisibilityChange in setupPanel).
+        wakeEngine.isSuspended = true
         orbViewModel.beginThinking()
         let privacy = AppSettings.shared.privacyMode
         Task {
