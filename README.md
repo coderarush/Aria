@@ -5,15 +5,16 @@
 
 <!-- demo gif here -->
 
-Aria is a native Swift/SwiftUI macOS app. Say **"Hey Aria"**, and a
-Dynamic-Island-style pill drops from the notch, listens, speaks back, sees your
-screen, and goes to work. It's built to be the most capable open-source AI agent
-for the Mac — extensible, private, and fully under your control.
+Aria is a native Swift/SwiftUI macOS app. Say **"Hey Aria"**, and a Siri-style
+aurora glow sweeps the screen edges, listens, speaks back, sees your screen, and
+goes to work. It's built to be the most capable open-source AI agent for the Mac
+— extensible, private, and fully under your control.
 
 > **Status: v2.0.** All core subsystems are built and tested (64 tests): wake
-> word → notch pill → screen → Gemini, the full tool system, dynamic tool
-> generation, sub-agents, on-device behavioral learning, on-device voice,
-> accent theming, Settings, and onboarding. See the [roadmap](#roadmap).
+> word → aurora glow → screen → multi-step Gemini agent, the full tool system,
+> dynamic tool generation, sub-agents, web search, on-device behavioral learning,
+> on-device + cloud voice, palette theming, Settings, and onboarding. See the
+> [roadmap](#roadmap).
 
 ---
 
@@ -57,7 +58,7 @@ a free **Premium** voice from the Voice tab for the most natural speech.
 | Smart-mirror bridge (interface stub) | ✅ v0.6 |
 | Metal-shader orb polish (runtime-compiled MSL glow/pulse/plasma) | ✅ v0.7 |
 | Reliable wake/command capture (recognition restart fixes) | ✅ v1.0 |
-| Aria redesign — notch pill (drops Metal), on-device voice, confident-and-charming persona, accent theming, full rename | ✅ v2.0 |
+| Aria redesign — Siri-style aurora glow (drops Metal), on-device + Gemini voice, multi-step agent + web, palette theming, confident-and-charming persona, one-line installer, full rename | ✅ v2.0 |
 
 ---
 
