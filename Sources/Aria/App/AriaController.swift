@@ -1,16 +1,16 @@
 import SwiftUI
 import AppKit
 
-/// Top-level coordinator that owns the runtime engines and the orb panel, and
+/// Top-level coordinator that owns the runtime engines and the Island panel, and
 /// wires wake → listen → think → respond. Lives for the app's lifetime.
 @MainActor
 final class AriaController {
 
-    let orbViewModel = OrbViewModel()
+    let islandViewModel = IslandViewModel()
     private let wakeEngine = WakeWordEngine()
     private let orchestrator = AgentOrchestrator()
     private let patternEngine = PatternEngine()
-    private var panel: OrbPanel?
+    private var panel: IslandPanel?
     private var learningTimer: Timer?
 
     func start() {
@@ -23,29 +23,29 @@ final class AriaController {
 
     private var previewWindow: NSWindow?
 
-    /// Preview mode (used for screenshots/docs): shows the orb in a plain titled
+    /// Preview mode (used for screenshots/docs): shows the island in a plain titled
     /// window on a dark backdrop, without starting the mic so there is no TCC
-    /// prompt. The production orb lives in a borderless non-activating panel,
+    /// prompt. The production island lives in a borderless non-activating panel,
     /// which doesn't capture cleanly; this window does. Triggered by the
     /// `/tmp/aria_show_orb` sentinel or the `ARIA_SHOW_ORB` env var.
     func startForScreenshot() {
         // Defer off the launch call stack so the runloop is up before building
-        // the Metal-backed hosting view.
+        // the hosting view.
         DispatchQueue.main.async { [weak self] in self?.buildPreviewWindow() }
     }
 
     private func buildPreviewWindow() {
-        orbViewModel.beginListening()
-        orbViewModel.updateAudioLevel(0.6)
+        islandViewModel.beginListening()
+        islandViewModel.updateAudioLevel(0.6)
 
         let root = ZStack {
             Color.black
-            OrbView(viewModel: orbViewModel)
+            IslandView(viewModel: islandViewModel)
         }
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 420, height: 420),
             styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        window.title = "Aria — Orb Preview"
+        window.title = "Aria — Island Preview"
         window.contentView = NSHostingView(rootView: root)
         window.isReleasedWhenClosed = false
         window.center()
@@ -59,7 +59,7 @@ final class AriaController {
         try? "\(window.windowNumber)".write(toFile: "/tmp/aria_window.txt", atomically: true, encoding: .utf8)
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
-            self?.orbViewModel.showResponse("**Aria** is online.\nSay *Hey Aria* to begin.")
+            self?.islandViewModel.showResponse("**Aria** is online.\nSay *Hey Aria* to begin.")
             self?.previewWindow?.orderFrontRegardless()
         }
     }
@@ -101,17 +101,17 @@ final class AriaController {
         for pattern in firing {
             if case let .runSavedCommand(command) = pattern.action {
                 Log.app.info("Firing automation: \(command, privacy: .public)")
-                orbViewModel.beginThinking()
+                islandViewModel.beginThinking()
                 let response = await orchestrator.handle(command: command)
-                orbViewModel.showResponse("⚡️ " + response.message)
+                islandViewModel.showResponse("⚡️ " + response.message)
             }
         }
     }
 
     @MainActor
     private func presentSuggestion(_ pattern: BehaviorPattern) {
-        orbViewModel.beginListening()
-        orbViewModel.showResponse(pattern.description + " — want me to handle that automatically?")
+        islandViewModel.beginListening()
+        islandViewModel.showResponse(pattern.description + " — want me to handle that automatically?")
         let approved = Self.confirm("\(pattern.description).\n\nWant Aria to do this automatically from now on?")
         Task {
             if approved {
@@ -146,19 +146,18 @@ final class AriaController {
     // MARK: Panel
 
     private func setupPanel() {
-        let panel = OrbPanel()
-        let host = NSHostingView(rootView: OrbView(viewModel: orbViewModel))
+        let panel = IslandPanel()
+        let host = NSHostingView(rootView: IslandView(viewModel: islandViewModel))
         host.frame = panel.contentLayoutRect
         host.autoresizingMask = [.width, .height]
         panel.contentView = host
         self.panel = panel
 
-        orbViewModel.onVisibilityChange = { [weak self] visible in
+        islandViewModel.onVisibilityChange = { [weak self] visible in
             self?.setPanelVisible(visible)
-            // Resume wake detection once the orb is fully hidden again.
             if !visible {
                 self?.wakeEngine.isSuspended = false
-                Log.trace("orb hidden → wake re-armed (isSuspended=false)")
+                Log.trace("island hidden → wake re-armed (isSuspended=false)")
             }
         }
     }
@@ -166,46 +165,37 @@ final class AriaController {
     private func setPanelVisible(_ visible: Bool) {
         guard let panel else { return }
         if visible {
-            positionPanel(panel)
+            panel.reposition()
+            panel.ignoresMouseEvents = false
             panel.orderFrontRegardless()
         } else {
+            panel.ignoresMouseEvents = true   // click-through when idle
             panel.orderOut(nil)
         }
-    }
-
-    private func positionPanel(_ panel: NSPanel) {
-        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
-        let frame = screen.visibleFrame
-        let size = panel.frame.size
-        // Bottom-center.
-        let x = frame.midX - size.width / 2
-        let y = frame.minY + 80
-        panel.setFrameOrigin(NSPoint(x: x, y: y))
     }
 
     // MARK: Engine wiring
 
     private func wireEngine() {
         wakeEngine.onWake = { [weak self] in
-            Log.trace("onWake — orb listening")
-            self?.orbViewModel.beginListening()
+            Log.trace("onWake — island listening")
+            self?.islandViewModel.beginListening()
         }
         wakeEngine.onAudioLevel = { [weak self] level in
-            self?.orbViewModel.updateAudioLevel(level)
+            self?.islandViewModel.updateAudioLevel(level)
         }
         wakeEngine.onCommand = { [weak self] command in
             Log.trace("onCommand fired: '\(command)'")
             self?.handleCommand(command)
         }
         wakeEngine.onCommandEmpty = { [weak self] in
-            // Heard the wake word but no command — fade the orb out only if it's
-            // still idle (don't kill an orb that's already thinking/responding).
-            guard let self, self.orbViewModel.state == .listening else { return }
-            self.orbViewModel.dismiss()
+            // Heard the wake word but no command — dismiss only if still listening.
+            guard let self, self.islandViewModel.state == .listening else { return }
+            self.islandViewModel.dismiss()
         }
         wakeEngine.onError = { [weak self] message in
-            self?.orbViewModel.beginListening()
-            self?.orbViewModel.showError(message)
+            self?.islandViewModel.beginListening()
+            self?.islandViewModel.showError(message)
         }
     }
 
@@ -218,8 +208,8 @@ final class AriaController {
                 let missing = [micOK ? nil : "Microphone", speechOK ? nil : "Speech Recognition"]
                     .compactMap { $0 }.joined(separator: " + ")
                 Log.app.error("Permissions denied: \(missing)")
-                orbViewModel.beginListening()
-                orbViewModel.showError("\(missing) permission denied. Enable it in System Settings → Privacy & Security, then relaunch Aria.")
+                islandViewModel.beginListening()
+                islandViewModel.showError("\(missing) permission denied. Enable it in System Settings → Privacy & Security, then relaunch Aria.")
                 return
             }
             do {
@@ -229,8 +219,8 @@ final class AriaController {
             catch {
                 Log.trace("wake engine start FAILED: \(error.localizedDescription)")
                 Log.app.error("Wake engine failed to start: \(error.localizedDescription)")
-                orbViewModel.beginListening()
-                orbViewModel.showError(error.localizedDescription)
+                islandViewModel.beginListening()
+                islandViewModel.showError(error.localizedDescription)
             }
         }
     }
@@ -241,15 +231,15 @@ final class AriaController {
         // Dismissal phrases.
         let lower = command.lowercased()
         if lower.contains("dismiss") || lower.contains("thanks aria") || lower.contains("never mind") {
-            orbViewModel.dismiss()
+            islandViewModel.dismiss()
             return
         }
 
         // Stop listening for new wakes while we work, so a stray "aria" can't
-        // interrupt or dismiss the orb mid-task. Resumed when the orb hides
+        // interrupt or dismiss the island mid-task. Resumed when the island hides
         // (see onVisibilityChange in setupPanel).
         wakeEngine.isSuspended = true
-        orbViewModel.beginThinking()
+        islandViewModel.beginThinking()
         let privacy = AppSettings.shared.privacyMode
         Log.trace("handleCommand: '\(command)' privacy=\(privacy) — thinking")
         Task {
@@ -258,42 +248,19 @@ final class AriaController {
             let response = await orchestrator.handle(command: command, privacyMode: privacy)
             Log.trace("orchestrator returned: type=\(response.type.rawValue) conf=\(response.confidence) msg=\(response.message.prefix(120))")
             if response.confidence == 0 {
-                orbViewModel.showError(response.message)
+                islandViewModel.showError(response.message)
             } else {
-                orbViewModel.showResponse(response.message)
+                islandViewModel.showResponse(response.message)
             }
-            Log.trace("orb updated, state=\(String(describing: orbViewModel.state))")
+            Log.trace("island updated, state=\(String(describing: islandViewModel.state))")
         }
     }
 
     func toggleManually() {
-        if orbViewModel.isVisible {
-            orbViewModel.dismiss()
+        if islandViewModel.isVisible {
+            islandViewModel.dismiss()
         } else {
-            orbViewModel.beginListening()
+            islandViewModel.beginListening()
         }
     }
-}
-
-/// Borderless, floating, non-activating panel that hosts the orb across all
-/// spaces without stealing focus from the user's current app.
-final class OrbPanel: NSPanel {
-    init() {
-        super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 400, height: 240),
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false)
-        isFloatingPanel = true
-        level = .floating
-        backgroundColor = .clear
-        isOpaque = false
-        hasShadow = false
-        hidesOnDeactivate = false
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-        isMovableByWindowBackground = false
-    }
-
-    override var canBecomeKey: Bool { false }
-    override var canBecomeMain: Bool { false }
 }
