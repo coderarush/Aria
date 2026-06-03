@@ -176,10 +176,8 @@ final class AriaController {
         guard let panel else { return }
         if visible {
             panel.reposition()
-            panel.ignoresMouseEvents = false
             panel.orderFrontRegardless()
         } else {
-            panel.ignoresMouseEvents = true   // click-through when idle
             panel.orderOut(nil)
         }
     }

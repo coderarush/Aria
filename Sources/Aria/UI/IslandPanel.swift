@@ -1,12 +1,11 @@
 import AppKit
 import SwiftUI
 
-/// Borderless, non-activating panel that hosts the Island pill at the top-center
-/// of the main screen, hugging the notch. Floats above other windows; click-
-/// through is toggled by the controller based on visibility.
+/// Full-screen, click-through overlay panel hosting Aria's Siri-style glow.
+/// Always passes mouse events through; floats above normal windows.
 final class IslandPanel: NSPanel {
     init() {
-        super.init(contentRect: NSRect(x: 0, y: 0, width: 380, height: 140),
+        super.init(contentRect: NSScreen.main?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: 900),
                    styleMask: [.borderless, .nonactivatingPanel],
                    backing: .buffered, defer: false)
         isFloatingPanel = true
@@ -14,18 +13,17 @@ final class IslandPanel: NSPanel {
         backgroundColor = .clear
         isOpaque = false
         hasShadow = false
+        ignoresMouseEvents = true            // passive overlay — never blocks clicks
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         isMovable = false
         hidesOnDeactivate = false
     }
-
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
-    /// Position centered on the main screen, top edge pinned under the notch.
+    /// Cover the whole main screen.
     func reposition() {
         guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
-        let frame = NotchGeometry.panelFrame(screenFrame: screen.frame, size: self.frame.size)
-        setFrame(frame, display: true)
+        setFrame(screen.frame, display: true)
     }
 }

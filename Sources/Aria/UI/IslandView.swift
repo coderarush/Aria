@@ -1,88 +1,72 @@
 import SwiftUI
 
-/// The Dynamic-Island pill. One surface whose size/content morph by state.
-/// Pinned at the top; grows downward. Color appears only on accents; the
-/// surface stays neutral `.ultraThinMaterial`.
+/// Aria's Siri-style presence: a full-screen animated accent glow hugging the
+/// screen edges, plus a bottom caption for her reply. Center is transparent and
+/// click-through.
 struct IslandView: View {
     @ObservedObject var viewModel: IslandViewModel
+    @State private var rotate = 0.0
+    @State private var pulse = false
 
-    private var size: CGSize {
+    private var active: Bool { viewModel.isVisible && viewModel.state != .idle }
+
+    private var glowColors: [Color] {
+        let a = viewModel.accent
+        return [a.opacity(0.0), a, a.opacity(0.6), .white.opacity(0.5), a, a.opacity(0.0)]
+    }
+
+    private var captionText: String {
         switch viewModel.state {
-        case .idle:       return CGSize(width: 200, height: 34)
-        case .listening:  return CGSize(width: 320, height: 64)
-        case .thinking:   return CGSize(width: 320, height: 64)
-        case .responding, .error: return CGSize(width: 380, height: 140)
+        case .listening: return "Listening…"
+        case .thinking: return "Thinking…"
+        case .responding, .error: return viewModel.responseText
+        case .idle: return ""
         }
+    }
+    private var showCaption: Bool { active && !captionText.isEmpty }
+
+    /// Glow thickens with mic level while listening; steady otherwise.
+    private var glowWidth: CGFloat {
+        let base: CGFloat = viewModel.state == .listening ? 26 : 18
+        let level = viewModel.state == .listening ? CGFloat(viewModel.audioLevel) * 26 : 0
+        return base + level + (pulse ? 6 : 0)
     }
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .strokeBorder(viewModel.accent.opacity(0.25), lineWidth: 1)
-                )
-                .shadow(color: .black.opacity(0.25), radius: 12, y: 4)
-
-            content
-                .padding(.horizontal, 16)
+            Color.clear
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .strokeBorder(
+                    AngularGradient(gradient: Gradient(colors: glowColors),
+                                    center: .center, angle: .degrees(rotate)),
+                    lineWidth: glowWidth)
+                .blur(radius: 32)
+                .opacity(active ? 1 : 0)
+                .animation(.easeInOut(duration: 0.45), value: active)
+                .animation(.easeInOut(duration: 0.25), value: glowWidth)
+                .ignoresSafeArea()
         }
-        .frame(width: size.width, height: size.height)
-        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: viewModel.state)
-        .opacity(viewModel.isVisible ? 1 : 0)
-        .animation(.easeInOut(duration: 0.2), value: viewModel.isVisible)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .onTapGesture { if viewModel.state == .responding || viewModel.state == .error { viewModel.dismiss() } }
-    }
-
-    @ViewBuilder private var content: some View {
-        switch viewModel.state {
-        case .idle:
-            BreathingDot(accent: viewModel.accent)
-        case .listening:
-            WaveformView(level: viewModel.audioLevel, color: viewModel.accent)
-                .frame(height: 28)
-        case .thinking:
-            ShimmerBar(accent: viewModel.accent)
-        case .responding, .error:
-            Text(viewModel.responseText)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.primary)
-                .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-}
-
-/// Faint accent dot that breathes while idle.
-private struct BreathingDot: View {
-    let accent: Color
-    @State private var on = false
-    var body: some View {
-        Circle()
-            .fill(accent.opacity(on ? 0.8 : 0.3))
-            .frame(width: 6, height: 6)
-            .onAppear {
-                withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) { on = true }
+        .overlay(alignment: .bottom) {
+            if showCaption {
+                Text(captionText)
+                    .font(.system(size: 18, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
+                    .padding(.horizontal, 22).padding(.vertical, 14)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay(Capsule().strokeBorder(viewModel.accent.opacity(0.35), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.25), radius: 16, y: 6)
+                    .frame(maxWidth: 680)
+                    .padding(.bottom, 90)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
-    }
-}
-
-/// Indeterminate accent shimmer sweep for the thinking state.
-private struct ShimmerBar: View {
-    let accent: Color
-    @State private var x: CGFloat = -1
-    var body: some View {
-        GeometryReader { geo in
-            Capsule()
-                .fill(LinearGradient(colors: [.clear, accent, .clear], startPoint: .leading, endPoint: .trailing))
-                .frame(width: geo.size.width * 0.4, height: 4)
-                .offset(x: x * geo.size.width)
-                .onAppear {
-                    withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: false)) { x = 1 }
-                }
         }
-        .frame(height: 8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: viewModel.responseText)
+        .onAppear {
+            withAnimation(.linear(duration: 8).repeatForever(autoreverses: false)) { rotate = 360 }
+            withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) { pulse = true }
+        }
     }
 }
