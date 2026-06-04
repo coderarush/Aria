@@ -174,9 +174,14 @@ struct APIKeyTab: View {
     @State private var key: String = ""
     @State private var status: String = ""
 
+    private var keyCount: Int {
+        key.split(whereSeparator: { $0 == "\n" || $0 == "," })
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.count
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Your Gemini Key")
+            Text("Your Gemini Keys")
                 .font(.title3.bold())
             Text("Stored securely in the macOS Keychain. Never transmitted by Aria.")
                 .font(.caption)
@@ -187,21 +192,28 @@ struct APIKeyTab: View {
 
         Form {
             Section {
-                SecureField("Gemini API key", text: $key)
+                TextEditor(text: $key)
+                    .font(.system(.body, design: .monospaced))
+                    .frame(minHeight: 90)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
                 HStack {
-                    Button("Save") { save() }
+                    Button("Save") { save() }.buttonStyle(.borderedProminent)
                     Button("Clear") {
                         KeychainManager.delete(account: KeychainKey.geminiAPIKey)
                         key = ""; status = "Cleared."
                     }
+                    Spacer()
+                    Text("\(keyCount) key\(keyCount == 1 ? "" : "s")").foregroundStyle(.secondary).font(.caption)
                 }
-                if !status.isEmpty { Text(status).foregroundStyle(.secondary).font(.caption) }
-            } header: { Text("API Key") }
+                if !status.isEmpty { Text(status).foregroundStyle(.green).font(.caption) }
+                Text("One key per line. Aria rotates across them — when one hits its daily free-tier limit, she switches to the next. **Click Save** after pasting.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } header: { Text("API Keys") }
 
             Section {
-                Text("Get a free key at aistudio.google.com. The free tier is sufficient for most use.")
+                Text("Get free keys at aistudio.google.com. Each Google project has its own free daily quota, so adding 2–3 keys from different projects multiplies how much you can do for free.")
                     .font(.caption).foregroundStyle(.secondary)
-            } header: { Text("About") }
+            } header: { Text("More free quota") }
         }
         .formStyle(.grouped)
         .onAppear { key = KeychainManager.read(account: KeychainKey.geminiAPIKey) ?? "" }
@@ -211,7 +223,7 @@ struct APIKeyTab: View {
         do {
             try KeychainManager.save(key.trimmingCharacters(in: .whitespacesAndNewlines),
                                      account: KeychainKey.geminiAPIKey)
-            status = "Saved to Keychain."
+            status = "Saved \(keyCount) key\(keyCount == 1 ? "" : "s") to Keychain."
         } catch { status = "Save failed: \(error.localizedDescription)" }
     }
 }

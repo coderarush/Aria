@@ -21,6 +21,7 @@ actor GeminiClient {
 
     private let models: [String]
     private let scheduler: RequestScheduler
+    private let keyRotator = KeyRotator()
     private let session: URLSession
     private let apiKeyProvider: () -> String?
 
@@ -44,9 +45,28 @@ actor GeminiClient {
         self.apiKeyProvider = apiKeyProvider
     }
 
-    /// Reserve a model bucket, waiting (pacing) if all are momentarily maxed. Never
-    /// returns an un-recorded model — the free-tier guarantee depends on honest
-    /// bucket accounting + pacing forever rather than failing.
+    /// All configured keys. The keychain item may hold several (one per line / comma-
+    /// separated) — each Google project has its own free-tier daily quota, so multiple
+    /// free keys multiply the free ceiling.
+    private func currentKeys() -> [String] {
+        let raw = apiKeyProvider() ?? ""
+        return raw.split(whereSeparator: { $0 == "\n" || $0 == "," })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
+    /// Reserve a usable key, refreshing the pool and pacing briefly if all keys are
+    /// momentarily quota-blocked. Returns nil only when NO keys are configured.
+    private func reserveKey(paceIfBlocked: Bool) async -> String? {
+        keyRotator.update(keys: currentKeys())
+        if keyRotator.isEmpty { return nil }
+        if let k = keyRotator.reserve() { return k }
+        guard paceIfBlocked else { return nil }
+        let wait = min(max(keyRotator.waitTime(), 0.5), 8)
+        try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+        return keyRotator.reserve()
+    }
+
     private func reserveModel(preferred: String? = nil) async -> String {
         if let p = preferred { scheduler.record(p); return p }
         while true {
@@ -64,9 +84,6 @@ actor GeminiClient {
               context: SystemContext,
               toolCatalog: String = "") async throws -> AriaResponse {
 
-        guard let apiKey = apiKeyProvider(), !apiKey.isEmpty else {
-            throw GeminiError.missingAPIKey
-        }
 
         let cacheKey = Self.cacheKey(transcript: transcript, image: screenshotJPEG)
         if let hit = cache[cacheKey], Date().timeIntervalSince(hit.at) < cacheTTL {
@@ -79,7 +96,7 @@ actor GeminiClient {
                                     history: history,
                                     context: context,
                                     toolCatalog: toolCatalog)
-        let data = try await performWithFallback(apiKey: apiKey, body: body)
+        let data = try await performWithFallback(body: body)
         let response = try Self.decodeAriaResponse(from: data)
 
         cache[cacheKey] = CacheEntry(response: response, at: Date())
@@ -100,9 +117,8 @@ actor GeminiClient {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    guard let apiKey = apiKeyProvider(), !apiKey.isEmpty else {
-                        throw GeminiError.missingAPIKey
-                    }
+                    keyRotator.update(keys: currentKeys())
+                    guard !keyRotator.isEmpty else { throw GeminiError.missingAPIKey }
                     let body = buildRequestBody(transcript: transcript,
                                                 screenshotJPEG: screenshotJPEG,
                                                 history: history, context: context,
@@ -118,10 +134,12 @@ actor GeminiClient {
                     var attempt = 0
                     var quotaWaits = 0
                     var first = true
-                    // Free-tier guarantee: a 429 paces (reserveModel waits for a free bucket) and
-                    // retries rather than failing; only genuinely-broken models exhaust maxAttempts.
+                    // A 429 cools that key+model and routes to the next key/model bucket;
+                    // with several free keys this multiplies the free ceiling.
                     while attempt < maxAttempts && quotaWaits < maxQuotaWaits {
-                        // First pass honors a routed preferredModel; later passes reserve a bucket (pacing if needed).
+                        guard let apiKey = await reserveKey(paceIfBlocked: true) else {
+                            quotaWaits += 1; continue   // all keys cooling — bounded, then fail fast
+                        }
                         let model = await reserveModel(preferred: first ? preferredModel : nil)
                         first = false
                         let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):streamGenerateContent?alt=sse&key=\(apiKey)")!
@@ -143,8 +161,9 @@ actor GeminiClient {
                         } catch let GeminiError.http(status) where status == 429 {
                             lastError = GeminiError.http(status)
                             quotaWaits += 1
-                            scheduler.penalize(model, seconds: 8)   // route around this model; reserveModel paces briefly
-                            Log.trace("streamSend: \(model) http(429) quota; pacing (\(quotaWaits)/\(maxQuotaWaits))")
+                            scheduler.penalize(model, seconds: 8)
+                            keyRotator.penalize(apiKey, seconds: 60)   // rotate off this key
+                            Log.trace("streamSend: \(model) http(429) quota; rotating key (\(quotaWaits)/\(maxQuotaWaits))")
                             continue
                         } catch let GeminiError.http(status) where [404, 408, 425, 500, 502, 503, 504].contains(status) {
                             lastError = GeminiError.http(status)
@@ -167,9 +186,6 @@ actor GeminiClient {
     func generateScript(task: String,
                         language: ToolLanguage,
                         context: SystemContext) async throws -> String {
-        guard let apiKey = apiKeyProvider(), !apiKey.isEmpty else {
-            throw GeminiError.missingAPIKey
-        }
         let prompt = """
         Write a single, self-contained \(language.rawValue) script that accomplishes this task:
 
@@ -188,7 +204,7 @@ actor GeminiClient {
             "generationConfig": ["temperature": 0.2]
         ]
         let body = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
-        let data = try await performWithFallback(apiKey: apiKey, body: body)
+        let data = try await performWithFallback(body: body)
         return Self.stripCodeFences(Self.extractText(from: data))
     }
 
@@ -196,15 +212,12 @@ actor GeminiClient {
     /// the planner and by agents synthesizing prose. Spreads across model buckets via
     /// performWithFallback (free-tier safe). Returns the model's text, fences stripped.
     func generateText(prompt: String, temperature: Double = 0.3) async throws -> String {
-        guard let apiKey = apiKeyProvider(), !apiKey.isEmpty else {
-            throw GeminiError.missingAPIKey
-        }
         let payload: [String: Any] = [
             "contents": [["role": "user", "parts": [["text": prompt]]]],
             "generationConfig": ["temperature": temperature]
         ]
         let body = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
-        let data = try await performWithFallback(apiKey: apiKey, body: body)
+        let data = try await performWithFallback(body: body)
         return Self.stripCodeFences(Self.extractText(from: data))
     }
 
@@ -257,13 +270,18 @@ actor GeminiClient {
     /// bucket and retries instead of grinding slow per-model backoff (which used to
     /// hang multi-call autonomous tasks for minutes). Only genuinely-broken models
     /// exhaust the attempt budget.
-    private func performWithFallback(apiKey: String, body: Data) async throws -> Data {
+    private func performWithFallback(body: Data) async throws -> Data {
+        keyRotator.update(keys: currentKeys())
+        guard !keyRotator.isEmpty else { throw GeminiError.missingAPIKey }
         var lastError: Error = GeminiError.emptyResponse
         let maxAttempts = 6
         let maxQuotaWaits = 3      // brief pacing for per-minute spikes; fail fast on a hard cap
         var attempt = 0
         var quotaWaits = 0
         while attempt < maxAttempts && quotaWaits < maxQuotaWaits {
+            guard let apiKey = await reserveKey(paceIfBlocked: true) else {
+                quotaWaits += 1; continue   // all keys cooling — bounded, then fail fast
+            }
             let model = await reserveModel()
             let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent?key=\(apiKey)")!
             do {
@@ -273,8 +291,9 @@ actor GeminiClient {
             } catch let GeminiError.http(status) where status == 429 {
                 lastError = GeminiError.http(status)
                 quotaWaits += 1
-                scheduler.penalize(model, seconds: 8)   // route around this model; reserveModel paces briefly
-                Log.trace("gemini: \(model) http(429); pacing (\(quotaWaits)/\(maxQuotaWaits))")
+                scheduler.penalize(model, seconds: 8)
+                keyRotator.penalize(apiKey, seconds: 60)   // rotate off this key
+                Log.trace("gemini: \(model) http(429); rotating key (\(quotaWaits)/\(maxQuotaWaits))")
                 continue
             } catch let GeminiError.http(status) where [404, 408, 425, 500, 502, 503, 504].contains(status) {
                 lastError = GeminiError.http(status)

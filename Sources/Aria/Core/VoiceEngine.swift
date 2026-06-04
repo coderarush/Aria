@@ -16,7 +16,13 @@ final class VoiceEngine: NSObject {
     /// Aria's TTS plays through the shared AudioBus (so the echo canceller has her
     /// exact audio as its far-end reference and can be stopped instantly on barge-in).
     weak var audioBus: AudioBus?
-    private let keyProvider: () -> String? = { KeychainManager.read(account: KeychainKey.geminiAPIKey) }
+    // The keychain item may hold several keys (one per line); TTS uses the first.
+    private let keyProvider: () -> String? = {
+        (KeychainManager.read(account: KeychainKey.geminiAPIKey) ?? "")
+            .split(whereSeparator: { $0 == "\n" || $0 == "," })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { !$0.isEmpty }
+    }
 
     var enabled = true
 
