@@ -5,9 +5,9 @@ final class AudioFrameMathTests: XCTestCase {
     func testFloatToInt16Clamps() {
         XCTAssertEqual(AudioFrameMath.int16(fromFloat: 0), 0)
         XCTAssertEqual(AudioFrameMath.int16(fromFloat: 1.0), 32767)
-        XCTAssertEqual(AudioFrameMath.int16(fromFloat: -1.0), -32768)
-        XCTAssertEqual(AudioFrameMath.int16(fromFloat: 2.0), 32767)   // clamp high
-        XCTAssertEqual(AudioFrameMath.int16(fromFloat: -2.0), -32768) // clamp low
+        XCTAssertEqual(AudioFrameMath.int16(fromFloat: -1.0), -32767)  // symmetric scale
+        XCTAssertEqual(AudioFrameMath.int16(fromFloat: 2.0), 32767)    // clamp high
+        XCTAssertEqual(AudioFrameMath.int16(fromFloat: -2.0), -32767)  // clamp low
     }
 
     func testFrameRingEmitsFixedFrames() {
