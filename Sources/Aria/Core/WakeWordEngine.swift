@@ -21,6 +21,11 @@ final class WakeWordEngine {
     var onCommandEmpty: (() -> Void)?
     var onAudioLevel: ((Float) -> Void)?
     var onError: ((String) -> Void)?
+    /// Experimental speaker gate: when set, a detected wake only proceeds if this
+    /// returns true for the utterance's voiceprint. nil (default) = no gating.
+    var verifyWake: (([Float]) -> Bool)? { didSet { gateActive = (verifyWake != nil) } }
+    private nonisolated(unsafe) var gateActive = false
+    private var recentVoiceprints: [[Float]] = []
 
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     private var request: SFSpeechAudioBufferRecognitionRequest?
@@ -93,12 +98,18 @@ final class WakeWordEngine {
         feedLock.lock(); let req = feedRequest; feedLock.unlock()
         req?.append(buf)
         let rms = WakeWordEngine.rms(samples)
-        Task { @MainActor in self.noteAudio(level: rms) }
+        // Only fingerprint voiced frames while the speaker gate is active (off by default).
+        let voiceprint: [Float]? = (gateActive && rms > 0.05) ? VoiceFeatures.extract(samples) : nil
+        Task { @MainActor in self.noteAudio(level: rms, voiceprint: voiceprint) }
     }
 
-    @MainActor private func noteAudio(level: Float) {
+    @MainActor private func noteAudio(level: Float, voiceprint: [Float]? = nil) {
         lifecycle.sawAudio(at: Date.timeIntervalSinceReferenceDate)
         onAudioLevel?(min(1, max(0, level)))
+        if let vp = voiceprint {
+            recentVoiceprints.append(vp)
+            if recentVoiceprints.count > 30 { recentVoiceprints.removeFirst(recentVoiceprints.count - 30) }
+        }
     }
 
     // MARK: Recognition session
@@ -193,6 +204,18 @@ final class WakeWordEngine {
     }
 
     private func enterCommandMode(initialTranscript: String) {
+        // Experimental speaker gate: reject the wake if the voice doesn't match the
+        // enrolled owner. Inert (always proceeds) unless a gate is wired + enrolled.
+        if let verify = verifyWake, !recentVoiceprints.isEmpty {
+            let print = SpeakerVerifier.averaged(recentVoiceprints)
+            recentVoiceprints = []
+            if !verify(print) {
+                Log.trace("wake rejected — voice didn't match the enrolled owner")
+                return
+            }
+        } else {
+            recentVoiceprints = []
+        }
         mode = .command
         committedCommand = ""
         commandBuffer = stripWakePhrase(from: initialTranscript, original: initialTranscript)

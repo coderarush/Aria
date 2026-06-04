@@ -163,6 +163,13 @@ struct ConversationSettingsTab: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             } header: { Text("Barge-in") }
+
+            Section {
+                Toggle("Only respond to my voice", isOn: $settings.speakerVerificationEnabled)
+                Button("Teach Aria my voice") { NotificationCenter.default.post(name: .ariaEnrollVoice, object: nil) }
+                Text("Experimental. After enabling, click “Teach Aria my voice”, then say “Hey Aria” a few times. She'll bias toward your voice and ignore others. Basic on-device voiceprint — not a hard security guarantee.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } header: { Text("Speaker verification") }
         }
         .formStyle(.grouped)
     }

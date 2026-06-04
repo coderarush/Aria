@@ -12,6 +12,7 @@ final class AriaController {
     private let wakeEngine = WakeWordEngine()
     private let voice = VoiceEngine()
     private let bargeController = BargeController()
+    private let speakerGate = SpeakerGate()
     private let orchestrator = AgentOrchestrator()
     private let patternEngine = PatternEngine()
     private var panel: IslandPanel?
@@ -223,6 +224,25 @@ final class AriaController {
         let threshold = 1800.0 - s * 1500.0      // ~1800 (needs loud) … ~300 (touchy)
         let onset = Int((4.0 - s * 2.0).rounded()) // 4 frames (40 ms) … 2 frames (20 ms)
         bargeController.configure(onsetFrames: onset, energyThreshold: threshold)
+        refreshSpeakerGate()
+    }
+
+    /// Wire (or unwire) the experimental speaker gate. verifyWake is only set when the
+    /// gate is active (enrolling, or enabled + enrolled) so the wake path is untouched
+    /// by default — accept() itself always allows when inert.
+    private func refreshSpeakerGate() {
+        speakerGate.enabled = AppSettings.shared.speakerVerificationEnabled
+        wakeEngine.verifyWake = speakerGate.isActive ? { [weak self] f in self?.speakerGate.accept(f) ?? true } : nil
+    }
+
+    /// Capture the next few "Hey Aria" utterances as the owner's voiceprint.
+    func enrollOwnerVoice() {
+        speakerGate.onEnrollmentComplete = { [weak self] in
+            self?.refreshSpeakerGate()
+            self?.islandViewModel.beginListening()
+        }
+        speakerGate.beginEnrollment()
+        refreshSpeakerGate()   // sets verifyWake so enrollment frames accumulate
     }
 
     private func applyVoiceSettings() {
@@ -238,12 +258,17 @@ final class AriaController {
                                                           accent: AppSettings.shared.accentColor)
         }
         refreshTheme()
-        settingsCancellable = Publishers.Merge3(
-            AppSettings.shared.$accentChoiceRaw.map { _ in () },
-            AppSettings.shared.$glowPaletteID.map { _ in () },
-            AppSettings.shared.$bargeInSensitivity.map { _ in () })
+        settingsCancellable = Publishers.MergeMany(
+            AppSettings.shared.$accentChoiceRaw.map { _ in () }.eraseToAnyPublisher(),
+            AppSettings.shared.$glowPaletteID.map { _ in () }.eraseToAnyPublisher(),
+            AppSettings.shared.$bargeInSensitivity.map { _ in () }.eraseToAnyPublisher(),
+            AppSettings.shared.$speakerVerificationEnabled.map { _ in () }.eraseToAnyPublisher())
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in refreshTheme(); self?.applyConversationSettings() }
+        // The Settings "teach my voice" button posts this; enroll from live wakes.
+        NotificationCenter.default.addObserver(forName: .ariaEnrollVoice, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.enrollOwnerVoice() }
+        }
         applyVoiceSettings()
         applyConversationSettings()
         voice.audioBus = audioBus

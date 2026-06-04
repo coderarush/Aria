@@ -62,6 +62,8 @@ final class AppSettings: ObservableObject {
     @Published var echoCancellation: Bool { didSet { defaults.set(echoCancellation, forKey: K.echoCancellation) } }
     @Published var bargeInSensitivity: Double { didSet { defaults.set(bargeInSensitivity, forKey: K.bargeInSensitivity) } }
     @Published var conversationSilenceTimeout: Double { didSet { defaults.set(conversationSilenceTimeout, forKey: K.conversationSilenceTimeout) } }
+    /// Experimental: only respond to the enrolled owner's voice.
+    @Published var speakerVerificationEnabled: Bool { didSet { defaults.set(speakerVerificationEnabled, forKey: K.speakerVerificationEnabled) } }
 
     var accentChoice: AccentChoice {
         get { Theme.decodeChoice(accentChoiceRaw) }
@@ -90,6 +92,7 @@ final class AppSettings: ObservableObject {
         bargeInEnabled = defaults.object(forKey: K.bargeInEnabled) as? Bool ?? true
         bargeInSensitivity = defaults.object(forKey: K.bargeInSensitivity) as? Double ?? 0.5
         conversationSilenceTimeout = defaults.object(forKey: K.conversationSilenceTimeout) as? Double ?? 9
+        speakerVerificationEnabled = defaults.bool(forKey: K.speakerVerificationEnabled)
     }
 
     /// Register/unregister the app as a login item (SMAppService, macOS 13+).
@@ -121,5 +124,6 @@ final class AppSettings: ObservableObject {
         static let echoCancellation = "app.echoCancellation"
         static let bargeInSensitivity = "app.bargeInSensitivity"
         static let conversationSilenceTimeout = "app.conversationSilenceTimeout"
+        static let speakerVerificationEnabled = "app.speakerVerificationEnabled"
     }
 }
