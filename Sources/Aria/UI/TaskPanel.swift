@@ -1,6 +1,14 @@
 import AppKit
 import SwiftUI
 
+/// NSHostingView that lets a click reach its SwiftUI controls even when the host
+/// panel isn't the key window. Without this, the first click on the Stop button in
+/// a non-activating accessory-app panel is swallowed by window activation instead
+/// of firing the button.
+final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
 /// Floating panel hosting the task checklist, positioned top-right of the main screen.
 final class TaskPanel: NSPanel {
     init(viewModel: TaskViewModel) {
@@ -10,13 +18,15 @@ final class TaskPanel: NSPanel {
             backing: .buffered,
             defer: false)
         isFloatingPanel = true
-        level = .statusBar
+        // Above the full-screen island glow overlay (which sits at .statusBar), so
+        // nothing can sit over the Stop button.
+        level = .popUpMenu
         backgroundColor = .clear
         isOpaque = false
         hasShadow = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         isMovableByWindowBackground = true
-        contentView = NSHostingView(rootView: TaskPanelView(viewModel: viewModel))
+        contentView = FirstMouseHostingView(rootView: TaskPanelView(viewModel: viewModel))
     }
 
     override var canBecomeKey: Bool { true }

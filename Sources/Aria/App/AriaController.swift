@@ -401,6 +401,10 @@ final class AriaController {
         speechStartedAt = Date()
         islandViewModel.beginThinking()
         applyVoiceSettings()
+        // Task narration is the "JARVIS speaking" moment — always use the natural
+        // Gemini voice (it auto-falls back to Apple only if Gemini errors). Scoped to
+        // the task: handleCommand re-applies the user's chosen voice each chat turn.
+        voice.kind = .gemini
 
         // The voice queue drains several times during a task (after the spoken plan,
         // between steps). Only re-arm wake once the task is DONE (taskActive == false),
