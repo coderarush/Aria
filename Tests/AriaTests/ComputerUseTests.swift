@@ -1,0 +1,43 @@
+import XCTest
+@testable import Aria
+
+final class ComputerUseTests: XCTestCase {
+    func testActionableRoles() {
+        XCTAssertTrue(AXReader.isActionable(role: "AXButton"))
+        XCTAssertTrue(AXReader.isActionable(role: "AXTextField"))
+        XCTAssertFalse(AXReader.isActionable(role: "AXStaticText"))
+        XCTAssertFalse(AXReader.isActionable(role: "AXGroup"))
+    }
+
+    func testBestLabelPrefersTitleThenDescription() {
+        XCTAssertEqual(AXReader.bestLabel(title: "Export", description: "d", roleDescription: "r", value: "v"), "Export")
+        XCTAssertEqual(AXReader.bestLabel(title: "", description: "Save file", roleDescription: "button", value: ""), "Save file")
+        XCTAssertEqual(AXReader.bestLabel(title: " ", description: "", roleDescription: "button", value: "typed"), "typed")
+        XCTAssertEqual(AXReader.bestLabel(title: "", description: "", roleDescription: "", value: ""), "")
+    }
+
+    func testSummarizeNumbersElements() {
+        let els = [
+            UIElement(role: "AXButton", label: "Export", value: "", frame: .zero),
+            UIElement(role: "AXTextField", label: "Search", value: "cats", frame: .zero)
+        ]
+        let s = AXReader.summarize(els)
+        XCTAssertTrue(s.contains("1. [Button] Export"))
+        XCTAssertTrue(s.contains("2. [TextField] Search"))
+        XCTAssertTrue(s.contains("cats"))
+    }
+
+    func testKeyCombosResolve() {
+        XCTAssertNotNil(UIActuator.keyCodes["s"])
+        XCTAssertEqual(UIActuator.keyCodes["enter"], UIActuator.keyCodes["return"])
+        XCTAssertNotNil(UIActuator.keyCodes["escape"])
+        XCTAssertNil(UIActuator.keyCodes["f13"])
+    }
+
+    func testPilotParsesAction() {
+        let a = PilotAgent.parse(#"{"tool":"ui_click","input":{"label":"Export"}}"#)
+        XCTAssertEqual(a?.tool, "ui_click")
+        XCTAssertEqual(a?.input["label"], "Export")
+        XCTAssertNil(PilotAgent.parse("not json"))
+    }
+}

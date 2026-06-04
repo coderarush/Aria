@@ -17,7 +17,7 @@ final class SubAgentTests: XCTestCase {
 
     func testCrewPersonas() {
         let crew = SubAgentRegistry.crewInfo()
-        XCTAssertEqual(crew.count, 5)
+        XCTAssertEqual(crew.count, 6)   // + Pilot (v6 computer use)
         let orion = crew.first { $0.name == "Orion" }
         XCTAssertEqual(orion?.persona, "tracks down anything on the web")
         let nova = crew.first { $0.name == "Nova" }

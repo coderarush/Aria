@@ -47,7 +47,11 @@ actor ToolRegistry {
             OpenAppTool(),
             BrowserTool(),
             WebSearchTool(),
-            WebFetchTool()
+            WebFetchTool(),
+            UIReadTool(),
+            UIClickTool(),
+            UITypeTool(),
+            UIKeyTool()
         ]
     }
 }

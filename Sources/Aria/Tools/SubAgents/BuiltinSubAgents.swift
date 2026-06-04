@@ -169,6 +169,54 @@ struct CometAgent: SubAgent {
     }
 }
 
+/// Pilot — operates any Mac app's UI (sees the screen, clicks, types). Runs a capped
+/// perceive→act→perceive loop, because GUIs need to be re-read after each action.
+struct PilotAgent: SubAgent {
+    let name = "Pilot"
+    let description = "Operate any app's interface — click buttons, fill fields, run menus — to accomplish a goal on screen."
+    let persona = "the operator — drives apps hands-on"
+    let allowedTools = ["ui_read", "ui_click", "ui_type", "ui_key", "open_app"]
+
+    func execute(task: String, context: AgentContext) async -> AgentResult {
+        var log = ""
+        for _ in 0..<10 {
+            let screen = await context.runAction(AgentAction(tool: "ui_read", input: [:]), "")
+            let prompt = """
+            You operate this Mac's UI to accomplish: \(task)
+
+            What's on screen now:
+            \(screen.output)
+
+            Actions so far:\(log.isEmpty ? " (none)" : log)
+
+            Reply with ONE next action as a single JSON object and nothing else:
+            {"tool":"ui_click","input":{"label":"…"}}  OR  {"tool":"ui_type","input":{"text":"…"}}
+            {"tool":"ui_key","input":{"combo":"cmd+s"}}  OR  {"tool":"done","input":{"summary":"…"}}
+            Use "done" when the goal is complete or impossible.
+            """
+            let raw = (try? await context.gemini.generateText(prompt: prompt, temperature: 0.1)) ?? ""
+            guard let action = PilotAgent.parse(raw) else { break }
+            if action.tool == "done" { return .ok(action.input["summary"] ?? "Done.\(log)") }
+            let r = await context.runAction(AgentAction(tool: action.tool, input: action.input), "")
+            log += "\n• \(action.tool)(\(action.input.values.joined(separator: ","))) → \(r.output.prefix(60))"
+            if !r.success { log += " [failed]" }
+        }
+        return .ok("Operated the app.\(log)")
+    }
+
+    static func parse(_ raw: String) -> (tool: String, input: [String: String])? {
+        let cleaned = GeminiClient.stripCodeFences(raw)
+        guard let start = cleaned.firstIndex(of: "{"), let end = cleaned.lastIndex(of: "}"),
+              let data = String(cleaned[start...end]).data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tool = obj["tool"] as? String else { return nil }
+        let input = (obj["input"] as? [String: Any])?.reduce(into: [String: String]()) {
+            $0[$1.key] = String(describing: $1.value)
+        } ?? [:]
+        return (tool, input)
+    }
+}
+
 extension AgentContext {
     /// Cheap language sniff from a task string for CodeWriterAgent.
     static func languageHint(in task: String) -> String {
