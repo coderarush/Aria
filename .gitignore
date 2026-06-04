@@ -6,3 +6,9 @@ DerivedData/
 *.apikey
 xcuserdata/
 ruvector.db
+
+# Runtime agent/vector DB (not source)
+agentdb.rvf
+agentdb.rvf.lock
+*.rvf
+*.rvf.lock
