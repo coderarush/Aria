@@ -128,16 +128,14 @@ struct SaveNoteTool: AriaTool {
         guard !content.isEmpty else { throw ToolError.missingInput("content") }
         let title = (input["title"]?.isEmpty == false ? input["title"]! : Self.firstLineTitle(content))
 
-        // 1) Try Apple Notes (the user asked for "a note"). Notes wants the body as
-        //    HTML with the first line as the title.
+        // 1) Try Apple Notes (the user asked for "a note"). Notes derives the title
+        //    from the first line of the HTML body, so we make that a bold heading.
+        //    No hard-coded account/folder → uses the default account so it works on
+        //    any setup (iCloud or "On My Mac").
         let escapedTitle = Self.htmlEscape(title)
         let escapedBody = Self.htmlEscape(content).replacingOccurrences(of: "\n", with: "<br>")
         let notesScript = """
-        tell application "Notes"
-            tell account "iCloud"
-                make new note at folder "Notes" with properties {name:"\(Self.asLiteral(title))", body:"<div><b>\(escapedTitle)</b></div><div>\(escapedBody)</div>"}
-            end tell
-        end tell
+        tell application "Notes" to make new note with properties {body:"<div><b>\(escapedTitle)</b></div><div>\(escapedBody)</div>"}
         """
         let notes = await AppleScriptTool.execute(notesScript)
         if notes.success {
