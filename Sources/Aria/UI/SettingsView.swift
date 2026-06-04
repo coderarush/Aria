@@ -5,7 +5,7 @@ import AVFoundation
 struct SettingsView: View {
     enum Section: String, CaseIterable, Identifiable {
         case general = "General", voice = "Voice", conversation = "Conversation",
-             apiKey = "API Key", tools = "Tools", dynamic = "Dynamic", brain = "Brain", mirror = "Mirror"
+             apiKey = "API Key", tools = "Tools", dynamic = "Dynamic", brain = "Brain", mirror = "Mirror", crew = "Crew"
         var id: String { rawValue }
         var icon: String {
             switch self {
@@ -17,6 +17,7 @@ struct SettingsView: View {
             case .dynamic:      return "sparkles"
             case .brain:        return "brain"
             case .mirror:       return "rectangle.on.rectangle"
+            case .crew:         return "person.3"
             }
         }
     }
@@ -50,6 +51,7 @@ struct SettingsView: View {
         case .dynamic:      DynamicToolsTab()
         case .brain:        BrainTab()
         case .mirror:       MirrorTab()
+        case .crew:         CrewSettingsTab()
         }
     }
 }
@@ -357,6 +359,38 @@ struct MirrorTab: View {
     private func persist() {
         s.port = Int(portText) ?? 8765
         s.save()
+    }
+}
+
+// MARK: Crew
+
+struct CrewSettingsTab: View {
+    private let crew = SubAgentRegistry.crewInfo()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Crew")
+                .font(.title3.bold())
+            Text("Aria\u{2019}s specialist sub-agents \u{2014} each handles a kind of work.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 4)
+        .padding(.bottom, 8)
+
+        Form {
+            Section {
+                ForEach(crew, id: \.name) { c in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(c.name).font(.headline)
+                        Text(c.persona).font(.caption).foregroundStyle(.secondary)
+                        Text(c.description).font(.caption2).foregroundStyle(.tertiary)
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        }
+        .formStyle(.grouped)
     }
 }
 
