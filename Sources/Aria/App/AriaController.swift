@@ -14,6 +14,8 @@ final class AriaController {
     private let orchestrator = AgentOrchestrator()
     private let patternEngine = PatternEngine()
     private var panel: IslandPanel?
+    private let taskViewModel = TaskViewModel()
+    private var taskPanel: TaskPanel?
     private var learningTimer: Timer?
     private var settingsCancellable: AnyCancellable?
     /// True while Aria is speaking; keeps wake suspended even if the pill
@@ -178,6 +180,17 @@ final class AriaController {
                 Log.trace("island hidden → wake re-armed (isSuspended=false)")
             }
         }
+
+        // Task panel — floats top-right while an autonomous task is running.
+        taskPanel = TaskPanel(viewModel: taskViewModel)
+        taskViewModel.onVisibilityChange = { [weak self] visible in
+            guard let p = self?.taskPanel else { return }
+            if visible { p.reposition(); p.orderFrontRegardless() } else { p.orderOut(nil) }
+        }
+        taskViewModel.onStop = { [weak self] in
+            self?.currentTurnTask?.cancel()
+            self?.taskViewModel.hide()
+        }
     }
 
     private func setPanelVisible(_ visible: Bool) {
@@ -314,6 +327,12 @@ final class AriaController {
         if lower.contains("dismiss") || lower.contains("thanks aria") || lower.contains("never mind") {
             streamVoice.stop(); session?.end(); return
         }
+
+        if IntentRouter.isTask(command) {
+            runAutonomousTask(command)
+            return
+        }
+
         wakeEngine.isSuspended = true
         isSpeaking = true
         speechStartedAt = Date()
@@ -360,6 +379,49 @@ final class AriaController {
                 }
                 // Safety: if nothing was spoken (empty reply/error), re-arm anyway.
                 if !self.streamVoice.isSpeaking { self.streamVoice.onAllFinished?() }
+            }
+        }
+    }
+
+    private func runAutonomousTask(_ goal: String) {
+        wakeEngine.isSuspended = true
+        isSpeaking = true
+        speechStartedAt = Date()
+        islandViewModel.beginThinking()
+        applyVoiceSettings()
+
+        streamVoice.onAllFinished = { [weak self] in
+            guard let self else { return }
+            self.isSpeaking = false
+            self.wakeEngine.freshTurn()
+            self.wakeEngine.isSuspended = false
+            self.islandViewModel.beginListening()
+        }
+
+        currentTurnTask = Task { [weak self] in
+            guard let self else { return }
+            await self.orchestrator.runTask(goal: goal) { event in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    switch event {
+                    case .planReady(let plan):
+                        self.taskViewModel.show(plan)
+                    case .stepStarted(let i):
+                        self.taskViewModel.markRunning(i)
+                    case .stepFinished(let i, let ok, let result):
+                        self.taskViewModel.markFinished(i, ok: ok, result: result)
+                    case .narrate(let line):
+                        self.islandViewModel.appendResponse(line + " ")
+                        self.streamVoice.enqueue(line)
+                    case .finished(_, let summary):
+                        self.streamVoice.enqueue(summary)
+                        if !self.streamVoice.isSpeaking { self.streamVoice.onAllFinished?() }
+                        Task { [weak self] in
+                            try? await Task.sleep(nanoseconds: 4_000_000_000)
+                            await MainActor.run { self?.taskViewModel.hide() }
+                        }
+                    }
+                }
             }
         }
     }

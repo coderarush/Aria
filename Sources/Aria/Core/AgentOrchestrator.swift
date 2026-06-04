@@ -206,6 +206,26 @@ actor AgentOrchestrator {
                 "overwrite", "drop ", "kill"].contains { t.contains($0) }
     }
 
+    /// Run a multi-step autonomous task. Emits `TaskEvent` values as each planning
+    /// and execution step completes. Hooks into the same `execute` + `confirmationHandler`
+    /// plumbing used by the normal command path.
+    func runTask(goal: String, emit: @escaping @Sendable (TaskEvent) -> Void) async {
+        // currentSystemContext() is @MainActor, so we hop to it explicitly.
+        let context = await MainActor.run { Self.currentSystemContext() }
+        let engine = AutonomyEngine(
+            gemini: gemini,
+            registry: registry,
+            subAgents: subAgents,
+            context: context,
+            runAction: { [weak self] act, prior in
+                await self?.execute(act, priorOutput: prior, context: context) ?? .fail("orchestrator gone")
+            },
+            confirm: { [weak self] prompt in
+                await self?.confirmationHandler?(prompt) ?? false
+            })
+        await engine.run(goal: goal, emit: emit)
+    }
+
     /// Streaming answer path (Phase 2: text + native function-calling loop).
     /// Calls `onText` with each text delta; runs up to maxRounds agentic turns.
     func handleStreaming(command: String, privacyMode: Bool,
