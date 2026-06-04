@@ -142,13 +142,16 @@ final class WakeWordEngine {
     private func ensureAudioEngineRunning() throws {
         guard !audioEngine.isRunning else { return }
         let input = audioEngine.inputNode
-        // NOTE: voice-processing I/O (setVoiceProcessingEnabled) was tried here for
-        // echo cancellation (to enable barge-in), but on this hardware it changed
-        // the input format and silently broke recognition — no buffers reached
-        // SFSpeech, so wake stopped working entirely. Hearing the user is
-        // non-negotiable, so AEC is disabled until it can be made robust + live-
-        // tested. Barge-in defaults OFF without it (see AppSettings.bargeInEnabled).
-        let format = input.inputFormat(forBus: 0)
+        // Echo cancellation enables barge-in. CRITICAL FIX vs. the earlier attempt:
+        // after enabling voice processing, tap the node's OUTPUT format (the
+        // processed format the node actually delivers), NOT its input format —
+        // tapping the wrong format silently delivers no buffers and breaks
+        // recognition (that was the deafness bug). Gated by a setting so a
+        // misbehaving device can turn it off in Settings → Conversation.
+        if AppSettings.shared.echoCancellation {
+            try? input.setVoiceProcessingEnabled(true)
+        }
+        let format = input.outputFormat(forBus: 0)
         // A zero sample rate means there is no usable input device.
         guard format.sampleRate > 0 else {
             throw NSError(domain: "Aria.Wake", code: 3,

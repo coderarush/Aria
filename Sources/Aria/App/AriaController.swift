@@ -315,8 +315,7 @@ final class AriaController {
         isSpeaking = true
         speechStartedAt = Date()
         applyVoiceSettings()
-        islandViewModel.beginListening()
-        islandViewModel.showResponse("")
+        islandViewModel.beginThinking()
         // Apple voice streams per sentence (instant). The Gemini cloud voice speaks
         // the whole reply in ONE call at the end — per-sentence Gemini calls burn
         // quota fast and fall back to the robotic Apple voice.
@@ -329,6 +328,7 @@ final class AriaController {
             // she spoke) doesn't leak into the next turn, then resume listening.
             self.wakeEngine.freshTurn()
             self.wakeEngine.isSuspended = false
+            self.islandViewModel.beginListening()   // show "Listening…" for a follow-up
             self.convSilenceTimer?.invalidate()
             self.convSilenceTimer = Timer.scheduledTimer(withTimeInterval: AppSettings.shared.conversationSilenceTimeout, repeats: false) { [weak self] _ in
                 Task { @MainActor in self?.session?.end() }
@@ -339,13 +339,14 @@ final class AriaController {
             await self.orchestrator.handleStreaming(command: command, privacyMode: AppSettings.shared.privacyMode) { delta in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
-                    self.islandViewModel.responseText += delta
+                    self.islandViewModel.appendResponse(delta)   // caption streams; no auto-dismiss
                     if streamPerSentence {
                         for chunk in chunker.push(delta) { self.streamVoice.enqueue(chunk) }
                     }
                 }
             }
             await MainActor.run {
+                if Task.isCancelled { return }   // barge-in cancelled this turn — don't resume speaking
                 if streamPerSentence {
                     let tail = chunker.flush()
                     if !tail.isEmpty { self.streamVoice.enqueue(tail) }
@@ -354,7 +355,6 @@ final class AriaController {
                     let full = self.islandViewModel.responseText.trimmingCharacters(in: .whitespacesAndNewlines)
                     if !full.isEmpty { self.streamVoice.enqueue(full) }
                 }
-                self.islandViewModel.showResponse(self.islandViewModel.responseText)
                 // Safety: if nothing was spoken (empty reply/error), re-arm anyway.
                 if !self.streamVoice.isSpeaking { self.streamVoice.onAllFinished?() }
             }

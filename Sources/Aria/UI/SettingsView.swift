@@ -140,6 +140,9 @@ struct ConversationSettingsTab: View {
 
         Form {
             Section {
+                Toggle("Echo cancellation (needed for barge-in)", isOn: $settings.echoCancellation)
+                Text("If Aria stops hearing you after changing this, turn it off and relaunch.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Toggle("Let me interrupt Aria (barge-in)", isOn: $settings.bargeInEnabled)
                 HStack {
                     Text("Barge-in sensitivity")
