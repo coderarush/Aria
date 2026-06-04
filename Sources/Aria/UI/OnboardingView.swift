@@ -11,7 +11,6 @@ struct OnboardingView: View {
     @State private var micGranted = false
     @State private var apiKey = ""
     @State private var apiStatus = ""
-    @State private var naturalVoiceInstalled = false
 
     // Steps: 0=Welcome 1=Mic 2=Screen 3=APIKey 4=Voice 5=Done
     private let totalSteps = 6
@@ -125,7 +124,6 @@ struct OnboardingView: View {
             }
         }
         .frame(width: 560, height: 500)
-        .onAppear { naturalVoiceInstalled = VoiceEngine.hasNaturalVoiceInstalled() }
     }
 
     // MARK: Step views
@@ -217,44 +215,17 @@ struct OnboardingView: View {
 
     private var voiceStep: some View {
         VStack(spacing: 12) {
-            Text("Voice Setup")
+            Text("Aria\u{2019}s Voice")
                 .font(.system(size: 22, weight: .bold, design: .rounded))
-
-            if naturalVoiceInstalled {
-                VStack(spacing: 8) {
-                    Label("Natural voice installed", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                        .font(.callout.bold())
-                    Text("Aria will use the best available voice automatically.")
-                        .foregroundStyle(.secondary)
-                        .font(.callout)
-                        .multilineTextAlignment(.center)
-                }
-            } else {
-                VStack(spacing: 10) {
-                    Text("The default macOS voice sounds robotic. Installing a free Premium voice makes Aria far more pleasant to use.")
-                        .foregroundStyle(.secondary)
-                        .font(.callout)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 8)
-                    Button {
-                        VoiceEngine.openVoiceDownloadSettings()
-                    } label: {
-                        Label("Install a free voice\u{2026}", systemImage: "arrow.down.circle")
-                            .fontWeight(.medium)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(settings.accentColor)
-                    .controlSize(.regular)
-                    Text("System Settings \u{2192} Spoken Content \u{2192} Manage Voices \u{2192} English \u{2192} Premium (e.g. Ava, Zoe, Evan).")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 4)
-                }
-            }
+            Image(systemName: "waveform")
+                .font(.system(size: 34))
+                .foregroundStyle(settings.accentColor)
+            Text("Aria speaks with a natural Gemini voice — no setup needed. You can pick a different voice any time in Settings \u{2192} Voice.")
+                .foregroundStyle(.secondary)
+                .font(.callout)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 8)
         }
-        .onAppear { naturalVoiceInstalled = VoiceEngine.hasNaturalVoiceInstalled() }
     }
 
     private var doneStep: some View {
@@ -267,9 +238,6 @@ struct OnboardingView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 8)
         }
-        .onAppear {
-            AppSettings.shared.voiceIdentifier = VoiceEngine.bestVoiceIdentifier() ?? ""
-        }
     }
 
     // MARK: Navigation
@@ -280,10 +248,6 @@ struct OnboardingView: View {
             try? KeychainManager.save(apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
                                       account: KeychainKey.geminiAPIKey)
             apiStatus = "Saved."
-        }
-        // Auto-select best voice when leaving Voice step
-        if step == 4 {
-            AppSettings.shared.voiceIdentifier = VoiceEngine.bestVoiceIdentifier() ?? ""
         }
         if step >= totalSteps - 1 {
             onComplete()

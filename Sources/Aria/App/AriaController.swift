@@ -225,9 +225,6 @@ final class AriaController {
     private func applyVoiceSettings() {
         let s = AppSettings.shared
         voice.enabled = s.voiceEnabled
-        voice.voiceIdentifier = s.voiceIdentifier.isEmpty ? nil : s.voiceIdentifier
-        voice.rate = Float(s.voiceRate) * (AVSpeechUtteranceMaximumSpeechRate - AVSpeechUtteranceMinimumSpeechRate) + AVSpeechUtteranceMinimumSpeechRate
-        voice.kind = VoiceEngine.Kind(rawValue: s.voiceEngineKind) ?? .apple
         voice.geminiVoiceName = s.geminiVoiceName
     }
 
@@ -349,11 +346,8 @@ final class AriaController {
         speechStartedAt = Date()
         applyVoiceSettings()
         islandViewModel.beginThinking()
-        // Apple voice streams per sentence (instant). The Gemini cloud voice speaks
-        // the whole reply in ONE call at the end — per-sentence Gemini calls burn
-        // quota fast and fall back to the robotic Apple voice.
-        let streamPerSentence = AppSettings.shared.voiceEngineKind != "gemini"
-        var chunker = SentenceChunker()
+        // The Gemini voice speaks the whole reply in ONE call at the end — per-
+        // sentence TTS calls burn the free quota fast.
         streamVoice.onAllFinished = { [weak self] in
             guard let self else { return }
             self.isSpeaking = false
@@ -371,23 +365,14 @@ final class AriaController {
             guard let self else { return }
             await self.orchestrator.handleStreaming(command: command, privacyMode: AppSettings.shared.privacyMode) { delta in
                 Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    self.islandViewModel.appendResponse(delta)   // caption streams; no auto-dismiss
-                    if streamPerSentence {
-                        for chunk in chunker.push(delta) { self.streamVoice.enqueue(chunk) }
-                    }
+                    self?.islandViewModel.appendResponse(delta)   // caption streams; no auto-dismiss
                 }
             }
             await MainActor.run {
                 if Task.isCancelled { return }   // barge-in cancelled this turn — don't resume speaking
-                if streamPerSentence {
-                    let tail = chunker.flush()
-                    if !tail.isEmpty { self.streamVoice.enqueue(tail) }
-                } else {
-                    // Gemini voice: speak the whole reply in a single call.
-                    let full = self.islandViewModel.responseText.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !full.isEmpty { self.streamVoice.enqueue(full) }
-                }
+                // Speak the whole reply in a single Gemini call.
+                let full = self.islandViewModel.responseText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !full.isEmpty { self.streamVoice.enqueue(full) }
                 // Safety: if nothing was spoken (empty reply/error), re-arm anyway.
                 if !self.streamVoice.isSpeaking { self.streamVoice.onAllFinished?() }
             }
@@ -401,10 +386,6 @@ final class AriaController {
         speechStartedAt = Date()
         islandViewModel.beginThinking()
         applyVoiceSettings()
-        // Task narration is the "JARVIS speaking" moment — always use the natural
-        // Gemini voice (it auto-falls back to Apple only if Gemini errors). Scoped to
-        // the task: handleCommand re-applies the user's chosen voice each chat turn.
-        voice.kind = .gemini
 
         // The voice queue drains several times during a task (after the spoken plan,
         // between steps). Only re-arm wake once the task is DONE (taskActive == false),
