@@ -4,7 +4,7 @@ import SwiftUI
 struct SettingsView: View {
     enum Section: String, CaseIterable, Identifiable {
         case general = "General", voice = "Voice", conversation = "Conversation",
-             apiKey = "API Key", tools = "Tools", dynamic = "Dynamic", brain = "Brain", mirror = "Mirror", crew = "Crew"
+             apiKey = "API Key", memory = "Memory", tools = "Tools", dynamic = "Dynamic", brain = "Brain", mirror = "Mirror", crew = "Crew"
         var id: String { rawValue }
         var icon: String {
             switch self {
@@ -12,6 +12,7 @@ struct SettingsView: View {
             case .voice:        return "speaker.wave.2"
             case .conversation: return "bubble.left.and.bubble.right"
             case .apiKey:       return "key"
+            case .memory:       return "brain.head.profile"
             case .tools:        return "wrench.and.screwdriver"
             case .dynamic:      return "sparkles"
             case .brain:        return "brain"
@@ -46,6 +47,7 @@ struct SettingsView: View {
         case .voice:        VoiceSettingsTab()
         case .conversation: ConversationSettingsTab()
         case .apiKey:       APIKeyTab()
+        case .memory:       MemorySettingsTab()
         case .tools:        ToolsTab()
         case .dynamic:      DynamicToolsTab()
         case .brain:        BrainTab()
@@ -149,6 +151,27 @@ struct ConversationSettingsTab: View {
                 Text("Talk to Aria in a continuous back-and-forth — after she answers, just speak your next question (no need to say “Hey Aria” again). She stops listening after this much silence.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+
+            Section {
+                Toggle("Let me interrupt her (talk-over)", isOn: $settings.bargeInEnabled)
+                if settings.bargeInEnabled {
+                    HStack {
+                        Text("Interrupt sensitivity")
+                        Slider(value: $settings.bargeInSensitivity, in: 0...1, step: 0.05)
+                        Text(settings.bargeInSensitivity < 0.34 ? "Low" : settings.bargeInSensitivity < 0.67 ? "Med" : "High")
+                            .monospacedDigit().foregroundStyle(.secondary)
+                    }
+                    Text("Start talking while Aria is speaking and she'll stop and listen — powered by on-device echo cancellation. Higher sensitivity interrupts more easily (but may trigger on background noise).")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            } header: { Text("Barge-in") }
+
+            Section {
+                Toggle("Only respond to my voice", isOn: $settings.speakerVerificationEnabled)
+                Button("Teach Aria my voice") { NotificationCenter.default.post(name: .ariaEnrollVoice, object: nil) }
+                Text("Experimental. After enabling, click “Teach Aria my voice”, then say “Hey Aria” a few times. She'll bias toward your voice and ignore others. Basic on-device voiceprint — not a hard security guarantee.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } header: { Text("Speaker verification") }
         }
         .formStyle(.grouped)
     }
@@ -157,12 +180,21 @@ struct ConversationSettingsTab: View {
 // MARK: API key
 
 struct APIKeyTab: View {
+    @StateObject private var settings = AppSettings.shared
     @State private var key: String = ""
+    @State private var groq: String = ""
+    @State private var cerebras: String = ""
+    @State private var openRouter: String = ""
     @State private var status: String = ""
+
+    private var keyCount: Int {
+        key.split(whereSeparator: { $0 == "\n" || $0 == "," })
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.count
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Your Gemini Key")
+            Text("Your Gemini Keys")
                 .font(.title3.bold())
             Text("Stored securely in the macOS Keychain. Never transmitted by Aria.")
                 .font(.caption)
@@ -173,32 +205,117 @@ struct APIKeyTab: View {
 
         Form {
             Section {
-                SecureField("Gemini API key", text: $key)
+                TextEditor(text: $key)
+                    .font(.system(.body, design: .monospaced))
+                    .frame(minHeight: 90)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
                 HStack {
-                    Button("Save") { save() }
+                    Button("Save") { save() }.buttonStyle(.borderedProminent)
                     Button("Clear") {
                         KeychainManager.delete(account: KeychainKey.geminiAPIKey)
                         key = ""; status = "Cleared."
                     }
+                    Spacer()
+                    Text("\(keyCount) key\(keyCount == 1 ? "" : "s")").foregroundStyle(.secondary).font(.caption)
                 }
-                if !status.isEmpty { Text(status).foregroundStyle(.secondary).font(.caption) }
-            } header: { Text("API Key") }
+                if !status.isEmpty { Text(status).foregroundStyle(.green).font(.caption) }
+                Text("One key per line. Aria rotates across them — when one hits its daily free-tier limit, she switches to the next. **Click Save** after pasting.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } header: { Text("API Keys") }
 
             Section {
-                Text("Get a free key at aistudio.google.com. The free tier is sufficient for most use.")
+                Text("Get free keys at aistudio.google.com. Each Google project has its own free daily quota, so adding 2–3 keys from different projects multiplies how much you can do for free.")
                     .font(.caption).foregroundStyle(.secondary)
-            } header: { Text("About") }
+            } header: { Text("More free quota") }
+
+            Section {
+                SecureField("Groq key (groq.com — free, fast)", text: $groq)
+                SecureField("Cerebras key (cerebras.ai — free, fast)", text: $cerebras)
+                SecureField("OpenRouter key (openrouter.ai — free tier)", text: $openRouter)
+                Text("When your Gemini quota runs out, Aria automatically continues on these free, fast providers — so she keeps working. Each is free to sign up; add any you like, then Save.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } header: { Text("Free fallback providers") }
+
+            Section {
+                Toggle("Use a local model when everything else is out (Ollama)", isOn: $settings.localModelEnabled)
+                if settings.localModelEnabled {
+                    TextField("Ollama model", text: $settings.localModelName)
+                    Text("Last resort — works offline. Requires Ollama running (ollama.com) with the model pulled. Slower, but never hits a limit.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            } header: { Text("Local model") }
         }
         .formStyle(.grouped)
-        .onAppear { key = KeychainManager.read(account: KeychainKey.geminiAPIKey) ?? "" }
+        .onAppear {
+            key = KeychainManager.read(account: KeychainKey.geminiAPIKey) ?? ""
+            groq = KeychainManager.read(account: KeychainKey.groqAPIKey) ?? ""
+            cerebras = KeychainManager.read(account: KeychainKey.cerebrasAPIKey) ?? ""
+            openRouter = KeychainManager.read(account: KeychainKey.openRouterAPIKey) ?? ""
+        }
     }
 
     private func save() {
-        do {
-            try KeychainManager.save(key.trimmingCharacters(in: .whitespacesAndNewlines),
-                                     account: KeychainKey.geminiAPIKey)
-            status = "Saved to Keychain."
-        } catch { status = "Save failed: \(error.localizedDescription)" }
+        func put(_ v: String, _ account: String) {
+            let t = v.trimmingCharacters(in: .whitespacesAndNewlines)
+            if t.isEmpty { KeychainManager.delete(account: account) } else { try? KeychainManager.save(t, account: account) }
+        }
+        put(key, KeychainKey.geminiAPIKey)
+        put(groq, KeychainKey.groqAPIKey)
+        put(cerebras, KeychainKey.cerebrasAPIKey)
+        put(openRouter, KeychainKey.openRouterAPIKey)
+        status = "Saved \(keyCount) Gemini key\(keyCount == 1 ? "" : "s") + providers to Keychain."
+    }
+}
+
+// MARK: Memory
+
+struct MemorySettingsTab: View {
+    @State private var facts: [MemoryFact] = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("What Aria Remembers")
+                .font(.title3.bold())
+            Text("Durable facts Aria recalls across sessions. Say “remember that …” to add one.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 4).padding(.bottom, 8)
+
+        Form {
+            Section {
+                if facts.isEmpty {
+                    Text("Nothing remembered yet.").foregroundStyle(.secondary).font(.callout)
+                } else {
+                    ForEach(facts) { fact in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(fact.text).font(.system(size: 13))
+                                Text(fact.createdAt.formatted(date: .abbreviated, time: .omitted))
+                                    .font(.caption2).foregroundStyle(.tertiary)
+                            }
+                            Spacer()
+                            Button(role: .destructive) {
+                                Task { await LongTermMemory.shared.forget(id: fact.id); await reload() }
+                            } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
+                        }
+                    }
+                }
+            } header: { Text("Memories (\(facts.count))") }
+
+            if !facts.isEmpty {
+                Section {
+                    Button("Forget everything", role: .destructive) {
+                        Task { await LongTermMemory.shared.clear(); await reload() }
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .task { await reload() }
+    }
+
+    private func reload() async {
+        facts = await LongTermMemory.shared.all().sorted { $0.createdAt > $1.createdAt }
     }
 }
 

@@ -8,8 +8,11 @@ import Combine
 final class AriaController {
 
     let islandViewModel = IslandViewModel()
+    private let audioBus = AudioBus()
     private let wakeEngine = WakeWordEngine()
     private let voice = VoiceEngine()
+    private let bargeController = BargeController()
+    private let speakerGate = SpeakerGate()
     private let orchestrator = AgentOrchestrator()
     private let patternEngine = PatternEngine()
     private var panel: IslandPanel?
@@ -216,9 +219,30 @@ final class AriaController {
     // MARK: Engine wiring
 
     private func applyConversationSettings() {
-        // sensitivity 0…1 (1 = most sensitive) → threshold ~0.20 (loud) … 0.04 (sensitive)
+        // sensitivity 0…1 (1 = most sensitive) → lower RMS threshold + shorter onset.
         let s = AppSettings.shared.bargeInSensitivity
-        wakeEngine.bargeInThreshold = Float(0.20 - s * 0.16)
+        let threshold = 1800.0 - s * 1500.0      // ~1800 (needs loud) … ~300 (touchy)
+        let onset = Int((4.0 - s * 2.0).rounded()) // 4 frames (40 ms) … 2 frames (20 ms)
+        bargeController.configure(onsetFrames: onset, energyThreshold: threshold)
+        refreshSpeakerGate()
+    }
+
+    /// Wire (or unwire) the experimental speaker gate. verifyWake is only set when the
+    /// gate is active (enrolling, or enabled + enrolled) so the wake path is untouched
+    /// by default — accept() itself always allows when inert.
+    private func refreshSpeakerGate() {
+        speakerGate.enabled = AppSettings.shared.speakerVerificationEnabled
+        wakeEngine.verifyWake = speakerGate.isActive ? { [weak self] f in self?.speakerGate.accept(f) ?? true } : nil
+    }
+
+    /// Capture the next few "Hey Aria" utterances as the owner's voiceprint.
+    func enrollOwnerVoice() {
+        speakerGate.onEnrollmentComplete = { [weak self] in
+            self?.refreshSpeakerGate()
+            self?.islandViewModel.beginListening()
+        }
+        speakerGate.beginEnrollment()
+        refreshSpeakerGate()   // sets verifyWake so enrollment frames accumulate
     }
 
     private func applyVoiceSettings() {
@@ -234,13 +258,20 @@ final class AriaController {
                                                           accent: AppSettings.shared.accentColor)
         }
         refreshTheme()
-        settingsCancellable = Publishers.Merge(
-            AppSettings.shared.$accentChoiceRaw.map { _ in () },
-            AppSettings.shared.$glowPaletteID.map { _ in () })
+        settingsCancellable = Publishers.MergeMany(
+            AppSettings.shared.$accentChoiceRaw.map { _ in () }.eraseToAnyPublisher(),
+            AppSettings.shared.$glowPaletteID.map { _ in () }.eraseToAnyPublisher(),
+            AppSettings.shared.$bargeInSensitivity.map { _ in () }.eraseToAnyPublisher(),
+            AppSettings.shared.$speakerVerificationEnabled.map { _ in () }.eraseToAnyPublisher())
             .receive(on: RunLoop.main)
-            .sink { _ in refreshTheme() }
+            .sink { [weak self] _ in refreshTheme(); self?.applyConversationSettings() }
+        // The Settings "teach my voice" button posts this; enroll from live wakes.
+        NotificationCenter.default.addObserver(forName: .ariaEnrollVoice, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.enrollOwnerVoice() }
+        }
         applyVoiceSettings()
         applyConversationSettings()
+        voice.audioBus = audioBus
         voice.onStart = { [weak self] in
             self?.isSpeaking = true
             self?.wakeEngine.isSuspended = true
@@ -281,24 +312,40 @@ final class AriaController {
             self?.islandViewModel.beginListening()
             self?.islandViewModel.showError(message)
         }
-        // Barge-in (talk-over) is disabled: it requires echo cancellation, which
-        // breaks recognition on this hardware. Without AEC the mic hears Aria's own
-        // voice and would false-trigger, so we don't wire onSpeechOnset. The model
-        // is continuous follow-up: wait for her to finish, then talk (no re-wake).
+        // v5.1 talk-over barge-in. AudioBus feeds the CLEANED mic stream to the
+        // recognizer (audio thread → nonisolated acceptCleanedFrame) and to the
+        // BargeController, which watches its energy while Aria speaks. On talk-over
+        // it stops her and re-arms to capture what you say.
+        audioBus.onCleanedFrame = { [weak self] frame in
+            self?.wakeEngine.acceptCleanedFrame(frame)
+            self?.bargeController.feed(frame)
+        }
+        audioBus.onPlayStateChange = { [weak self] playing in
+            self?.bargeController.setPlaying(playing)
+        }
+        bargeController.onBarge = { [weak self] in
+            Task { @MainActor in self?.handleBarge() }
+        }
     }
 
     // MARK: Barge-in
 
-    private func handleBargeIn() {
-        guard AppSettings.shared.bargeInEnabled else { return }
-        guard isSpeaking else { return }                                    // only while she's talking
-        guard Date().timeIntervalSince(speechStartedAt) > 0.5 else { return } // arm-grace
-        Log.trace("barge-in — user interrupted")
-        streamVoice.stop()                  // stop TTS + clear queue
-        currentTurnTask?.cancel()           // cancel the in-flight stream
+    @MainActor private func handleBarge() {
+        guard AppSettings.shared.bargeInEnabled, isSpeaking else { return }
+        // Grace at the start of her speech: the AEC needs a moment to converge, so
+        // ignore the first ~400 ms to avoid a residual-echo false barge.
+        guard Date().timeIntervalSince(speechStartedAt) > 0.4 else { return }
+        Log.trace("barge-in — user talked over Aria")
+        streamVoice.stop()              // → AudioBus.stopPlayback()
+        currentTurnTask?.cancel()
+        taskActive = false
         isSpeaking = false
         convSilenceTimer?.invalidate()
-        wakeEngine.isSuspended = false      // capture the user's interrupting utterance
+        // Re-arm into command capture so the interrupting utterance becomes the next
+        // turn (she stopped the instant you spoke; now she listens).
+        wakeEngine.freshTurn()
+        wakeEngine.isSuspended = false
+        islandViewModel.beginListening()
     }
 
     private func startListening() {
@@ -315,12 +362,13 @@ final class AriaController {
                 return
             }
             do {
+                try audioBus.start()          // owns the mic; feeds cleaned frames to the wake engine
                 try wakeEngine.start()
-                Log.trace("wake engine started OK — listening for 'Hey Aria'")
+                Log.trace("audio bus + wake engine started OK — listening for 'Hey Aria'")
             }
             catch {
-                Log.trace("wake engine start FAILED: \(error.localizedDescription)")
-                Log.app.error("Wake engine failed to start: \(error.localizedDescription)")
+                Log.trace("audio/wake start FAILED: \(error.localizedDescription)")
+                Log.app.error("Audio/wake engine failed to start: \(error.localizedDescription)")
                 islandViewModel.beginListening()
                 islandViewModel.showError(error.localizedDescription)
             }

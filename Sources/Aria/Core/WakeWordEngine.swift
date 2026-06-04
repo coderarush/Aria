@@ -2,13 +2,14 @@ import Foundation
 import AVFoundation
 import Speech
 
-/// Always-on, on-device wake-word listener built on SFSpeechRecognizer +
-/// AVAudioEngine. Listens for "Hey Aria" (and common mishearings). On wake it
-/// switches to command-capture mode, accumulates the spoken command, and fires
-/// `onCommand` after a short trailing silence.
+/// Always-on wake-word listener built on SFSpeechRecognizer. As of v5.1 it no longer
+/// owns the mic — `AudioBus` owns one audio engine, runs echo cancellation, and feeds
+/// the CLEANED mic frames here via `acceptCleanedFrame`. Because the recognizer never
+/// hears Aria's own voice, talk-over barge-in works and self-trigger is gone; and a
+/// guarded restart + watchdog (RecognitionLifecycle) keeps it from ever going deaf.
 ///
-/// Recognition is restarted on a rolling interval so the phrase is never lost to
-/// SFSpeechRecognizer's ~1-minute session cap.
+/// Listens for "Hey Aria" (and common mishearings); on wake it captures the command
+/// and fires `onCommand` after a short trailing silence.
 @MainActor
 final class WakeWordEngine {
 
@@ -17,62 +18,53 @@ final class WakeWordEngine {
     // Callbacks (delivered on the main actor).
     var onWake: (() -> Void)?
     var onCommand: ((String) -> Void)?
-    /// Fired when the wake phrase was heard but no command followed.
     var onCommandEmpty: (() -> Void)?
     var onAudioLevel: ((Float) -> Void)?
-    /// Fired on the main actor when the VAD detects speech onset (used for barge-in).
-    var onSpeechOnset: (() -> Void)?
-    /// Surfaced setup/recognition failures (shown on the orb).
     var onError: ((String) -> Void)?
-
-    private var bargeVAD = VoiceActivity(onsetFrames: 4)
-    /// Higher = less sensitive (needs louder speech to barge in).
-    var bargeInThreshold: Float = 0.08 {
-        didSet { bargeVAD = VoiceActivity(threshold: bargeInThreshold, onsetFrames: 4) }
-    }
-    private var restartPending = false
+    /// Experimental speaker gate: when set, a detected wake only proceeds if this
+    /// returns true for the utterance's voiceprint. nil (default) = no gating.
+    var verifyWake: (([Float]) -> Bool)? { didSet { gateActive = (verifyWake != nil) } }
+    private nonisolated(unsafe) var gateActive = false
+    private var recentVoiceprints: [[Float]] = []
 
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
-    private let audioEngine = AVAudioEngine()
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
+    private var restartPending = false
 
+    // Audio-thread-safe handle to the current request: AudioBus calls
+    // `acceptCleanedFrame` from its audio thread, so the append must not touch
+    // main-actor state. The request pointer is swapped under a lock.
+    private let feedLock = NSLock()
+    private nonisolated(unsafe) var feedRequest: SFSpeechAudioBufferRecognitionRequest?
+    private nonisolated static let feedFormat = AVAudioFormat(commonFormat: .pcmFormatInt16,
+                                                              sampleRate: AudioBus.aecRate,
+                                                              channels: 1, interleaved: true)!
+
+    private var lifecycle = RecognitionLifecycle()
     private var mode: Mode = .wake
-    /// Bumped on every (re)start. A recognition task's completion callback only
-    /// acts if its id still matches — so deliberately cancelling the previous
-    /// task (which fires its callback with a cancellation error) does NOT
-    /// trigger another restart. Without this, each restart's cancel scheduled
-    /// the next restart: an infinite ~0.4s loop where recognition never lived
-    /// long enough to hear the wake word.
-    private var sessionID = 0
     private var commandBuffer = ""
-    /// Command text finalized from PRIOR recognition sessions in this capture.
-    /// SFSpeechRecognizer ends a session on silence; without carrying this
-    /// forward, a command spoken AFTER the wake word (not in the same breath)
-    /// is lost when the session restarts. Combined with the live session's
-    /// transcript to form `commandBuffer`.
     private var committedCommand = ""
     private var silenceTimer: Timer?
     private var rollingTimer: Timer?
+    private var watchdogTimer: Timer?
 
     private let wakeVariants = ["hey aria", "hey arya", "hey aria's",
                                "hey, aria", "aria", "hey ariel"]
-    private let commandSilence: TimeInterval = 1.4   // trailing silence once speaking
-    private let commandLeadGrace: TimeInterval = 6.0 // time to START the command after wake
+    private let commandSilence: TimeInterval = 1.4
+    private let commandLeadGrace: TimeInterval = 6.0
     private let rollingRestart: TimeInterval = 50
+    private let watchdogTimeout: TimeInterval = 8
 
     private(set) var isRunning = false
-    /// When true, incoming transcripts are ignored (used while a command is
-    /// being processed so a stray "aria" can't interrupt or dismiss the orb).
     var isSuspended = false
-    /// When true, after a non-empty command finishes the engine stays in
-    /// .command mode (no re-wake required) for continuous multi-turn conversation.
     var conversationActive = false
-    /// True when listening for the wake word (not mid-command).
     var isInWakeMode: Bool { mode == .wake }
 
     // MARK: Lifecycle
 
+    /// Start recognition. The mic is owned by `AudioBus`; this only sets up the
+    /// recognizer + keep-alive timers and relies on `acceptCleanedFrame` for audio.
     func start() throws {
         guard !isRunning else { return }
         guard let recognizer else {
@@ -84,127 +76,107 @@ final class WakeWordEngine {
                           userInfo: [NSLocalizedDescriptionKey: "Speech recognition is temporarily unavailable. Check your network or Siri/Dictation settings."])
         }
         isRunning = true
-        try beginRecognition()
+        beginRecognition()
+        lifecycle.sawAudio(at: Date.timeIntervalSinceReferenceDate)   // arm the watchdog
         scheduleRollingRestart()
+        scheduleWatchdog()
         Log.wake.info("Wake word engine started (onDevice: \(recognizer.supportsOnDeviceRecognition))")
     }
 
     func stop() {
         isRunning = false
         rollingTimer?.invalidate()
+        watchdogTimer?.invalidate()
         silenceTimer?.invalidate()
         teardownRecognition()
         Log.wake.info("Wake word engine stopped")
     }
 
+    /// Called from AudioBus's audio thread with cleaned 16 kHz mono Int16 frames.
+    nonisolated func acceptCleanedFrame(_ samples: [Int16]) {
+        guard let buf = WakeWordEngine.buffer(from: samples) else { return }
+        feedLock.lock(); let req = feedRequest; feedLock.unlock()
+        req?.append(buf)
+        let rms = WakeWordEngine.rms(samples)
+        // Only fingerprint voiced frames while the speaker gate is active (off by default).
+        let voiceprint: [Float]? = (gateActive && rms > 0.05) ? VoiceFeatures.extract(samples) : nil
+        Task { @MainActor in self.noteAudio(level: rms, voiceprint: voiceprint) }
+    }
+
+    @MainActor private func noteAudio(level: Float, voiceprint: [Float]? = nil) {
+        lifecycle.sawAudio(at: Date.timeIntervalSinceReferenceDate)
+        onAudioLevel?(min(1, max(0, level)))
+        if let vp = voiceprint {
+            recentVoiceprints.append(vp)
+            if recentVoiceprints.count > 30 { recentVoiceprints.removeFirst(recentVoiceprints.count - 30) }
+        }
+    }
+
     // MARK: Recognition session
 
-    private func beginRecognition() throws {
-        // Recycle ONLY the speech request + task; keep the AVAudioEngine and its
-        // input tap alive across restarts. Tearing the engine down on every
-        // silence-restart is what killed wake: one failed audioEngine.start()
-        // used to leave no task → no completion → no further restart, silently
-        // dead after the first command. Throwing here lets scheduleRestart retry.
-        // Supersede the previous session FIRST so its cancellation callback is
-        // ignored (see sessionID). Then tear down the old request/task.
-        sessionID &+= 1
-        let myID = sessionID
+    private func beginRecognition() {
+        let myID = lifecycle.begin()           // supersede any prior session
         request?.endAudio()
         task?.cancel()
         task = nil
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
-        // Only require on-device if the model is actually available; otherwise
-        // fall back to server recognition instead of failing silently.
         request.requiresOnDeviceRecognition = recognizer?.supportsOnDeviceRecognition ?? false
         self.request = request
-
-        try ensureAudioEngineRunning()
+        feedLock.lock(); feedRequest = request; feedLock.unlock()
 
         task = recognizer?.recognitionTask(with: request) { [weak self] result, error in
-            guard let self, myID == self.sessionID else { return }  // ignore superseded sessions
-            if let result {
-                self.handleTranscript(result.bestTranscription.formattedString)
-            }
-            if let error {
-                // Genuine session end (silence / 1-min cap). Restart to keep
-                // listening. Superseded-session cancellations are filtered above,
-                // so this can't cascade into a tight loop.
-                Log.wake.debug("Recognition ended: \(error.localizedDescription)")
-                Log.trace("recognition ended (mode=\(self.mode)): \(error.localizedDescription)")
-                self.scheduleRestart()
+            guard let self else { return }
+            Task { @MainActor in
+                guard self.lifecycle.shouldRestart(forSession: myID) else { return }  // ignore superseded
+                if let result { self.handleTranscript(result.bestTranscription.formattedString) }
+                if let error {
+                    Log.trace("recognition ended (mode=\(self.mode)): \(error.localizedDescription)")
+                    self.scheduleRestart()
+                }
             }
         }
     }
 
-    /// Install the mic tap and start the audio engine once; reused across all
-    /// recognition restarts (the tap appends to whatever `self.request` currently
-    /// is). Throws so callers retry instead of leaving wake permanently dead.
-    private func ensureAudioEngineRunning() throws {
-        guard !audioEngine.isRunning else { return }
-        let input = audioEngine.inputNode
-        // Echo cancellation (setVoiceProcessingEnabled) breaks SFSpeech recognition
-        // on this hardware no matter how the tap format is set — Aria goes deaf.
-        // Hearing is non-negotiable, so AEC stays OFF for good. `inputFormat` is the
-        // proven-working tap format. (Talk-over barge-in needs AEC and is therefore
-        // not available; continuous follow-up — wait, then talk — is the model.)
-        let format = input.inputFormat(forBus: 0)
-        // A zero sample rate means there is no usable input device.
-        guard format.sampleRate > 0 else {
-            throw NSError(domain: "Aria.Wake", code: 3,
-                          userInfo: [NSLocalizedDescriptionKey: "No microphone input available. Check your input device."])
-        }
-        input.removeTap(onBus: 0)
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            self?.request?.append(buffer)
-            self?.reportLevel(buffer)
-        }
-        audioEngine.prepare()
-        try audioEngine.start()
-    }
-
-    /// Restart recognition once, after a short delay, coalescing rapid retries
-    /// so a failing recognizer can't spin the CPU. Runs in BOTH modes: in
-    /// command mode a session can end mid-command (silence), and we must keep
-    /// listening instead of dropping what the user is saying.
     private func scheduleRestart() {
         guard isRunning, !restartPending else { return }
-        // Commit the in-progress command so it survives the new session; the
-        // fresh session's transcript starts empty and is appended to this.
         if mode == .command { committedCommand = commandBuffer }
         restartPending = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
             guard let self, self.isRunning else { return }
             self.restartPending = false
-            do {
-                try self.beginRecognition()
-                Log.trace("recognition restarted (mode=\(self.mode))")
-            }
-            catch {
-                // Keep retrying instead of dying — a transient engine-start
-                // failure must not permanently kill wake detection.
-                Log.wake.error("Restart failed: \(error.localizedDescription) — retrying")
-                Log.trace("recognition restart FAILED: \(error.localizedDescription) — retrying")
-                self.scheduleRestart()
-            }
+            self.beginRecognition()
+            Log.trace("recognition restarted (mode=\(self.mode))")
         }
     }
 
     private func teardownRecognition() {
         task?.cancel(); task = nil
         request?.endAudio(); request = nil
-        if audioEngine.isRunning {
-            audioEngine.stop()
-            audioEngine.inputNode.removeTap(onBus: 0)
-        }
+        feedLock.lock(); feedRequest = nil; feedLock.unlock()
     }
 
     private func scheduleRollingRestart() {
         rollingTimer = Timer.scheduledTimer(withTimeInterval: rollingRestart, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.isRunning, self.mode == .wake else { return }
-                try? self.beginRecognition()
+                self.beginRecognition()
+            }
+        }
+    }
+
+    /// Never-deaf watchdog: if no cleaned audio has arrived for `watchdogTimeout`,
+    /// the recognizer/feed is silently dead — rebuild it.
+    private func scheduleWatchdog() {
+        watchdogTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.isRunning else { return }
+                if self.lifecycle.watchdogExpired(now: Date.timeIntervalSinceReferenceDate, timeout: self.watchdogTimeout) {
+                    Log.trace("watchdog: no audio for \(self.watchdogTimeout)s — rebuilding recognition")
+                    self.lifecycle.sawAudio(at: Date.timeIntervalSinceReferenceDate)
+                    self.beginRecognition()
+                }
             }
         }
     }
@@ -221,32 +193,33 @@ final class WakeWordEngine {
                 enterCommandMode(initialTranscript: lower)
             }
         case .command:
-            // The live session's transcript is cumulative within that session;
-            // prepend anything committed from earlier (restarted) sessions.
             let sessionText = stripWakePhrase(from: lower, original: text)
             let combined = committedCommand.isEmpty
                 ? sessionText
-                : (committedCommand + " " + sessionText)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                : (committedCommand + " " + sessionText).trimmingCharacters(in: .whitespacesAndNewlines)
             let grew = combined.count > commandBuffer.count
             commandBuffer = combined
-            // Once the user is actually speaking the command, use the short
-            // trailing-silence window; otherwise keep waiting out the lead grace.
             if grew { resetSilenceTimer(commandSilence) }
         }
     }
 
     private func enterCommandMode(initialTranscript: String) {
+        // Experimental speaker gate: reject the wake if the voice doesn't match the
+        // enrolled owner. Inert (always proceeds) unless a gate is wired + enrolled.
+        if let verify = verifyWake, !recentVoiceprints.isEmpty {
+            let print = SpeakerVerifier.averaged(recentVoiceprints)
+            recentVoiceprints = []
+            if !verify(print) {
+                Log.trace("wake rejected — voice didn't match the enrolled owner")
+                return
+            }
+        } else {
+            recentVoiceprints = []
+        }
         mode = .command
         committedCommand = ""
-        // Keep the SAME recognition session running — its transcription is
-        // cumulative, so a command spoken in the same breath as the wake phrase
-        // ("Hey Aria, open Spotify") is preserved. stripWakePhrase removes the
-        // wake words. Restarting here would discard the command already spoken.
         commandBuffer = stripWakePhrase(from: initialTranscript, original: initialTranscript)
         onWake?()
-        // If the command came in the same breath, finish on short silence;
-        // otherwise give a longer grace for the user to start speaking it.
         resetSilenceTimer(commandBuffer.isEmpty ? commandLeadGrace : commandSilence)
     }
 
@@ -260,41 +233,29 @@ final class WakeWordEngine {
     private func finishCommand() {
         let command = commandBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
         Log.trace("finishCommand: '\(command)' → conversationActive=\(conversationActive)")
-        if command.isEmpty {
-            onCommandEmpty?()          // let the UI dismiss the idle orb
-        } else {
-            onCommand?(command)
-        }
-        if conversationActive && !command.isEmpty {
-            mode = .command          // stay listening for the next turn, no re-wake
-        } else {
-            mode = .wake
-        }
+        if command.isEmpty { onCommandEmpty?() } else { onCommand?(command) }
+        mode = (conversationActive && !command.isEmpty) ? .command : .wake
         commandBuffer = ""
         committedCommand = ""
-        do { try beginRecognition() }
-        catch { Log.trace("finishCommand beginRecognition failed: \(error.localizedDescription)"); scheduleRestart() }
+        beginRecognition()
     }
 
     /// Leave conversation mode and go back to wake-word listening.
     func endConversation() {
         conversationActive = false
-        isSuspended = false          // CRITICAL: a stuck-suspended flag is what
-        mode = .wake                 // silently swallowed the next wake word.
+        isSuspended = false
+        mode = .wake
         commandBuffer = ""; committedCommand = ""
         silenceTimer?.invalidate()
-        do { try beginRecognition() } catch { scheduleRestart() }
+        beginRecognition()
     }
 
-    /// Start a CLEAN recognition session for the next conversation turn, discarding
-    /// any audio captured while Aria was speaking. Without echo cancellation the mic
-    /// hears her own voice during a reply; a fresh session ensures those words don't
-    /// leak into the next command (which caused a self-talking feedback loop).
+    /// Start a CLEAN recognition session for the next turn.
     func freshTurn() {
         commandBuffer = ""; committedCommand = ""
         silenceTimer?.invalidate()
         mode = conversationActive ? .command : .wake
-        do { try beginRecognition() } catch { scheduleRestart() }
+        beginRecognition()
     }
 
     private func stripWakePhrase(from lower: String, original: String) -> String {
@@ -308,20 +269,25 @@ final class WakeWordEngine {
         return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    // MARK: Audio level (for waveform)
+    // MARK: Audio helpers (nonisolated — run on the audio thread)
 
-    private func reportLevel(_ buffer: AVAudioPCMBuffer) {
-        guard let channel = buffer.floatChannelData?[0] else { return }
-        let frames = Int(buffer.frameLength)
-        guard frames > 0 else { return }
-        var sum: Float = 0
-        for i in 0..<frames { sum += channel[i] * channel[i] }
-        let rms = (sum / Float(frames)).squareRoot()
-        let level = min(1, max(0, rms * 12))  // normalize to ~0...1
-        Task { @MainActor in
-            let r = self.bargeVAD.process(level)
-            if r.didOnset { self.onSpeechOnset?() }
-            self.onAudioLevel?(level)
+    private nonisolated static func buffer(from samples: [Int16]) -> AVAudioPCMBuffer? {
+        guard !samples.isEmpty,
+              let buf = AVAudioPCMBuffer(pcmFormat: feedFormat, frameCapacity: AVAudioFrameCount(samples.count))
+        else { return nil }
+        buf.frameLength = AVAudioFrameCount(samples.count)
+        samples.withUnsafeBufferPointer { src in
+            if let dst = buf.int16ChannelData?[0], let base = src.baseAddress {
+                dst.update(from: base, count: samples.count)
+            }
         }
+        return buf
+    }
+
+    private nonisolated static func rms(_ samples: [Int16]) -> Float {
+        guard !samples.isEmpty else { return 0 }
+        let sum = samples.reduce(0.0) { $0 + Double($1) * Double($1) }
+        let rms = (sum / Double(samples.count)).squareRoot()
+        return Float(rms / 32768.0 * 12)   // normalize toward ~0…1 (matches old scaling)
     }
 }

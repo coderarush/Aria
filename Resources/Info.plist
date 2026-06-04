@@ -9,9 +9,9 @@
     <key>CFBundleIdentifier</key>
     <string>com.aria.agent</string>
     <key>CFBundleVersion</key>
-    <string>2.0.0</string>
+    <string>5.0.0</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.0.0</string>
+    <string>5.0.0</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleExecutable</key>
@@ -28,5 +28,11 @@
     <string>Aria transcribes your voice commands on-device to understand what you need.</string>
     <key>NSScreenCaptureUsageDescription</key>
     <string>Aria captures your screen only when you issue a command, to see what you are working on.</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>Aria adds and reads your calendar events when you ask.</string>
+    <key>NSRemindersFullAccessUsageDescription</key>
+    <string>Aria creates and reads your reminders when you ask.</string>
+    <key>NSContactsUsageDescription</key>
+    <string>Aria looks up contacts when you ask it to message or email someone.</string>
 </dict>
 </plist>
