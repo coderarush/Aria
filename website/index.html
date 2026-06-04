@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Aria — Your Mac, by voice</title>
+<meta name="description" content="Aria is a JARVIS-style AI assistant for your Mac. Talk to it, and it actually does things — research, write, control any app — all by voice. Free forever." />
+<style>
+  :root{
+    --bg:#08080c; --panel:#101018; --ink:#f4f5fa; --muted:#9aa0b4;
+    --a1:#7c5cff; --a2:#37b6ff; --a3:#ff5ca8; --line:rgba(255,255,255,.08);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",Inter,system-ui,sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.55;-webkit-font-smoothing:antialiased;overflow-x:hidden;
+  }
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+  .btn{
+    display:inline-flex;align-items:center;gap:8px;padding:13px 22px;border-radius:999px;font-weight:600;font-size:15px;
+    background:linear-gradient(120deg,var(--a1),var(--a2));color:#fff;border:0;cursor:pointer;
+    box-shadow:0 8px 30px rgba(124,92,255,.35);transition:transform .15s ease,box-shadow .15s ease;
+  }
+  .btn:hover{transform:translateY(-2px);box-shadow:0 12px 38px rgba(124,92,255,.5)}
+  .btn.ghost{background:transparent;border:1px solid var(--line);box-shadow:none}
+  /* glow backdrop */
+  .glow{position:fixed;inset:0;z-index:-1;filter:blur(90px);opacity:.55;pointer-events:none}
+  .glow::before,.glow::after{content:"";position:absolute;border-radius:50%}
+  .glow::before{width:520px;height:520px;left:-120px;top:-160px;background:radial-gradient(circle,var(--a1),transparent 60%)}
+  .glow::after{width:560px;height:560px;right:-140px;top:120px;background:radial-gradient(circle,var(--a3),transparent 60%)}
+  /* nav */
+  nav{position:sticky;top:0;z-index:10;backdrop-filter:saturate(140%) blur(14px);background:rgba(8,8,12,.6);border-bottom:1px solid var(--line)}
+  nav .wrap{display:flex;align-items:center;justify-content:space-between;height:64px}
+  .logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px;letter-spacing:.2px}
+  .dot{width:22px;height:22px;border-radius:50%;background:conic-gradient(from 0deg,var(--a1),var(--a2),var(--a3),var(--a1));box-shadow:0 0 18px var(--a1)}
+  nav .links{display:flex;gap:26px;align-items:center}
+  nav .links a{color:var(--muted);font-size:14px}
+  nav .links a:hover{color:var(--ink)}
+  @media(max-width:720px){nav .links a:not(.btn){display:none}}
+  /* hero */
+  header{padding:84px 0 56px;text-align:center}
+  .tag{display:inline-block;font-size:13px;color:var(--muted);border:1px solid var(--line);padding:6px 14px;border-radius:999px;margin-bottom:26px}
+  h1{font-size:clamp(40px,7vw,72px);line-height:1.04;font-weight:800;letter-spacing:-1.5px}
+  h1 .grad{background:linear-gradient(120deg,var(--a1),var(--a2),var(--a3));-webkit-background-clip:text;background-clip:text;color:transparent}
+  header p.sub{max-width:620px;margin:22px auto 0;font-size:19px;color:var(--muted)}
+  .cta{display:flex;gap:14px;justify-content:center;margin-top:34px;flex-wrap:wrap}
+  .demo{margin:54px auto 0;max-width:880px;aspect-ratio:16/9;border-radius:18px;border:1px solid var(--line);
+    background:linear-gradient(180deg,#12121c,#0b0b12);display:flex;align-items:center;justify-content:center;
+    color:var(--muted);font-size:15px;position:relative;overflow:hidden}
+  .demo .play{width:74px;height:74px;border-radius:50%;background:rgba(255,255,255,.08);border:1px solid var(--line);
+    display:flex;align-items:center;justify-content:center;font-size:26px}
+  .demo .cap{position:absolute;bottom:16px;left:0;right:0;text-align:center;font-size:13px}
+  /* sections */
+  section{padding:72px 0}
+  h2{font-size:clamp(28px,4vw,40px);font-weight:800;letter-spacing:-.5px;text-align:center}
+  .lead{max-width:560px;margin:14px auto 0;color:var(--muted);text-align:center}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:46px}
+  @media(max-width:820px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:24px}
+  .card .ic{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;
+    background:linear-gradient(120deg,rgba(124,92,255,.2),rgba(55,182,255,.2));margin-bottom:14px}
+  .card h3{font-size:18px;margin-bottom:6px}
+  .card p{color:var(--muted);font-size:14.5px}
+  /* free banner */
+  .free{background:linear-gradient(120deg,rgba(124,92,255,.14),rgba(255,92,168,.12));border:1px solid var(--line);
+    border-radius:22px;padding:46px;text-align:center}
+  .free h2{font-size:32px}
+  .free p{color:var(--muted);max-width:560px;margin:12px auto 0}
+  /* pricing */
+  .price{max-width:420px;margin:46px auto 0;background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:34px;text-align:center}
+  .price .amt{font-size:52px;font-weight:800;letter-spacing:-1px}
+  .price .amt span{font-size:18px;color:var(--muted);font-weight:500}
+  .price ul{list-style:none;margin:22px 0;text-align:left}
+  .price li{padding:8px 0;color:var(--muted);font-size:15px}
+  .price li::before{content:"✓";color:var(--a2);font-weight:800;margin-right:10px}
+  /* faq */
+  .faq{max-width:760px;margin:40px auto 0}
+  details{border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:12px;background:var(--panel)}
+  summary{cursor:pointer;font-weight:600;font-size:16px;list-style:none}
+  summary::-webkit-details-marker{display:none}
+  details p{color:var(--muted);margin-top:10px;font-size:14.5px}
+  footer{border-top:1px solid var(--line);padding:40px 0;text-align:center;color:var(--muted);font-size:14px}
+</style>
+</head>
+<body>
+<div class="glow"></div>
+
+<nav><div class="wrap">
+  <div class="logo"><span class="dot"></span> Aria</div>
+  <div class="links">
+    <a href="#features">Features</a>
+    <a href="#free">Free forever</a>
+    <a href="#pricing">Pricing</a>
+    <a class="btn" href="#pricing">Download</a>
+  </div>
+</div></nav>
+
+<header><div class="wrap">
+  <span class="tag">A JARVIS for your Mac · macOS 14+</span>
+  <h1>Your Mac,<br><span class="grad">by voice.</span></h1>
+  <p class="sub">Say “Hey Aria” and just ask. She researches, writes, remembers, and
+  <strong>operates any app on your screen</strong> — clicking and typing for you. Not a chatbot. An assistant that does things.</p>
+  <div class="cta">
+    <a class="btn" href="#pricing">Download for Mac</a>
+    <a class="btn ghost" href="#demo">Watch the demo</a>
+  </div>
+  <div class="demo" id="demo">
+    <div style="text-align:center">
+      <div class="play">▶</div>
+      <div class="cap">Drop your screen-recording demo here</div>
+    </div>
+  </div>
+</div></header>
+
+<section id="features"><div class="wrap">
+  <h2>What Aria does</h2>
+  <p class="lead">All from your voice — no typing, no clicking around.</p>
+  <div class="grid">
+    <div class="card"><div class="ic">🎙️</div><h3>Talk, naturally</h3><p>Say “Hey Aria” any time. Interrupt her mid-sentence — real talk-over barge-in. Premium cloud voice.</p></div>
+    <div class="card"><div class="ic">🤖</div><h3>It actually does things</h3><p>Give a goal — “research the best mics and save a note” — and she plans, executes, and reports back.</p></div>
+    <div class="card"><div class="ic">🖱️</div><h3>Controls any app</h3><p>Aria sees your screen and clicks, types, and runs menus in any app. The thing no other assistant can do.</p></div>
+    <div class="card"><div class="ic">🧠</div><h3>Remembers you</h3><p>“Remember that…” and she keeps it across sessions. She knows your preferences, not a goldfish.</p></div>
+    <div class="card"><div class="ic">📅</div><h3>Runs your day</h3><p>Calendar, reminders, mail, notes, music — first-class, by voice. “Add to my calendar.” Done.</p></div>
+    <div class="card"><div class="ic">🔒</div><h3>Private &amp; safe</h3><p>Runs on your Mac. Destructive actions always confirm first. You see when she's in control, and can Stop.</p></div>
+  </div>
+</div></section>
+
+<section id="free"><div class="wrap">
+  <div class="free">
+    <h2>Free forever to run.</h2>
+    <p>Aria uses free AI providers and rotates across them — when one hits a limit, she keeps going on the next (Gemini, Groq, Cerebras, OpenRouter, or a local model). <strong>Buy once. No subscriptions. No API bills.</strong></p>
+  </div>
+</div></section>
+
+<section id="pricing"><div class="wrap">
+  <h2>One price. Yours forever.</h2>
+  <div class="price">
+    <div class="amt">$29<span> one-time</span></div>
+    <ul>
+      <li>Voice assistant + autonomous tasks</li>
+      <li>Controls any app (computer use)</li>
+      <li>Cross-session memory</li>
+      <li>Free-forever multi-provider engine</li>
+      <li>Free updates</li>
+    </ul>
+    <a class="btn" href="#" style="width:100%;justify-content:center" id="buy">Download for Mac</a>
+    <p style="color:var(--muted);font-size:13px;margin-top:14px">macOS 14 (Sonoma) or later · Apple Silicon &amp; Intel</p>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <h2>Questions</h2>
+  <div class="faq">
+    <details><summary>Is it really free to run?</summary><p>Yes. You pay once for the app. It runs on free AI provider tiers and rotates across them, so you never pay for usage. Add your own keys (all free to create) and it just works.</p></details>
+    <details><summary>What does “controls any app” mean?</summary><p>Aria reads what's on your screen and can click buttons, fill fields, and run menus in any Mac app — by voice. It asks before anything destructive, and shows a visible indicator while it's in control.</p></details>
+    <details><summary>Is my data private?</summary><p>Aria runs locally on your Mac. Wake-word listening and your voiceprint stay on-device. Only the request you make is sent to the AI provider you chose.</p></details>
+    <details><summary>Do I need to be technical?</summary><p>No. Install, grant mic + accessibility access, paste a free API key, and talk to it.</p></details>
+  </div>
+</div></section>
+
+<footer><div class="wrap">
+  © <span id="yr"></span> Aria. Made for macOS. · <a href="https://github.com/coderarush/Aria" style="color:var(--a2)">GitHub</a>
+</div></footer>
+
+<script>
+  document.getElementById('yr').textContent = new Date().getFullYear();
+  // Wire these to your Gumroad / Lemon Squeezy product link when ready:
+  // document.getElementById('buy').href = 'https://YOURNAME.gumroad.com/l/aria';
+</script>
+</body>
+</html>
