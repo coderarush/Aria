@@ -32,4 +32,18 @@ final class RequestSchedulerTests: XCTestCase {
         s.record("a")
         XCTAssertNil(s.reserve())   // bucket already full from record()
     }
+
+    // C1 regression: a server 429 (penalize) must route around the model and, when
+    // all are penalized, report a real wait — not let the caller hot-spin and fail.
+    func testPenalizedModelIsSkippedThenPaces() {
+        var t = Date(timeIntervalSince1970: 0)
+        let s = RequestScheduler(models: ["a", "b"], perMinuteLimit: 5, now: { t })
+        s.penalize("a", seconds: 30)
+        XCTAssertEqual(s.reserve(), "b")        // routes around penalized a
+        s.penalize("b", seconds: 30)
+        XCTAssertNil(s.reserve())               // both rate-limited
+        XCTAssertEqual(s.waitTime(), 30, accuracy: 1.0)   // real pacing, not 0
+        t = Date(timeIntervalSince1970: 31)
+        XCTAssertNotNil(s.reserve())            // cooldown passed → available again
+    }
 }

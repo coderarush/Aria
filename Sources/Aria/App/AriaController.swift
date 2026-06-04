@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import AVFoundation
 import Combine
 
 /// Top-level coordinator that owns the runtime engines and the Island panel, and

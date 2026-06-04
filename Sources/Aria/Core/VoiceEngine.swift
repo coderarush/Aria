@@ -34,6 +34,7 @@ final class VoiceEngine: NSObject, AVAudioPlayerDelegate {
 
     /// Speak a single chunk (no onStart). Completion routes to onChunkFinished.
     func speakChunk(_ text: String) {
+        guard enabled else { onChunkFinished?(); return }   // respect the Settings toggle
         let clean = Self.spokenText(from: text)
         guard !clean.isEmpty else { onChunkFinished?(); return }
         speakWithGemini(clean)

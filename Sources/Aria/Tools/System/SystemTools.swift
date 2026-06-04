@@ -132,8 +132,11 @@ struct SaveNoteTool: AriaTool {
         //    from the first line of the HTML body, so we make that a bold heading.
         //    No hard-coded account/folder → uses the default account so it works on
         //    any setup (iCloud or "On My Mac").
-        let escapedTitle = Self.htmlEscape(title)
-        let escapedBody = Self.htmlEscape(content).replacingOccurrences(of: "\n", with: "<br>")
+        // HTML-escape for Notes' rich body, THEN escape for the AppleScript string
+        // literal (backslash + double-quote) — otherwise a quote in the content
+        // breaks the script and it always falls back to a file.
+        let escapedTitle = Self.asLiteral(Self.htmlEscape(title))
+        let escapedBody = Self.asLiteral(Self.htmlEscape(content).replacingOccurrences(of: "\n", with: "<br>"))
         let notesScript = """
         tell application "Notes" to make new note with properties {body:"<div><b>\(escapedTitle)</b></div><div>\(escapedBody)</div>"}
         """

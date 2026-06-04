@@ -1,5 +1,4 @@
 import SwiftUI
-import AVFoundation
 
 /// Aria's settings window — sidebar layout.
 struct SettingsView: View {

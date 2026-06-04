@@ -51,8 +51,8 @@ actor GeminiClient {
         if let p = preferred { scheduler.record(p); return p }
         while true {
             if let m = scheduler.reserve() { return m }
-            let wait = min(max(scheduler.waitTime(), 0.05), 65)
-            Log.trace("scheduler: all buckets maxed; pacing \(wait)s")
+            let wait = min(max(scheduler.waitTime(), 0.5), 65)
+            Log.trace("scheduler: all buckets busy; pacing \(wait)s")
             try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
         }
     }
@@ -140,8 +140,9 @@ actor GeminiClient {
                         } catch let GeminiError.http(status) where status == 429 {
                             lastError = GeminiError.http(status)
                             quotaWaits += 1
+                            scheduler.penalize(model)   // route around this model; reserveModel now paces
                             Log.trace("streamSend: \(model) http(429) quota; pacing (\(quotaWaits)/\(maxQuotaWaits))")
-                            continue   // reserveModel paces to a free bucket on the next iteration
+                            continue
                         } catch let GeminiError.http(status) where [404, 408, 425, 500, 502, 503, 504].contains(status) {
                             lastError = GeminiError.http(status)
                             attempt += 1
@@ -269,6 +270,7 @@ actor GeminiClient {
             } catch let GeminiError.http(status) where status == 429 {
                 lastError = GeminiError.http(status)
                 quotaWaits += 1
+                scheduler.penalize(model)   // route around this model; reserveModel now paces
                 Log.trace("gemini: \(model) http(429); pacing (\(quotaWaits)/\(maxQuotaWaits))")
                 continue
             } catch let GeminiError.http(status) where [404, 408, 425, 500, 502, 503, 504].contains(status) {

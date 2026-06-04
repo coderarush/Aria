@@ -112,9 +112,19 @@ struct TaskPlannerAgent: SubAgent {
     static func parseActions(_ raw: String) -> [AgentAction]? {
         let cleaned = GeminiClient.stripCodeFences(raw)
         guard let start = cleaned.firstIndex(of: "["),
-              let end = cleaned.lastIndex(of: "]") else { return nil }
-        let json = String(cleaned[start...end])
-        return try? JSONDecoder().decode([AgentAction].self, from: Data(json.utf8))
+              let end = cleaned.lastIndex(of: "]"),
+              let data = String(cleaned[start...end]).data(using: .utf8),
+              let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else { return nil }
+        // Coerce input values to strings (the model sometimes emits numbers/bools),
+        // mirroring PlanParser — JSONDecoder([AgentAction]) would reject those.
+        return arr.compactMap { obj in
+            guard let tool = obj["tool"] as? String else { return nil }
+            let input = (obj["input"] as? [String: Any])?.reduce(into: [String: String]()) {
+                $0[$1.key] = String(describing: $1.value)
+            } ?? [:]
+            return AgentAction(tool: tool, input: input)
+        }
     }
 }
 
@@ -142,7 +152,19 @@ struct CometAgent: SubAgent {
     let allowedTools = ["applescript", "clipboard"]
 
     func execute(task: String, context: AgentContext) async -> AgentResult {
-        let result = await context.runAction(AgentAction(tool: "applescript", input: ["script": task]), "")
+        // The task is natural language ("email John the summary"), not AppleScript —
+        // generate the script first, then run it. Sending is gated by the Safety
+        // confirm in the orchestrator's execute().
+        let prompt = """
+        Write AppleScript to accomplish this on macOS using the Mail or Messages app. \
+        Output ONLY the AppleScript source, no explanation, no code fences.
+
+        TASK: \(task)
+        """
+        let script = (try? await context.gemini.generateText(prompt: prompt, temperature: 0.2)) ?? ""
+        let clean = GeminiClient.stripCodeFences(script)
+        guard !clean.isEmpty else { return .fail("Couldn't compose that message.") }
+        let result = await context.runAction(AgentAction(tool: "applescript", input: ["script": clean]), "")
         return result.success ? .ok(result.output) : .fail(result.output)
     }
 }

@@ -140,7 +140,13 @@ actor AgentOrchestrator {
 
         // Native static tool wins if registered.
         if let tool = await registry.tool(named: action.tool) {
-            if tool.isDestructive {
+            // Universal safety gate: confirm anything destructive — whether the tool
+            // declares itself destructive OR its name/input trips the Safety
+            // heuristic (e.g. `shell` running `rm`, `applescript` that sends mail).
+            // This covers EVERY caller — chat function-calls, the autonomy loop,
+            // recovery/alternative actions, and agent-internal tool use — since they
+            // all run through here.
+            if tool.isDestructive || Safety.isDestructive(tool: action.tool, input: action.input) {
                 let approved = await (confirmationHandler?(
                     "Run \(action.tool) with \(action.input)?") ?? false)
                 guard approved else { return .fail("Cancelled — not approved.") }
