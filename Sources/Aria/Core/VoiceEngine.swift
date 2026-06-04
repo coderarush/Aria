@@ -11,9 +11,11 @@ import AVFoundation
 /// silent — the on-screen caption still conveys the reply — and fires its
 /// completion callbacks so the speech queue and wake re-arm never stall.
 @MainActor
-final class VoiceEngine: NSObject, AVAudioPlayerDelegate {
+final class VoiceEngine: NSObject {
     var geminiVoiceName = "Kore"
-    private var audioPlayer: AVAudioPlayer?
+    /// Aria's TTS plays through the shared AudioBus (so the echo canceller has her
+    /// exact audio as its far-end reference and can be stopped instantly on barge-in).
+    weak var audioBus: AudioBus?
     private let keyProvider: () -> String? = { KeychainManager.read(account: KeychainKey.geminiAPIKey) }
 
     var enabled = true
@@ -70,19 +72,16 @@ final class VoiceEngine: NSObject, AVAudioPlayerDelegate {
     }
 
     private func play(_ wav: Data) throws {
-        let player = try AVAudioPlayer(data: wav)
-        player.delegate = self
-        self.audioPlayer = player
-        player.play()
-    }
-
-    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        Task { @MainActor in self.onFinish?(); self.onChunkFinished?() }
+        guard let bus = audioBus else { throw NSError(domain: "AriaTTS", code: -2) }
+        // synthesizeGemini returns a WAV (44-byte header + 24 kHz mono Int16 PCM).
+        let pcm = wav.count > 44 ? wav.subdata(in: 44..<wav.count) : wav
+        bus.playReference(pcm: pcm, pcmRate: 24000) { [weak self] in
+            Task { @MainActor in self?.onFinish?(); self?.onChunkFinished?() }
+        }
     }
 
     func stop() {
-        audioPlayer?.stop()
-        audioPlayer = nil
+        audioBus?.stopPlayback()
     }
 
     /// Remove markdown emphasis, code ticks, arrows, and URLs; collapse whitespace.
