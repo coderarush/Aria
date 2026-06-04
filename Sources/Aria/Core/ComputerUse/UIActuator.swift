@@ -64,11 +64,13 @@ enum UIActuator {
     private static func center(of el: AXUIElement) -> CGPoint {
         var posV: CFTypeRef?, sizeV: CFTypeRef?
         var pos = CGPoint.zero, size = CGSize.zero
-        if AXUIElementCopyAttributeValue(el, kAXPositionAttribute as CFString, &posV) == .success, let p = posV {
-            AXValueGetValue(p as! AXValue, .cgPoint, &pos)
+        if AXUIElementCopyAttributeValue(el, kAXPositionAttribute as CFString, &posV) == .success,
+           let p = posV, CFGetTypeID(p) == AXValueGetTypeID() {
+            AXValueGetValue((p as! AXValue), .cgPoint, &pos)
         }
-        if AXUIElementCopyAttributeValue(el, kAXSizeAttribute as CFString, &sizeV) == .success, let s = sizeV {
-            AXValueGetValue(s as! AXValue, .cgSize, &size)
+        if AXUIElementCopyAttributeValue(el, kAXSizeAttribute as CFString, &sizeV) == .success,
+           let s = sizeV, CFGetTypeID(s) == AXValueGetTypeID() {
+            AXValueGetValue((s as! AXValue), .cgSize, &size)
         }
         return CGPoint(x: pos.x + size.width / 2, y: pos.y + size.height / 2)
     }
