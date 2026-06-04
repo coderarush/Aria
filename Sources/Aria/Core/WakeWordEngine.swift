@@ -68,6 +68,8 @@ final class WakeWordEngine {
     /// When true, after a non-empty command finishes the engine stays in
     /// .command mode (no re-wake required) for continuous multi-turn conversation.
     var conversationActive = false
+    /// True when listening for the wake word (not mid-command).
+    var isInWakeMode: Bool { mode == .wake }
 
     // MARK: Lifecycle
 
@@ -277,7 +279,8 @@ final class WakeWordEngine {
     /// Leave conversation mode and go back to wake-word listening.
     func endConversation() {
         conversationActive = false
-        mode = .wake
+        isSuspended = false          // CRITICAL: a stuck-suspended flag is what
+        mode = .wake                 // silently swallowed the next wake word.
         commandBuffer = ""; committedCommand = ""
         silenceTimer?.invalidate()
         do { try beginRecognition() } catch { scheduleRestart() }

@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import AVFoundation
 import Combine
 
 /// Top-level coordinator that owns the runtime engines and the Island panel, and
@@ -14,6 +13,8 @@ final class AriaController {
     private let orchestrator = AgentOrchestrator()
     private let patternEngine = PatternEngine()
     private var panel: IslandPanel?
+    private let taskViewModel = TaskViewModel()
+    private var taskPanel: TaskPanel?
     private var learningTimer: Timer?
     private var settingsCancellable: AnyCancellable?
     /// True while Aria is speaking; keeps wake suspended even if the pill
@@ -22,6 +23,10 @@ final class AriaController {
     private var streamVoice: StreamingVoice!
     private var session: ConversationSession?
     private var convSilenceTimer: Timer?
+    /// True while an autonomous task is executing. Gates `streamVoice.onAllFinished`
+    /// so a queue-drain mid-task (e.g. after the spoken plan) doesn't re-arm wake
+    /// before the task is actually done.
+    private var taskActive = false
     /// The in-flight streaming turn task; cancelled on barge-in.
     private var currentTurnTask: Task<Void, Never>?
     /// When the current TTS turn started; used to enforce a 0.5 s arm-grace
@@ -178,6 +183,24 @@ final class AriaController {
                 Log.trace("island hidden → wake re-armed (isSuspended=false)")
             }
         }
+
+        // Task panel — floats top-right while an autonomous task is running.
+        taskPanel = TaskPanel(viewModel: taskViewModel)
+        taskViewModel.onVisibilityChange = { [weak self] visible in
+            guard let p = self?.taskPanel else { return }
+            if visible { p.reposition(); p.orderFrontRegardless() } else { p.orderOut(nil) }
+        }
+        taskViewModel.onStop = { [weak self] in
+            guard let self else { return }
+            self.taskActive = false
+            self.streamVoice.stop()             // silence queued narration immediately
+            self.currentTurnTask?.cancel()      // engine checks isCancelled before next step
+            self.isSpeaking = false
+            self.wakeEngine.freshTurn()
+            self.wakeEngine.isSuspended = false // re-arm the mic — never leave Aria deaf
+            self.islandViewModel.dismiss()
+            self.taskViewModel.hide()
+        }
     }
 
     private func setPanelVisible(_ visible: Bool) {
@@ -201,9 +224,6 @@ final class AriaController {
     private func applyVoiceSettings() {
         let s = AppSettings.shared
         voice.enabled = s.voiceEnabled
-        voice.voiceIdentifier = s.voiceIdentifier.isEmpty ? nil : s.voiceIdentifier
-        voice.rate = Float(s.voiceRate) * (AVSpeechUtteranceMaximumSpeechRate - AVSpeechUtteranceMinimumSpeechRate) + AVSpeechUtteranceMinimumSpeechRate
-        voice.kind = VoiceEngine.Kind(rawValue: s.voiceEngineKind) ?? .apple
         voice.geminiVoiceName = s.geminiVoiceName
     }
 
@@ -314,16 +334,19 @@ final class AriaController {
         if lower.contains("dismiss") || lower.contains("thanks aria") || lower.contains("never mind") {
             streamVoice.stop(); session?.end(); return
         }
+
+        if IntentRouter.isTask(command) {
+            runAutonomousTask(command)
+            return
+        }
+
         wakeEngine.isSuspended = true
         isSpeaking = true
         speechStartedAt = Date()
         applyVoiceSettings()
         islandViewModel.beginThinking()
-        // Apple voice streams per sentence (instant). The Gemini cloud voice speaks
-        // the whole reply in ONE call at the end — per-sentence Gemini calls burn
-        // quota fast and fall back to the robotic Apple voice.
-        let streamPerSentence = AppSettings.shared.voiceEngineKind != "gemini"
-        var chunker = SentenceChunker()
+        // The Gemini voice speaks the whole reply in ONE call at the end — per-
+        // sentence TTS calls burn the free quota fast.
         streamVoice.onAllFinished = { [weak self] in
             guard let self else { return }
             self.isSpeaking = false
@@ -341,25 +364,73 @@ final class AriaController {
             guard let self else { return }
             await self.orchestrator.handleStreaming(command: command, privacyMode: AppSettings.shared.privacyMode) { delta in
                 Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    self.islandViewModel.appendResponse(delta)   // caption streams; no auto-dismiss
-                    if streamPerSentence {
-                        for chunk in chunker.push(delta) { self.streamVoice.enqueue(chunk) }
-                    }
+                    self?.islandViewModel.appendResponse(delta)   // caption streams; no auto-dismiss
                 }
             }
             await MainActor.run {
                 if Task.isCancelled { return }   // barge-in cancelled this turn — don't resume speaking
-                if streamPerSentence {
-                    let tail = chunker.flush()
-                    if !tail.isEmpty { self.streamVoice.enqueue(tail) }
-                } else {
-                    // Gemini voice: speak the whole reply in a single call.
-                    let full = self.islandViewModel.responseText.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !full.isEmpty { self.streamVoice.enqueue(full) }
-                }
+                // Speak the whole reply in a single Gemini call.
+                let full = self.islandViewModel.responseText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !full.isEmpty { self.streamVoice.enqueue(full) }
                 // Safety: if nothing was spoken (empty reply/error), re-arm anyway.
                 if !self.streamVoice.isSpeaking { self.streamVoice.onAllFinished?() }
+            }
+        }
+    }
+
+    private func runAutonomousTask(_ goal: String) {
+        taskActive = true
+        wakeEngine.isSuspended = true
+        isSpeaking = true
+        speechStartedAt = Date()
+        islandViewModel.beginThinking()
+        applyVoiceSettings()
+
+        // The voice queue drains several times during a task (after the spoken plan,
+        // between steps). Only re-arm wake once the task is DONE (taskActive == false),
+        // and re-arm exactly the way the chat path does — fresh turn + silence timer
+        // that ends the session through the canonical endConversation() reset.
+        streamVoice.onAllFinished = { [weak self] in
+            guard let self, !self.taskActive else { return }
+            self.isSpeaking = false
+            self.wakeEngine.freshTurn()
+            self.wakeEngine.isSuspended = false
+            self.islandViewModel.beginListening()
+            self.convSilenceTimer?.invalidate()
+            self.convSilenceTimer = Timer.scheduledTimer(withTimeInterval: AppSettings.shared.conversationSilenceTimeout, repeats: false) { [weak self] _ in
+                Task { @MainActor in self?.session?.end() }
+            }
+        }
+
+        currentTurnTask = Task { [weak self] in
+            guard let self else { return }
+            await self.orchestrator.runTask(goal: goal) { event in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    switch event {
+                    case .planReady(let plan):
+                        self.taskViewModel.show(plan)
+                    case .stepStarted(let i):
+                        self.taskViewModel.markRunning(i)
+                    case .stepFinished(let i, let ok, let result):
+                        self.taskViewModel.markFinished(i, ok: ok, result: result)
+                    case .narrate(let line):
+                        self.islandViewModel.appendResponse(line + " ")
+                        self.streamVoice.enqueue(line)
+                    case .finished(_, let summary):
+                        self.taskActive = false   // now the next queue-drain re-arms wake
+                        self.streamVoice.enqueue(summary)
+                        if !self.streamVoice.isSpeaking { self.streamVoice.onAllFinished?() }
+                        let finishedGoal = goal
+                        Task { [weak self] in
+                            try? await Task.sleep(nanoseconds: 4_000_000_000)
+                            await MainActor.run {
+                                guard let self, self.taskViewModel.plan?.goal == finishedGoal else { return }
+                                self.taskViewModel.hide()
+                            }
+                        }
+                    }
+                }
             }
         }
     }

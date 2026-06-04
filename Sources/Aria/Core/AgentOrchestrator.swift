@@ -140,7 +140,13 @@ actor AgentOrchestrator {
 
         // Native static tool wins if registered.
         if let tool = await registry.tool(named: action.tool) {
-            if tool.isDestructive {
+            // Universal safety gate: confirm anything destructive — whether the tool
+            // declares itself destructive OR its name/input trips the Safety
+            // heuristic (e.g. `shell` running `rm`, `applescript` that sends mail).
+            // This covers EVERY caller — chat function-calls, the autonomy loop,
+            // recovery/alternative actions, and agent-internal tool use — since they
+            // all run through here.
+            if tool.isDestructive || Safety.isDestructive(tool: action.tool, input: action.input) {
                 let approved = await (confirmationHandler?(
                     "Run \(action.tool) with \(action.input)?") ?? false)
                 guard approved else { return .fail("Cancelled — not approved.") }
@@ -204,6 +210,26 @@ actor AgentOrchestrator {
         let t = task.lowercased()
         return ["delete", "remove", "rm ", "send", "post", "email", "submit",
                 "overwrite", "drop ", "kill"].contains { t.contains($0) }
+    }
+
+    /// Run a multi-step autonomous task. Emits `TaskEvent` values as each planning
+    /// and execution step completes. Hooks into the same `execute` + `confirmationHandler`
+    /// plumbing used by the normal command path.
+    func runTask(goal: String, emit: @escaping @Sendable (TaskEvent) -> Void) async {
+        // currentSystemContext() is @MainActor, so we hop to it explicitly.
+        let context = await MainActor.run { Self.currentSystemContext() }
+        let engine = AutonomyEngine(
+            gemini: gemini,
+            registry: registry,
+            subAgents: subAgents,
+            context: context,
+            runAction: { [weak self] act, prior in
+                await self?.execute(act, priorOutput: prior, context: context) ?? .fail("orchestrator gone")
+            },
+            confirm: { [weak self] prompt in
+                await self?.confirmationHandler?(prompt) ?? false
+            })
+        await engine.run(goal: goal, emit: emit)
     }
 
     /// Streaming answer path (Phase 2: text + native function-calling loop).

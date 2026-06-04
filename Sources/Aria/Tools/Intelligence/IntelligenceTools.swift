@@ -1,41 +1,77 @@
 import Foundation
 
-/// Search the web via DuckDuckGo's free Instant Answer API (no key).
+/// Search the web via DuckDuckGo's HTML endpoint (no key, free) and return the top
+/// organic results — title, snippet, and real URL — so the model has actual content
+/// to read and synthesize. (The old Instant-Answer API returned nothing for normal
+/// queries like "best USB mics", which made research useless.)
 struct WebSearchTool: AriaTool {
     static let name = "web_search"
-    static let description = "Search the web (DuckDuckGo instant answers). Input: {query}."
+    static let description = "Search the web and return the top results (title, snippet, link). Input: {query}."
     static let paramHints: [String: String] = ["query": "The search query"]
 
     var session: URLSession = .shared
+    private static let userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
 
     func run(input: [String: String]) async throws -> ToolResult {
         guard let query = input["query"], !query.isEmpty else { throw ToolError.missingInput("query") }
         guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let url = URL(string: "https://api.duckduckgo.com/?q=\(encoded)&format=json&no_html=1&skip_disambig=1")
+              let url = URL(string: "https://html.duckduckgo.com/html/?q=\(encoded)")
         else { return .fail("Bad query.") }
 
+        var req = URLRequest(url: url)
+        req.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
         do {
-            let (data, _) = try await session.data(from: url)
-            return .ok(Self.summarize(data, query: query))
+            let (data, _) = try await session.data(for: req)
+            let html = String(decoding: data, as: UTF8.self)
+            let results = Self.parseResults(html)
+            guard !results.isEmpty else {
+                return .ok("No web results found for “\(query)”.")
+            }
+            let formatted = results.prefix(6).enumerated().map { i, r in
+                "\(i + 1). \(r.title)\n   \(r.snippet)\n   \(r.url)"
+            }.joined(separator: "\n\n")
+            return .ok("Top results for “\(query)”:\n\n\(formatted)")
         } catch {
             return .fail("Search failed: \(error.localizedDescription)")
         }
     }
 
-    static func summarize(_ data: Data, query: String) -> String {
-        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return "No results for \(query)."
+    /// Pull (title, url, snippet) triples out of DuckDuckGo's HTML results page.
+    static func parseResults(_ html: String) -> [(title: String, url: String, snippet: String)] {
+        let titleAnchors = regexMatches(#"<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>"#, in: html)
+        let snippetAnchors = regexMatches(#"<a[^>]*class="result__snippet"[^>]*>(.*?)</a>"#, in: html)
+        var out: [(String, String, String)] = []
+        for (i, m) in titleAnchors.enumerated() where m.count >= 3 {
+            let url = realURL(from: m[1])
+            let title = WebFetchTool.stripHTML(m[2])
+            let snippet = i < snippetAnchors.count && snippetAnchors[i].count >= 2
+                ? WebFetchTool.stripHTML(snippetAnchors[i][1]) : ""
+            if !title.isEmpty, !url.isEmpty { out.append((title, url, snippet)) }
         }
-        if let abstract = root["AbstractText"] as? String, !abstract.isEmpty {
-            let src = root["AbstractURL"] as? String ?? ""
-            return src.isEmpty ? abstract : "\(abstract)\n\nSource: \(src)"
+        return out
+    }
+
+    /// DuckDuckGo wraps result links in a redirect (//duckduckgo.com/l/?uddg=…);
+    /// pull the real destination out of the `uddg` param.
+    static func realURL(from href: String) -> String {
+        var h = href
+        if h.hasPrefix("//") { h = "https:" + h }
+        if let comps = URLComponents(string: h),
+           let uddg = comps.queryItems?.first(where: { $0.name == "uddg" })?.value {
+            return uddg
         }
-        if let related = root["RelatedTopics"] as? [[String: Any]] {
-            let texts = related.compactMap { $0["Text"] as? String }.prefix(3)
-            if !texts.isEmpty { return texts.joined(separator: "\n• ") }
+        return h
+    }
+
+    static func regexMatches(_ pattern: String, in s: String) -> [[String]] {
+        guard let re = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators, .caseInsensitive]) else { return [] }
+        let range = NSRange(s.startIndex..., in: s)
+        return re.matches(in: s, range: range).map { m in
+            (0..<m.numberOfRanges).map { i -> String in
+                guard let r = Range(m.range(at: i), in: s) else { return "" }
+                return String(s[r])
+            }
         }
-        if let answer = root["Answer"] as? String, !answer.isEmpty { return answer }
-        return "No instant answer for \(query). Try a more specific query."
     }
 }
 

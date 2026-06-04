@@ -5,7 +5,16 @@ import Foundation
 protocol SubAgent {
     var name: String { get }
     var description: String { get }
+    /// One-line flavor text used in narration and the crew roster.
+    var persona: String { get }
+    /// Tool names this agent may call. Empty means no restriction.
+    var allowedTools: [String] { get }
     func execute(task: String, context: AgentContext) async -> AgentResult
+}
+
+extension SubAgent {
+    var persona: String { "" }
+    var allowedTools: [String] { [] }
 }
 
 /// Everything a sub-agent needs: the model, the tool registry, the dynamic
@@ -57,7 +66,21 @@ actor SubAgentRegistry {
             .joined(separator: "\n")
     }
 
+    /// Returns a sorted roster of the live crew (name, persona, description).
+    func crew() -> [(name: String, persona: String, description: String)] {
+        agents.values
+            .map { ($0.name, $0.persona, $0.description) }
+            .sorted { $0.name < $1.name }
+    }
+
+    /// Nonisolated static variant — builds from builtins without touching actor state.
+    nonisolated static func crewInfo() -> [(name: String, persona: String, description: String)] {
+        builtins()
+            .map { ($0.name, $0.persona, $0.description) }
+            .sorted { $0.name < $1.name }
+    }
+
     static func builtins() -> [SubAgent] {
-        [ResearchAgent(), CodeWriterAgent(), TaskPlannerAgent()]
+        [ResearchAgent(), LyraAgent(), CodeWriterAgent(), CometAgent(), TaskPlannerAgent()]
     }
 }

@@ -40,6 +40,7 @@ actor ToolRegistry {
             FileWriteTool(),
             FileReadTool(),
             ClipboardTool(),
+            SaveNoteTool(),
             NotificationTool(),
             OpenAppTool(),
             BrowserTool(),

@@ -111,6 +111,91 @@ struct ClipboardTool: AriaTool {
     }
 }
 
+/// Save text where the user can read it later. Tries Apple Notes first; if that
+/// fails for any reason, falls back to a Markdown file on the Desktop AND the
+/// clipboard AND a notification — so "write it down and give it to me" NEVER
+/// dead-ends. Always succeeds and reports where the text landed.
+struct SaveNoteTool: AriaTool {
+    static let name = "save_note"
+    static let description = "Save text so the user can read it later (Apple Notes, falling back to a Desktop file + clipboard). Input: {title?, content}. Use this for 'note', 'save', 'write it down', 'jot', 'remember this'."
+    static let paramHints: [String: String] = [
+        "title": "Short title / first line (optional)",
+        "content": "The text to save"
+    ]
+
+    func run(input: [String: String]) async throws -> ToolResult {
+        let content = (input["content"] ?? input["text"] ?? input["body"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !content.isEmpty else { throw ToolError.missingInput("content") }
+        let title = (input["title"]?.isEmpty == false ? input["title"]! : Self.firstLineTitle(content))
+
+        // 1) Try Apple Notes (the user asked for "a note"). Notes derives the title
+        //    from the first line of the HTML body, so we make that a bold heading.
+        //    No hard-coded account/folder → uses the default account so it works on
+        //    any setup (iCloud or "On My Mac").
+        // HTML-escape for Notes' rich body, THEN escape for the AppleScript string
+        // literal (backslash + double-quote) — otherwise a quote in the content
+        // breaks the script and it always falls back to a file.
+        let escapedTitle = Self.asLiteral(Self.htmlEscape(title))
+        let escapedBody = Self.asLiteral(Self.htmlEscape(content).replacingOccurrences(of: "\n", with: "<br>"))
+        let notesScript = """
+        tell application "Notes" to make new note with properties {body:"<div><b>\(escapedTitle)</b></div><div>\(escapedBody)</div>"}
+        """
+        let notes = await AppleScriptTool.execute(notesScript)
+        if notes.success {
+            Log.trace("save_note: created Apple Note “\(title)”")
+            // Also mirror to clipboard so it's instantly pasteable.
+            await Self.copyToClipboard(content)
+            return .ok("Saved a note titled “\(title)” in Apple Notes (and copied it to your clipboard).")
+        }
+        Log.trace("save_note: Notes failed (\(notes.output)); falling back to a Desktop file")
+
+        // 2) Fallback: write a Markdown file to ~/Desktop/Aria Notes/, open it so the
+        //    user can't miss it, copy to clipboard, and notify.
+        let dir = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Desktop/Aria Notes")
+        let fileURL = dir.appendingPathComponent("\(Self.slug(title)).md")
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let doc = "# \(title)\n\n\(content)\n"
+            try doc.write(to: fileURL, atomically: true, encoding: .utf8)
+            await Self.copyToClipboard(content)
+            await MainActor.run { _ = NSWorkspace.shared.open(fileURL) }   // surface it immediately
+            _ = await AppleScriptTool.execute(
+                "display notification \"Saved “\(Self.asLiteral(title))” to your Desktop\" with title \"Aria\"")
+            Log.trace("save_note: wrote + opened \(fileURL.path)")
+            return .ok("Couldn't reach Apple Notes, so I saved it to your Desktop (Aria Notes/\(fileURL.lastPathComponent)), opened it, and copied it to your clipboard.")
+        } catch {
+            // 3) Last resort: clipboard only — still give it to the user.
+            await Self.copyToClipboard(content)
+            return .ok("I couldn't open Notes or write a file, so I've copied the text to your clipboard for you.")
+        }
+    }
+
+    private static func firstLineTitle(_ s: String) -> String {
+        let first = s.split(separator: "\n").first.map(String.init) ?? s
+        let trimmed = first.replacingOccurrences(of: "#", with: "").trimmingCharacters(in: .whitespaces)
+        return String(trimmed.prefix(60)).isEmpty ? "Aria Note" : String(trimmed.prefix(60))
+    }
+    private static func htmlEscape(_ s: String) -> String {
+        s.replacingOccurrences(of: "&", with: "&amp;")
+         .replacingOccurrences(of: "<", with: "&lt;")
+         .replacingOccurrences(of: ">", with: "&gt;")
+    }
+    private static func asLiteral(_ s: String) -> String {
+        s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+    }
+    private static func slug(_ s: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: " -_"))
+        let cleaned = String(s.unicodeScalars.filter { allowed.contains($0) }).trimmingCharacters(in: .whitespaces)
+        let dashed = cleaned.replacingOccurrences(of: " ", with: "-")
+        return dashed.isEmpty ? "aria-note" : String(dashed.prefix(50))
+    }
+    @MainActor private static func copyToClipboard(_ text: String) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(text, forType: .string)
+    }
+}
+
 /// Post a macOS notification (via osascript, no entitlement needed).
 struct NotificationTool: AriaTool {
     static let name = "notify"

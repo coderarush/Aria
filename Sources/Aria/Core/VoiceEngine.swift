@@ -1,64 +1,70 @@
-import AppKit
+import Foundation
 import AVFoundation
 
-/// On-device and cloud text-to-speech for Aria's spoken responses. Strips markdown so the
-/// synthesizer reads clean prose, and notifies start/finish so the controller
-/// can mute wake detection while Aria speaks (preventing self-triggering).
+/// Cloud text-to-speech for Aria's spoken responses, using Gemini's natural voice
+/// exclusively (no on-device/Apple voice — it cheapened the premium feel). Strips
+/// markdown so the synthesizer reads clean prose, and notifies start/finish so the
+/// controller can mute wake detection while Aria speaks (preventing self-trigger).
+///
+/// Premium policy: there is NO robotic fallback. If Gemini TTS can't produce audio
+/// (offline, no key, or sustained rate-limit after paced retries), Aria stays
+/// silent — the on-screen caption still conveys the reply — and fires its
+/// completion callbacks so the speech queue and wake re-arm never stall.
 @MainActor
-final class VoiceEngine: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
-    private let synth = AVSpeechSynthesizer()
-
-    enum Kind: String { case apple, gemini }
-    var kind: Kind = .apple
+final class VoiceEngine: NSObject, AVAudioPlayerDelegate {
     var geminiVoiceName = "Kore"
     private var audioPlayer: AVAudioPlayer?
     private let keyProvider: () -> String? = { KeychainManager.read(account: KeychainKey.geminiAPIKey) }
 
     var enabled = true
-    var voiceIdentifier: String?
-    var rate: Float = 0.46 * (AVSpeechUtteranceMaximumSpeechRate + AVSpeechUtteranceMinimumSpeechRate)
 
     var onStart: (() -> Void)?
     var onFinish: (() -> Void)?
     /// Fired when a single utterance/chunk finishes (used by StreamingVoice).
     var onChunkFinished: (() -> Void)?
 
-    override init() {
-        super.init()
-        synth.delegate = self
-    }
-
+    /// Speak a full message (fires onStart).
     func speak(_ message: String) {
         guard enabled else { return }
         let clean = Self.spokenText(from: message)
         guard !clean.isEmpty else { return }
         onStart?()
-        if kind == .gemini {
-            speakWithGemini(clean)
-        } else {
-            speakWithApple(clean)
-        }
+        speakWithGemini(clean)
     }
 
-    private func speakWithApple(_ text: String) {
-        let u = AVSpeechUtterance(string: text)
-        if let id = voiceIdentifier, let v = AVSpeechSynthesisVoice(identifier: id) { u.voice = v }
-        else { u.voice = Self.preferredVoice() }
-        u.rate = rate
-        synth.speak(u)
+    /// Speak a single chunk (no onStart). Completion routes to onChunkFinished.
+    func speakChunk(_ text: String) {
+        guard enabled else { onChunkFinished?(); return }   // respect the Settings toggle
+        let clean = Self.spokenText(from: text)
+        guard !clean.isEmpty else { onChunkFinished?(); return }
+        speakWithGemini(clean)
     }
 
     private func speakWithGemini(_ text: String) {
         Task { [weak self] in
             guard let self else { return }
-            do {
-                let wav = try await Self.synthesizeGemini(text: text,
-                                                          voice: self.geminiVoiceName,
-                                                          apiKey: self.keyProvider() ?? "")
-                try self.play(wav)            // onFinish fires from AVAudioPlayer delegate
-            } catch {
-                Log.trace("gemini TTS failed (\(error)); falling back to Apple voice")
-                self.speakWithApple(text)     // onFinish fires from speech delegate
+            let key = self.keyProvider() ?? ""
+            // Up to 3 attempts, pacing on a momentary 429, so the natural voice wins
+            // under normal use instead of going silent on a transient rate-limit.
+            for attempt in 0..<3 {
+                do {
+                    let wav = try await Self.synthesizeGemini(text: text, voice: self.geminiVoiceName, apiKey: key)
+                    try self.play(wav)            // onFinish/onChunkFinished fire from the player delegate
+                    return
+                } catch {
+                    let is429 = (error as NSError).code == 429
+                    if is429, attempt < 2 {
+                        let wait = 1.2 + Double(attempt) * 1.3   // 1.2s, 2.5s
+                        Log.trace("gemini TTS 429 — pacing \(wait)s then retry \(attempt + 1)/2")
+                        try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+                        continue
+                    }
+                    // No Apple fallback — stay silent, but keep the pipeline moving.
+                    Log.trace("gemini TTS unavailable (\(error)); staying silent (premium: no robotic fallback)")
+                    self.onFinish?()
+                    self.onChunkFinished?()
+                    return
+                }
             }
         }
     }
@@ -77,40 +83,6 @@ final class VoiceEngine: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDel
     func stop() {
         audioPlayer?.stop()
         audioPlayer = nil
-        synth.stopSpeaking(at: .immediate)
-    }
-
-    /// Prefer an enhanced/premium en-US voice; fall back to the default en-US.
-    nonisolated static func preferredVoice() -> AVSpeechSynthesisVoice? {
-        let enUS = AVSpeechSynthesisVoice.speechVoices().filter { $0.language == "en-US" }
-        if let enhanced = enUS.first(where: { $0.quality == .premium })
-            ?? enUS.first(where: { $0.quality == .enhanced }) {
-            return enhanced
-        }
-        return AVSpeechSynthesisVoice(language: "en-US")
-    }
-
-    /// True if a natural (Premium/Enhanced) English voice is installed.
-    nonisolated static func hasNaturalVoiceInstalled() -> Bool {
-        AVSpeechSynthesisVoice.speechVoices().contains {
-            $0.language.hasPrefix("en") && ($0.quality == .premium || $0.quality == .enhanced)
-        }
-    }
-
-    /// Identifier of the best available voice (Premium/Enhanced preferred).
-    nonisolated static func bestVoiceIdentifier() -> String? { preferredVoice()?.identifier }
-
-    /// Open System Settings where the user can download free Enhanced/Premium
-    /// voices (Spoken Content). Best-effort across macOS versions.
-    static func openVoiceDownloadSettings() {
-        let candidates = [
-            "x-apple.systempreferences:com.apple.preference.universalaccess?SpokenContent",
-            "x-apple.systempreferences:com.apple.Accessibility-Settings.extension",
-            "x-apple.systempreferences:com.apple.preference.universalaccess"
-        ]
-        for s in candidates {
-            if let url = URL(string: s), NSWorkspace.shared.open(url) { return }
-        }
     }
 
     /// Remove markdown emphasis, code ticks, arrows, and URLs; collapse whitespace.
@@ -123,21 +95,6 @@ final class VoiceEngine: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDel
         }
         s = s.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
         return s.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    nonisolated func speechSynthesizer(_ s: AVSpeechSynthesizer, didFinish u: AVSpeechUtterance) {
-        Task { @MainActor in self.onFinish?(); self.onChunkFinished?() }
-    }
-
-    nonisolated func speechSynthesizer(_ s: AVSpeechSynthesizer, didCancel u: AVSpeechUtterance) {
-        Task { @MainActor in self.onChunkFinished?() }
-    }
-
-    /// Speak a single chunk (no onStart). Routes completion to onChunkFinished.
-    func speakChunk(_ text: String) {
-        let clean = Self.spokenText(from: text)
-        guard !clean.isEmpty else { Task { @MainActor in self.onChunkFinished?() }; return }
-        if kind == .gemini { speakWithGemini(clean) } else { speakWithApple(clean) }
     }
 
     /// Gemini TTS → WAV bytes (24kHz mono 16-bit PCM wrapped in a WAV header).
