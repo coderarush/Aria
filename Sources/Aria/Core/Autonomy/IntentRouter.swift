@@ -6,7 +6,9 @@ import Foundation
 enum IntentRouter {
     private static let actionVerbs = ["open", "create", "make", "write", "draft", "send", "email",
                                       "research", "find", "download", "organize", "clean", "build",
-                                      "summarize", "schedule", "rename", "move", "delete", "set up"]
+                                      "summarize", "summarise", "schedule", "rename", "move", "delete", "set up",
+                                      "save", "look up", "put ", "add ", "jot", "record", "remind",
+                                      "play", "back up", "note down", "write down", "take down"]
     static func isTask(_ command: String) -> Bool {
         let c = command.lowercased()
         let hasConjunction = c.contains(" and ") || c.contains(", then ") || c.contains(" then ")

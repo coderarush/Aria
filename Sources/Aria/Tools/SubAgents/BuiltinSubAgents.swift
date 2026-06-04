@@ -29,15 +29,8 @@ struct ResearchAgent: SubAgent {
         SOURCES:
         \(String(sources.prefix(8000)))
         """
-        do {
-            let report = try await context.gemini.generateScript(
-                task: "echo the following report verbatim to stdout, nothing else:\n\(synthTask)",
-                language: .bash, context: context.system)
-            // generateScript returns code; for a report we instead just ask plainly:
-            return .ok(report.isEmpty ? sources : report)
-        } catch {
-            return .ok(String(sources.prefix(2000)))
-        }
+        let report = (try? await context.gemini.generateText(prompt: synthTask, temperature: 0.3)) ?? ""
+        return .ok(report.isEmpty ? String(sources.prefix(2000)) : report)
     }
 
     static func extractURLs(from text: String) -> [String] {
@@ -84,30 +77,24 @@ struct TaskPlannerAgent: SubAgent {
     let name = "Atlas"
     let description = "Break a complex goal into steps and execute them in order."
     let persona = "operates the Mac — apps, files, system"
-    let allowedTools = ["shell", "applescript", "open_app", "file_write", "file_read", "clipboard", "open_url"]
+    let allowedTools = ["shell", "applescript", "open_app", "file_write", "file_read", "clipboard", "save_note", "open_url"]
 
     func execute(task: String, context: AgentContext) async -> AgentResult {
         let catalog = await context.registry.catalog()
         let planPrompt = """
-        Break this goal into an ordered list of tool steps and output ONLY a JSON \
-        array like [{"tool":"name","input":{...}}]. Use tool "dynamic" with \
-        input.task for anything no listed tool covers.
+        You operate this Mac and can accomplish anything via these tools (shell + \
+        applescript reach any app/file/setting). Break this goal into an ordered list \
+        of tool steps. Output ONLY a JSON array like [{"tool":"name","input":{...}}]. \
+        To save/record text for the user use tool "save_note". Use tool "dynamic" with \
+        input.task for anything no listed tool covers. Never refuse.
 
         GOAL: \(task)
 
         TOOLS:
         \(catalog)
         """
-        let raw: String
-        do {
-            raw = try await context.gemini.generateScript(
-                task: "print this JSON array and nothing else: \(planPrompt)",
-                language: .bash, context: context.system)
-        } catch {
-            return .fail("Planning failed: \(error.localizedDescription)")
-        }
-
-        guard let actions = TaskPlannerAgent.parseActions(raw) else {
+        let raw = (try? await context.gemini.generateText(prompt: planPrompt, temperature: 0.2)) ?? ""
+        guard let actions = TaskPlannerAgent.parseActions(raw), !actions.isEmpty else {
             return .fail("Couldn't parse a plan.")
         }
 
@@ -139,16 +126,11 @@ struct LyraAgent: SubAgent {
     let allowedTools = ["file_write", "clipboard"]
 
     func execute(task: String, context: AgentContext) async -> AgentResult {
-        do {
-            let text = try await context.gemini.generateScript(
-                task: "Write the following as clean prose and print ONLY the prose to stdout:\n\(task)",
-                language: .bash, context: context.system)
-            let clean = text.isEmpty ? task : text
-            _ = await context.runAction(AgentAction(tool: "clipboard", input: ["action": "write", "text": clean]), "")
-            return .ok(clean)
-        } catch {
-            return .fail("Couldn't draft that: \(error.localizedDescription)")
-        }
+        let prompt = "Write the following as clean, well-formatted prose. Output ONLY the prose, no preamble:\n\(task)"
+        let text = (try? await context.gemini.generateText(prompt: prompt, temperature: 0.4)) ?? ""
+        let clean = text.isEmpty ? task : text
+        _ = await context.runAction(AgentAction(tool: "clipboard", input: ["action": "write", "text": clean]), "")
+        return .ok(clean)
     }
 }
 

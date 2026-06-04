@@ -190,6 +190,22 @@ actor GeminiClient {
         return Self.stripCodeFences(Self.extractText(from: data))
     }
 
+    /// Plain text/JSON generation — no code framing, no JSON-schema mandate. Used by
+    /// the planner and by agents synthesizing prose. Spreads across model buckets via
+    /// performWithFallback (free-tier safe). Returns the model's text, fences stripped.
+    func generateText(prompt: String, temperature: Double = 0.3) async throws -> String {
+        guard let apiKey = apiKeyProvider(), !apiKey.isEmpty else {
+            throw GeminiError.missingAPIKey
+        }
+        let payload: [String: Any] = [
+            "contents": [["role": "user", "parts": [["text": prompt]]]],
+            "generationConfig": ["temperature": temperature]
+        ]
+        let body = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
+        let data = try await performWithFallback(apiKey: apiKey, body: body)
+        return Self.stripCodeFences(Self.extractText(from: data))
+    }
+
     static func extractText(from data: Data) -> String {
         guard
             let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
