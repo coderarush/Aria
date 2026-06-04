@@ -15,4 +15,11 @@ final class MemoryCaptureTests: XCTestCase {
         XCTAssertNil(MemoryCapture.extract("open Spotify"))
         XCTAssertNil(MemoryCapture.extract("remember"))   // nothing to remember
     }
+
+    func testIgnoresQuestionsAndRecall() {
+        XCTAssertNil(MemoryCapture.extract("remember when we talked about the project?"))
+        XCTAssertNil(MemoryCapture.extract("remember how to get to the airport?"))
+        XCTAssertNil(MemoryCapture.extract("remember what I said earlier"))   // "what" → recall
+        XCTAssertNil(MemoryCapture.extract("remember to buy milk"))           // "to" → a task
+    }
 }

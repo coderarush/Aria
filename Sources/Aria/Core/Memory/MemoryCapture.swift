@@ -9,14 +9,21 @@ enum MemoryCapture {
         "for future reference, ", "fyi, "
     ]
 
-    /// Returns the fact to remember (original casing), or nil if not a remember command.
+    /// Words that make "remember …" a QUESTION/recall or a task, not a fact to store.
+    private static let notAFact = ["when", "if", "how", "what", "where", "who", "why",
+                                   "whether", "to ", "the time", "that time"]
+
+    /// Returns the fact to remember (original casing), or nil if not a "store this" command.
     static func extract(_ command: String) -> String? {
         let lower = command.lowercased()
-        for t in triggers {
-            if lower.hasPrefix(t) {
-                let fact = String(command.dropFirst(t.count)).trimmingCharacters(in: .whitespacesAndNewlines)
-                return fact.isEmpty ? nil : normalizeFirstPerson(fact)
-            }
+        // A question ("remember when we…?") is recall, not storage.
+        if lower.hasSuffix("?") { return nil }
+        for t in triggers where lower.hasPrefix(t) {
+            let rest = String(command.dropFirst(t.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !rest.isEmpty else { return nil }
+            let restLower = rest.lowercased()
+            if Self.notAFact.contains(where: { restLower.hasPrefix($0) }) { return nil }
+            return normalizeFirstPerson(rest)
         }
         return nil
     }

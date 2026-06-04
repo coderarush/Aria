@@ -14,8 +14,9 @@ final class AudioBus {
     private let aec = EchoCanceller(frameSize: frameSize, filterTaps: frameSize * 16, sampleRate: Int(aecRate))
     private let aecFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: aecRate, channels: 1, interleaved: true)!
 
-    private var micRing = FrameRing(frameSize: frameSize)
-    private var farRing = FrameRing(frameSize: frameSize)
+    private var micRing = FrameRing(frameSize: frameSize)   // audio thread only
+    private var farRing = FrameRing(frameSize: frameSize)   // pushed (main) + popped (audio) → farLock
+    private let farLock = NSLock()
     private var micConverter: AVAudioConverter?
 
     /// Emits cleaned 16 kHz mono Int16 frames (echo removed), on the audio thread.
@@ -54,7 +55,7 @@ final class AudioBus {
     /// the far-end is zeros and the AEC is a near-passthrough.
     private func drain() {
         while let near = micRing.pop() {
-            let far = farRing.pop() ?? [Int16](repeating: 0, count: AudioBus.frameSize)
+            farLock.lock(); let far = farRing.pop() ?? [Int16](repeating: 0, count: AudioBus.frameSize); farLock.unlock()
             let cleaned = aec.process(near: near, far: far)
             onCleanedFrame?(cleaned)
         }
@@ -64,7 +65,7 @@ final class AudioBus {
     /// far-end so her voice is cancelled out of the mic.
     func playReference(pcm: Data, pcmRate: Double, onDone: @escaping () -> Void) {
         if let i16 = AudioBus.resampleInt16(pcm: pcm, fromRate: pcmRate, toFormat: aecFormat) {
-            farRing.push(i16)
+            farLock.lock(); farRing.push(i16); farLock.unlock()
         }
         guard let srcFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: pcmRate, channels: 1, interleaved: true),
               let buf = AudioBus.pcmBuffer(from: pcm, format: srcFormat) else { onDone(); return }
@@ -80,7 +81,7 @@ final class AudioBus {
 
     func stopPlayback() {
         player.stop()
-        farRing = FrameRing(frameSize: AudioBus.frameSize)   // drop pending reference
+        farLock.lock(); farRing = FrameRing(frameSize: AudioBus.frameSize); farLock.unlock()   // drop pending reference
         onPlayStateChange?(false)
     }
 
