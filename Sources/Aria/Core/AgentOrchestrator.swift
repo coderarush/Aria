@@ -13,6 +13,7 @@ actor AgentOrchestrator {
     private let factory: DynamicToolFactory
     private let registry: ToolRegistry
     private let subAgents: SubAgentRegistry
+    private let longTerm = LongTermMemory()
 
     /// Asks the user to approve running generated code. Param: a human-readable
     /// prompt (incl. code when "show code" is on). Returns true to proceed.
@@ -236,13 +237,28 @@ actor AgentOrchestrator {
     /// Calls `onText` with each text delta; runs up to maxRounds agentic turns.
     func handleStreaming(command: String, privacyMode: Bool,
                          onText: @escaping @Sendable (String) -> Void) async {
+        // Cross-session memory: an explicit "remember that …" is saved deterministically
+        // (zero model quota) and acknowledged.
+        if let fact = MemoryCapture.extract(command) {
+            await longTerm.remember(fact, kind: "fact")
+            onText("Got it — I'll remember that.")
+            await record(command: command, response: AriaResponse(type: .answer, message: "Got it — I'll remember that.", confidence: 1.0))
+            return
+        }
+
         let wantsScreen = !privacyMode && ModelRouter.needsScreen(for: command)
         let screenshot: Data? = wantsScreen ? (try? await screen.capturePrimaryJPEG()) : nil
         var history = await memory.recentContext()
         history = Array(history.suffix(8))
         let context = await Self.currentSystemContext()
         let tools = ToolDeclarations.declarations(for: await registry.specs())
+        // Recall relevant long-term facts and prime the turn with them.
+        let recalled = await longTerm.recall(for: command, limit: 4)
         var transcript = command
+        if !recalled.isEmpty {
+            let known = recalled.map { "- \($0.text)" }.joined(separator: "\n")
+            transcript = "(Relevant things you remember about me:\n\(known)\n)\n\n\(command)"
+        }
         var turnScreenshot = screenshot
         var full = ""
         let maxRounds = 4

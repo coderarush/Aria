@@ -65,15 +65,15 @@ actor LongTermMemory {
     static func rank(_ facts: [MemoryFact], query: String, now: Date) -> [MemoryFact] {
         let qTokens = tokens(query)
         return facts
-            .map { fact -> (MemoryFact, Double) in
+            .compactMap { fact -> (MemoryFact, Double)? in
                 let fTokens = tokens(fact.text)
                 let overlap = Double(qTokens.intersection(fTokens).count)
-                // Recency boost: newer facts score a little higher (decays over ~30 days).
+                guard overlap > 0 else { return nil }   // require a real keyword match
+                // Recency only tie-breaks among matches (newer slightly higher, ~30d decay).
                 let ageDays = max(0, now.timeIntervalSince(fact.createdAt) / 86_400)
                 let recency = max(0, 1.0 - ageDays / 30.0)
                 return (fact, overlap * 2.0 + recency)
             }
-            .filter { $0.1 > 0 }
             .sorted { $0.1 > $1.1 }
             .map { $0.0 }
     }
