@@ -140,20 +140,13 @@ struct ConversationSettingsTab: View {
 
         Form {
             Section {
-                Toggle("Echo cancellation (needed for barge-in)", isOn: $settings.echoCancellation)
-                Text("If Aria stops hearing you after changing this, turn it off and relaunch.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Toggle("Let me interrupt Aria (barge-in)", isOn: $settings.bargeInEnabled)
-                HStack {
-                    Text("Barge-in sensitivity")
-                    Slider(value: $settings.bargeInSensitivity, in: 0...1)
-                }
-                .disabled(!settings.bargeInEnabled)
                 HStack {
                     Text("End conversation after silence")
                     Slider(value: $settings.conversationSilenceTimeout, in: 5...20, step: 1)
                     Text("\(Int(settings.conversationSilenceTimeout))s").monospacedDigit()
                 }
+                Text("Talk to Aria in a continuous back-and-forth — after she answers, just speak your next question (no need to say “Hey Aria” again). She stops listening after this much silence.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

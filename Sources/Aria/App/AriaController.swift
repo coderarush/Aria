@@ -261,7 +261,10 @@ final class AriaController {
             self?.islandViewModel.beginListening()
             self?.islandViewModel.showError(message)
         }
-        wakeEngine.onSpeechOnset = { [weak self] in self?.handleBargeIn() }
+        // Barge-in (talk-over) is disabled: it requires echo cancellation, which
+        // breaks recognition on this hardware. Without AEC the mic hears Aria's own
+        // voice and would false-trigger, so we don't wire onSpeechOnset. The model
+        // is continuous follow-up: wait for her to finish, then talk (no re-wake).
     }
 
     // MARK: Barge-in
