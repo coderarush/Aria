@@ -247,6 +247,21 @@ actor GeminiClient {
         }
     }
 
+    /// Vision: describe / locate things in an image. Gemini-only (the OpenAI fallbacks
+    /// are text-only), used by the computer-use vision fallback.
+    func generateTextWithImage(prompt: String, jpeg: Data, temperature: Double = 0.1) async throws -> String {
+        let payload: [String: Any] = [
+            "contents": [["role": "user", "parts": [
+                ["text": prompt],
+                ["inline_data": ["mime_type": "image/jpeg", "data": jpeg.base64EncodedString()]]
+            ]]],
+            "generationConfig": ["temperature": temperature]
+        ]
+        let body = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
+        let data = try await performWithFallback(body: body)
+        return Self.stripCodeFences(Self.extractText(from: data))
+    }
+
     /// Built only when needed (on a Gemini failure), so the normal path has zero
     /// overhead. Reads provider config from UserDefaults (no MainActor hop).
     private func currentFallbacks() -> [OpenAICompatibleClient] {

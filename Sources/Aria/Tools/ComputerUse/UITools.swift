@@ -33,8 +33,13 @@ struct UIClickTool: AriaTool {
         }
         let role = (input["role"]?.isEmpty == false) ? input["role"] : nil
         let ok = await MainActor.run(body: { UIActuator.click(role: role, label: label) })
-        return ok ? .ok("Clicked “\(label)”.")
-                  : .fail("Couldn't find “\(label)” on screen. Call ui_read to see the exact labels.")
+        if ok { return .ok("Clicked “\(label)”.") }
+        // Accessibility couldn't find it (Electron/canvas/custom UI) → locate by sight.
+        if let pt = await VisionLocator.locate(label) {
+            await MainActor.run { UIActuator.clickAt(pt) }
+            return .ok("Clicked “\(label)” (located by sight).")
+        }
+        return .fail("Couldn't find “\(label)” on screen, even by sight. Call ui_read to see the exact labels.")
     }
 }
 

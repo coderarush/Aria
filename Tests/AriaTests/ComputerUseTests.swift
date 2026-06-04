@@ -34,6 +34,13 @@ final class ComputerUseTests: XCTestCase {
         XCTAssertNil(UIActuator.keyCodes["f13"])
     }
 
+    func testVisionFractionParsing() {
+        XCTAssertEqual(VisionLocator.parseFraction(#"{"x":0.5,"y":0.25}"#), CGPoint(x: 0.5, y: 0.25))
+        XCTAssertNil(VisionLocator.parseFraction(#"{"found":false}"#))
+        XCTAssertNil(VisionLocator.parseFraction(#"{"x":1.4,"y":0.2}"#))   // out of range
+        XCTAssertNil(VisionLocator.parseFraction("no json"))
+    }
+
     func testPilotParsesAction() {
         let a = PilotAgent.parse(#"{"tool":"ui_click","input":{"label":"Export"}}"#)
         XCTAssertEqual(a?.tool, "ui_click")
