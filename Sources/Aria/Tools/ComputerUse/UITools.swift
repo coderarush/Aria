@@ -31,6 +31,7 @@ struct UIClickTool: AriaTool {
         guard await MainActor.run(body: { AXReader.hasPermission }) else {
             return .fail("Accessibility access is off — enable Aria in System Settings → Privacy & Security → Accessibility.")
         }
+        await MainActor.run { NotificationCenter.default.post(name: .ariaUIActivity, object: nil) }
         let role = (input["role"]?.isEmpty == false) ? input["role"] : nil
         let ok = await MainActor.run(body: { UIActuator.click(role: role, label: label) })
         if ok { return .ok("Clicked “\(label)”.") }
@@ -54,7 +55,7 @@ struct UITypeTool: AriaTool {
         guard await MainActor.run(body: { AXReader.hasPermission }) else {
             return .fail("Accessibility access is off — enable Aria in System Settings → Privacy & Security → Accessibility.")
         }
-        await MainActor.run { UIActuator.type(text) }
+        await MainActor.run { NotificationCenter.default.post(name: .ariaUIActivity, object: nil); UIActuator.type(text) }
         return .ok("Typed \(text.count) characters.")
     }
 }
@@ -70,7 +71,7 @@ struct UIKeyTool: AriaTool {
         guard await MainActor.run(body: { AXReader.hasPermission }) else {
             return .fail("Accessibility access is off — enable Aria in System Settings → Privacy & Security → Accessibility.")
         }
-        let ok = await MainActor.run(body: { UIActuator.key(combo) })
+        let ok = await MainActor.run(body: { NotificationCenter.default.post(name: .ariaUIActivity, object: nil); return UIActuator.key(combo) })
         return ok ? .ok("Pressed \(combo).") : .fail("Didn't recognize the key combo “\(combo)”.")
     }
 }

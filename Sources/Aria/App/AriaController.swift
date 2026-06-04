@@ -13,6 +13,7 @@ final class AriaController {
     private let voice = VoiceEngine()
     private let bargeController = BargeController()
     private let speakerGate = SpeakerGate()
+    private let computerUseIndicator = ComputerUseIndicator()
     private let orchestrator = AgentOrchestrator()
     private let patternEngine = PatternEngine()
     private var panel: IslandPanel?
@@ -268,6 +269,16 @@ final class AriaController {
         // The Settings "teach my voice" button posts this; enroll from live wakes.
         NotificationCenter.default.addObserver(forName: .ariaEnrollVoice, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.enrollOwnerVoice() }
+        }
+        // Computer-use: show the visible "controlling your Mac" indicator while ui_* runs.
+        computerUseIndicator.onStop = { [weak self] in
+            self?.currentTurnTask?.cancel()
+            self?.taskActive = false
+            self?.streamVoice.stop()
+            self?.wakeEngine.isSuspended = false
+        }
+        NotificationCenter.default.addObserver(forName: .ariaUIActivity, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.computerUseIndicator.pulse() }
         }
         applyVoiceSettings()
         applyConversationSettings()
