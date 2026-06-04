@@ -1,9 +1,11 @@
 import Foundation
 
-/// Searches the web, fetches the top sources, and synthesizes a short report.
+/// Orion — searches the web, fetches the top sources, and synthesizes a short report.
 struct ResearchAgent: SubAgent {
-    let name = "research"
+    let name = "Orion"
     let description = "Research a topic: search the web, read sources, synthesize a report."
+    let persona = "tracks down anything on the web"
+    let allowedTools = ["web_search", "web_fetch"]
 
     func execute(task: String, context: AgentContext) async -> AgentResult {
         let search = await context.runAction(
@@ -45,10 +47,12 @@ struct ResearchAgent: SubAgent {
     }
 }
 
-/// Writes code from a description, saves it to a file, and optionally runs it.
+/// Nova — writes code from a description, saves it to a file, and optionally runs it.
 struct CodeWriterAgent: SubAgent {
-    let name = "code_writer"
+    let name = "Nova"
     let description = "Write code from a description, save to a file, optionally run it."
+    let persona = "writes and runs code on the fly"
+    let allowedTools = ["file_write"]
 
     func execute(task: String, context: AgentContext) async -> AgentResult {
         let language = ToolLanguage(rawValue: AgentContext.languageHint(in: task)) ?? .python
@@ -75,10 +79,12 @@ struct CodeWriterAgent: SubAgent {
     }
 }
 
-/// Breaks a goal into ordered tool actions and runs them sequentially.
+/// Atlas — breaks a goal into ordered tool actions and runs them sequentially.
 struct TaskPlannerAgent: SubAgent {
-    let name = "task_planner"
+    let name = "Atlas"
     let description = "Break a complex goal into steps and execute them in order."
+    let persona = "operates the Mac — apps, files, system"
+    let allowedTools = ["shell", "applescript", "open_app", "file_write", "file_read", "clipboard", "open_url"]
 
     func execute(task: String, context: AgentContext) async -> AgentResult {
         let catalog = await context.registry.catalog()
@@ -122,6 +128,40 @@ struct TaskPlannerAgent: SubAgent {
               let end = cleaned.lastIndex(of: "]") else { return nil }
         let json = String(cleaned[start...end])
         return try? JSONDecoder().decode([AgentAction].self, from: Data(json.utf8))
+    }
+}
+
+/// Lyra — writes/drafts prose (emails, notes, summaries) and saves/copies it.
+struct LyraAgent: SubAgent {
+    let name = "Lyra"
+    let description = "Write or draft text — emails, notes, docs, summaries — and save or copy it."
+    let persona = "the wordsmith — drafts and writes"
+    let allowedTools = ["file_write", "clipboard"]
+
+    func execute(task: String, context: AgentContext) async -> AgentResult {
+        do {
+            let text = try await context.gemini.generateScript(
+                task: "Write the following as clean prose and print ONLY the prose to stdout:\n\(task)",
+                language: .bash, context: context.system)
+            let clean = text.isEmpty ? task : text
+            _ = await context.runAction(AgentAction(tool: "clipboard", input: ["action": "write", "text": clean]), "")
+            return .ok(clean)
+        } catch {
+            return .fail("Couldn't draft that: \(error.localizedDescription)")
+        }
+    }
+}
+
+/// Comet — messages & mail. Drafting is free; SENDING is gated upstream (Safety).
+struct CometAgent: SubAgent {
+    let name = "Comet"
+    let description = "Compose and (with confirmation) send messages or mail via the Mail/Messages apps."
+    let persona = "the courier — handles mail and messages"
+    let allowedTools = ["applescript", "clipboard"]
+
+    func execute(task: String, context: AgentContext) async -> AgentResult {
+        let result = await context.runAction(AgentAction(tool: "applescript", input: ["script": task]), "")
+        return result.success ? .ok(result.output) : .fail(result.output)
     }
 }
 
