@@ -20,6 +20,7 @@ actor GeminiClient {
     }
 
     private let models: [String]
+    private let scheduler: RequestScheduler
     private let session: URLSession
     private let apiKeyProvider: () -> String?
 
@@ -40,8 +41,19 @@ actor GeminiClient {
         self.models = [model, "gemini-2.5-flash", "gemini-2.0-flash",
                        "gemini-2.5-flash-lite", "gemini-2.0-flash-lite"]
             .reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+        self.scheduler = RequestScheduler(models: self.models)
         self.session = session
         self.apiKeyProvider = apiKeyProvider
+    }
+
+    /// Reserve a model bucket, waiting (pacing) if all are momentarily maxed.
+    private func reserveModel(preferred: String? = nil) async -> String {
+        if let p = preferred { return p }
+        if let m = scheduler.reserve() { return m }
+        let wait = min(scheduler.waitTime(), 65)
+        Log.trace("scheduler: all buckets maxed; pacing \(wait)s")
+        try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+        return scheduler.reserve() ?? models[0]
     }
 
     /// Send a turn to Gemini and decode the structured AriaResponse.
@@ -96,41 +108,31 @@ actor GeminiClient {
                                                 toolCatalog: toolCatalog,
                                                 tools: tools,
                                                 jsonMode: false)
-                    let effectiveModels = ([preferredModel].compactMap { $0 } + models)
-                        .reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
                     var lastError: Error = GeminiError.emptyResponse
-                    // Free tier meters RPM PER MODEL. Try every model FAST (no delay)
-                    // to exploit their separate quota buckets; only if an entire pass
-                    // is rate-limited do we wait briefly and retry the cycle.
-                    let passes = 3
-                    for pass in 0..<passes {
-                        for model in effectiveModels {
-                            let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):streamGenerateContent?alt=sse&key=\(apiKey)")!
-                            var req = URLRequest(url: url)
-                            req.httpMethod = "POST"
-                            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                            req.httpBody = body
-                            do {
-                                let (bytes, resp) = try await session.bytes(for: req)
-                                let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
-                                guard status == 200 else { throw GeminiError.http(status) }
-                                var parser = GeminiStreamParser()
-                                for try await line in bytes.lines {
-                                    try Task.checkCancellation()
-                                    for ev in parser.consume(line + "\n") { continuation.yield(ev) }
-                                }
-                                continuation.finish()
-                                return
-                            } catch let GeminiError.http(status) where [404, 408, 425, 429, 500, 502, 503, 504].contains(status) {
-                                lastError = GeminiError.http(status)
-                                continue   // next model immediately — separate free bucket
+                    let maxAttempts = 6
+                    for attempt in 0..<maxAttempts {
+                        // First attempt may honor a routed preferredModel; otherwise reserve a bucket (pacing if needed).
+                        let model = await reserveModel(preferred: attempt == 0 ? preferredModel : nil)
+                        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):streamGenerateContent?alt=sse&key=\(apiKey)")!
+                        var req = URLRequest(url: url)
+                        req.httpMethod = "POST"
+                        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                        req.httpBody = body
+                        do {
+                            let (bytes, resp) = try await session.bytes(for: req)
+                            let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+                            guard status == 200 else { throw GeminiError.http(status) }
+                            var parser = GeminiStreamParser()
+                            for try await line in bytes.lines {
+                                try Task.checkCancellation()
+                                for ev in parser.consume(line + "\n") { continuation.yield(ev) }
                             }
-                        }
-                        // Whole pass limited across ALL models → brief wait, retry cycle.
-                        if pass < passes - 1 {
-                            let backoff = min(1.5 * pow(2.0, Double(pass)), 6)  // 1.5, 3s
-                            Log.trace("streamSend: all models limited; backoff \(backoff)s (pass \(pass + 1)/\(passes))")
-                            try? await Task.sleep(nanoseconds: UInt64(backoff * 1_000_000_000))
+                            continuation.finish()
+                            return
+                        } catch let GeminiError.http(status) where [404, 408, 425, 429, 500, 502, 503, 504].contains(status) {
+                            lastError = GeminiError.http(status)
+                            Log.trace("streamSend: \(model) http(\(status)); attempt \(attempt + 1)/\(maxAttempts)")
+                            continue   // reserveModel paces on the next iteration if all buckets are maxed
                         }
                     }
                     continuation.finish(throwing: lastError)
