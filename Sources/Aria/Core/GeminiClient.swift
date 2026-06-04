@@ -46,14 +46,17 @@ actor GeminiClient {
         self.apiKeyProvider = apiKeyProvider
     }
 
-    /// Reserve a model bucket, waiting (pacing) if all are momentarily maxed.
+    /// Reserve a model bucket, waiting (pacing) if all are momentarily maxed. Never
+    /// returns an un-recorded model — the free-tier guarantee depends on honest
+    /// bucket accounting + pacing forever rather than failing.
     private func reserveModel(preferred: String? = nil) async -> String {
-        if let p = preferred { return p }
-        if let m = scheduler.reserve() { return m }
-        let wait = min(scheduler.waitTime(), 65)
-        Log.trace("scheduler: all buckets maxed; pacing \(wait)s")
-        try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
-        return scheduler.reserve() ?? models[0]
+        if let p = preferred { scheduler.record(p); return p }
+        while true {
+            if let m = scheduler.reserve() { return m }
+            let wait = min(max(scheduler.waitTime(), 0.05), 65)
+            Log.trace("scheduler: all buckets maxed; pacing \(wait)s")
+            try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+        }
     }
 
     /// Send a turn to Gemini and decode the structured AriaResponse.
@@ -109,10 +112,17 @@ actor GeminiClient {
                                                 tools: tools,
                                                 jsonMode: false)
                     var lastError: Error = GeminiError.emptyResponse
-                    let maxAttempts = 6
-                    for attempt in 0..<maxAttempts {
-                        // First attempt may honor a routed preferredModel; otherwise reserve a bucket (pacing if needed).
-                        let model = await reserveModel(preferred: attempt == 0 ? preferredModel : nil)
+                    let maxAttempts = 6        // budget for genuinely-broken (5xx/404/…) errors
+                    let maxQuotaWaits = 20     // 429s pace via reserveModel; don't burn the attempt budget
+                    var attempt = 0
+                    var quotaWaits = 0
+                    var first = true
+                    // Free-tier guarantee: a 429 paces (reserveModel waits for a free bucket) and
+                    // retries rather than failing; only genuinely-broken models exhaust maxAttempts.
+                    while attempt < maxAttempts && quotaWaits < maxQuotaWaits {
+                        // First pass honors a routed preferredModel; later passes reserve a bucket (pacing if needed).
+                        let model = await reserveModel(preferred: first ? preferredModel : nil)
+                        first = false
                         let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):streamGenerateContent?alt=sse&key=\(apiKey)")!
                         var req = URLRequest(url: url)
                         req.httpMethod = "POST"
@@ -129,10 +139,16 @@ actor GeminiClient {
                             }
                             continuation.finish()
                             return
-                        } catch let GeminiError.http(status) where [404, 408, 425, 429, 500, 502, 503, 504].contains(status) {
+                        } catch let GeminiError.http(status) where status == 429 {
                             lastError = GeminiError.http(status)
-                            Log.trace("streamSend: \(model) http(\(status)); attempt \(attempt + 1)/\(maxAttempts)")
-                            continue   // reserveModel paces on the next iteration if all buckets are maxed
+                            quotaWaits += 1
+                            Log.trace("streamSend: \(model) http(429) quota; pacing (\(quotaWaits)/\(maxQuotaWaits))")
+                            continue   // reserveModel paces to a free bucket on the next iteration
+                        } catch let GeminiError.http(status) where [404, 408, 425, 500, 502, 503, 504].contains(status) {
+                            lastError = GeminiError.http(status)
+                            attempt += 1
+                            Log.trace("streamSend: \(model) http(\(status)); attempt \(attempt)/\(maxAttempts)")
+                            continue
                         }
                     }
                     continuation.finish(throwing: lastError)

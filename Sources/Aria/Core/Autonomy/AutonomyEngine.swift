@@ -72,11 +72,22 @@ actor AutonomyEngine {
             + plan.steps.map { $0.summary }.prefix(3).joined(separator: ", ") + "."))
 
         for i in plan.steps.indices {
+            if Task.isCancelled { return }   // Stop pressed — halt before the next step
             emit(.stepStarted(i))
             let step = plan.steps[i]
 
-            // Safety gate for destructive tool steps.
-            if case let .tool(t) = step.executor, Safety.isDestructive(tool: t, input: step.input) {
+            // Safety gate — destructive tool steps AND destructive agent steps (the
+            // danger verb is in the tool/input for tools, in the summary for agents,
+            // e.g. Comet "send the email", Atlas "delete the backups").
+            let needsConfirm: Bool
+            switch step.executor {
+            case .tool(let t):
+                needsConfirm = Safety.isDestructive(tool: t, input: step.input)
+            case .agent(let a):
+                needsConfirm = Safety.isDestructive(tool: a, input: step.input)
+                    || Safety.isDestructive(summary: step.summary)
+            }
+            if needsConfirm {
                 let okToRun = await confirm("Aria wants to \(step.summary). Allow?")
                 if !okToRun {
                     plan.steps[i].status = .failed

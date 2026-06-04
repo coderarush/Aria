@@ -22,6 +22,13 @@ final class RequestScheduler {
         for m in models { history[m] = (history[m] ?? []).filter { $0 > cutoff } }
     }
 
+    /// Record a call against a model's bucket without going through reserve()
+    /// (used when a caller forces a specific/preferred model so accounting stays honest).
+    func record(_ model: String) {
+        prune()
+        history[model, default: []].append(now())
+    }
+
     /// Reserve a model with capacity now, recording the request; nil if all maxed.
     func reserve() -> String? {
         prune()

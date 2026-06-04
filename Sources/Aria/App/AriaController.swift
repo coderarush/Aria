@@ -24,6 +24,10 @@ final class AriaController {
     private var streamVoice: StreamingVoice!
     private var session: ConversationSession?
     private var convSilenceTimer: Timer?
+    /// True while an autonomous task is executing. Gates `streamVoice.onAllFinished`
+    /// so a queue-drain mid-task (e.g. after the spoken plan) doesn't re-arm wake
+    /// before the task is actually done.
+    private var taskActive = false
     /// The in-flight streaming turn task; cancelled on barge-in.
     private var currentTurnTask: Task<Void, Never>?
     /// When the current TTS turn started; used to enforce a 0.5 s arm-grace
@@ -188,8 +192,15 @@ final class AriaController {
             if visible { p.reposition(); p.orderFrontRegardless() } else { p.orderOut(nil) }
         }
         taskViewModel.onStop = { [weak self] in
-            self?.currentTurnTask?.cancel()
-            self?.taskViewModel.hide()
+            guard let self else { return }
+            self.taskActive = false
+            self.streamVoice.stop()             // silence queued narration immediately
+            self.currentTurnTask?.cancel()      // engine checks isCancelled before next step
+            self.isSpeaking = false
+            self.wakeEngine.freshTurn()
+            self.wakeEngine.isSuspended = false // re-arm the mic — never leave Aria deaf
+            self.islandViewModel.dismiss()
+            self.taskViewModel.hide()
         }
     }
 
@@ -384,18 +395,27 @@ final class AriaController {
     }
 
     private func runAutonomousTask(_ goal: String) {
+        taskActive = true
         wakeEngine.isSuspended = true
         isSpeaking = true
         speechStartedAt = Date()
         islandViewModel.beginThinking()
         applyVoiceSettings()
 
+        // The voice queue drains several times during a task (after the spoken plan,
+        // between steps). Only re-arm wake once the task is DONE (taskActive == false),
+        // and re-arm exactly the way the chat path does — fresh turn + silence timer
+        // that ends the session through the canonical endConversation() reset.
         streamVoice.onAllFinished = { [weak self] in
-            guard let self else { return }
+            guard let self, !self.taskActive else { return }
             self.isSpeaking = false
             self.wakeEngine.freshTurn()
             self.wakeEngine.isSuspended = false
             self.islandViewModel.beginListening()
+            self.convSilenceTimer?.invalidate()
+            self.convSilenceTimer = Timer.scheduledTimer(withTimeInterval: AppSettings.shared.conversationSilenceTimeout, repeats: false) { [weak self] _ in
+                Task { @MainActor in self?.session?.end() }
+            }
         }
 
         currentTurnTask = Task { [weak self] in
@@ -414,11 +434,16 @@ final class AriaController {
                         self.islandViewModel.appendResponse(line + " ")
                         self.streamVoice.enqueue(line)
                     case .finished(_, let summary):
+                        self.taskActive = false   // now the next queue-drain re-arms wake
                         self.streamVoice.enqueue(summary)
                         if !self.streamVoice.isSpeaking { self.streamVoice.onAllFinished?() }
+                        let finishedGoal = goal
                         Task { [weak self] in
                             try? await Task.sleep(nanoseconds: 4_000_000_000)
-                            await MainActor.run { self?.taskViewModel.hide() }
+                            await MainActor.run {
+                                guard let self, self.taskViewModel.plan?.goal == finishedGoal else { return }
+                                self.taskViewModel.hide()
+                            }
                         }
                     }
                 }

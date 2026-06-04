@@ -11,4 +11,12 @@ enum Safety {
         let blob = (tool + " " + input.values.joined(separator: " ")).lowercased()
         return dangerWords.contains { blob.contains($0) }
     }
+
+    /// True if the step's natural-language summary describes a destructive act.
+    /// Used for agent steps (Comet/Atlas), where the danger verb lives in the
+    /// summary ("send the email to John") rather than in a tool name.
+    static func isDestructive(summary: String) -> Bool {
+        let blob = summary.lowercased()
+        return dangerWords.contains { blob.contains($0) }
+    }
 }

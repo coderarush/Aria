@@ -25,4 +25,11 @@ final class RequestSchedulerTests: XCTestCase {
         t = Date(timeIntervalSince1970: 61)
         XCTAssertEqual(s.reserve(), "a")
     }
+
+    func testRecordCountsAgainstBucket() {
+        let t = Date(timeIntervalSince1970: 0)
+        let s = RequestScheduler(models: ["a"], perMinuteLimit: 1, now: { t })
+        s.record("a")
+        XCTAssertNil(s.reserve())   // bucket already full from record()
+    }
 }

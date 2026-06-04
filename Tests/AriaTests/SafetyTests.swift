@@ -8,4 +8,10 @@ final class SafetyTests: XCTestCase {
         XCTAssertFalse(Safety.isDestructive(tool: "open_app", input: ["name": "Spotify"]))
         XCTAssertFalse(Safety.isDestructive(tool: "web_search", input: ["query": "cats"]))
     }
+
+    func testFlagsDestructiveAgentSummaries() {
+        XCTAssertTrue(Safety.isDestructive(summary: "send the email to John"))
+        XCTAssertTrue(Safety.isDestructive(summary: "delete the old backups"))
+        XCTAssertFalse(Safety.isDestructive(summary: "research the best mics"))
+    }
 }
