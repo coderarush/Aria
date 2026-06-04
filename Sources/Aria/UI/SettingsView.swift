@@ -180,7 +180,11 @@ struct ConversationSettingsTab: View {
 // MARK: API key
 
 struct APIKeyTab: View {
+    @StateObject private var settings = AppSettings.shared
     @State private var key: String = ""
+    @State private var groq: String = ""
+    @State private var cerebras: String = ""
+    @State private var openRouter: String = ""
     @State private var status: String = ""
 
     private var keyCount: Int {
@@ -223,17 +227,43 @@ struct APIKeyTab: View {
                 Text("Get free keys at aistudio.google.com. Each Google project has its own free daily quota, so adding 2–3 keys from different projects multiplies how much you can do for free.")
                     .font(.caption).foregroundStyle(.secondary)
             } header: { Text("More free quota") }
+
+            Section {
+                SecureField("Groq key (groq.com — free, fast)", text: $groq)
+                SecureField("Cerebras key (cerebras.ai — free, fast)", text: $cerebras)
+                SecureField("OpenRouter key (openrouter.ai — free tier)", text: $openRouter)
+                Text("When your Gemini quota runs out, Aria automatically continues on these free, fast providers — so she keeps working. Each is free to sign up; add any you like, then Save.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } header: { Text("Free fallback providers") }
+
+            Section {
+                Toggle("Use a local model when everything else is out (Ollama)", isOn: $settings.localModelEnabled)
+                if settings.localModelEnabled {
+                    TextField("Ollama model", text: $settings.localModelName)
+                    Text("Last resort — works offline. Requires Ollama running (ollama.com) with the model pulled. Slower, but never hits a limit.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            } header: { Text("Local model") }
         }
         .formStyle(.grouped)
-        .onAppear { key = KeychainManager.read(account: KeychainKey.geminiAPIKey) ?? "" }
+        .onAppear {
+            key = KeychainManager.read(account: KeychainKey.geminiAPIKey) ?? ""
+            groq = KeychainManager.read(account: KeychainKey.groqAPIKey) ?? ""
+            cerebras = KeychainManager.read(account: KeychainKey.cerebrasAPIKey) ?? ""
+            openRouter = KeychainManager.read(account: KeychainKey.openRouterAPIKey) ?? ""
+        }
     }
 
     private func save() {
-        do {
-            try KeychainManager.save(key.trimmingCharacters(in: .whitespacesAndNewlines),
-                                     account: KeychainKey.geminiAPIKey)
-            status = "Saved \(keyCount) key\(keyCount == 1 ? "" : "s") to Keychain."
-        } catch { status = "Save failed: \(error.localizedDescription)" }
+        func put(_ v: String, _ account: String) {
+            let t = v.trimmingCharacters(in: .whitespacesAndNewlines)
+            if t.isEmpty { KeychainManager.delete(account: account) } else { try? KeychainManager.save(t, account: account) }
+        }
+        put(key, KeychainKey.geminiAPIKey)
+        put(groq, KeychainKey.groqAPIKey)
+        put(cerebras, KeychainKey.cerebrasAPIKey)
+        put(openRouter, KeychainKey.openRouterAPIKey)
+        status = "Saved \(keyCount) Gemini key\(keyCount == 1 ? "" : "s") + providers to Keychain."
     }
 }
 

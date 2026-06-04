@@ -112,13 +112,13 @@ actor GeminiClient {
                     history: [ConversationTurn],
                     context: SystemContext,
                     toolCatalog: String = "",
-                    tools: [[String: Any]]? = nil,
+                    specs: [ToolSpec] = [],
                     preferredModel: String? = nil) -> AsyncThrowingStream<StreamEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
+                    let tools = specs.isEmpty ? nil : ToolDeclarations.declarations(for: specs)
                     keyRotator.update(keys: currentKeys())
-                    guard !keyRotator.isEmpty else { throw GeminiError.missingAPIKey }
                     let body = buildRequestBody(transcript: transcript,
                                                 screenshotJPEG: screenshotJPEG,
                                                 history: history, context: context,
@@ -172,6 +172,21 @@ actor GeminiClient {
                             continue
                         }
                     }
+                    // Gemini exhausted/unavailable — continue the answer on a free fallback
+                    // provider (Groq/Cerebras/OpenRouter/local) instead of failing.
+                    for fb in currentFallbacks() where await fb.hasCredentials() {
+                        do {
+                            var produced = false
+                            let sub = await fb.streamChat(transcript: transcript, history: history,
+                                                          system: ProviderConfig.chatSystemPrompt, specs: specs)
+                            for try await ev in sub {
+                                try Task.checkCancellation()
+                                produced = true
+                                continuation.yield(ev)
+                            }
+                            if produced { Log.trace("fallback \(fb.label) streamed (Gemini unavailable)"); continuation.finish(); return }
+                        } catch { lastError = error; continue }
+                    }
                     continuation.finish(throwing: lastError)
                 } catch {
                     continuation.finish(throwing: error)
@@ -217,8 +232,27 @@ actor GeminiClient {
             "generationConfig": ["temperature": temperature]
         ]
         let body = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
-        let data = try await performWithFallback(body: body)
-        return Self.stripCodeFences(Self.extractText(from: data))
+        do {
+            let data = try await performWithFallback(body: body)
+            return Self.stripCodeFences(Self.extractText(from: data))
+        } catch {
+            // Gemini exhausted/unavailable — continue on a free fallback provider.
+            for fb in currentFallbacks() where await fb.hasCredentials() {
+                if let text = try? await fb.generateText(prompt: prompt, temperature: temperature), !text.isEmpty {
+                    Log.trace("fallback \(fb.label) answered (Gemini unavailable)")
+                    return text
+                }
+            }
+            throw error
+        }
+    }
+
+    /// Built only when needed (on a Gemini failure), so the normal path has zero
+    /// overhead. Reads provider config from UserDefaults (no MainActor hop).
+    private func currentFallbacks() -> [OpenAICompatibleClient] {
+        let localOn = UserDefaults.standard.bool(forKey: "app.localModelEnabled")
+        let localModel = UserDefaults.standard.string(forKey: "app.localModelName") ?? ""
+        return ProviderConfig.fallbacks(includeLocal: localOn, localModel: localModel)
     }
 
     static func extractText(from data: Data) -> String {

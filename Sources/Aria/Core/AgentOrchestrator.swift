@@ -251,7 +251,7 @@ actor AgentOrchestrator {
         var history = await memory.recentContext()
         history = Array(history.suffix(8))
         let context = await Self.currentSystemContext()
-        let tools = ToolDeclarations.declarations(for: await registry.specs())
+        let specs = await registry.specs()
         // Recall relevant long-term facts and prime the turn with them.
         let recalled = await longTerm.recall(for: command, limit: 4)
         var transcript = command
@@ -266,7 +266,7 @@ actor AgentOrchestrator {
             for _ in 0..<maxRounds {
                 var calls: [(name: String, args: [String: String])] = []
                 let stream = await gemini.streamSend(transcript: transcript, screenshotJPEG: turnScreenshot,
-                                                     history: history, context: context, toolCatalog: "", tools: tools,
+                                                     history: history, context: context, toolCatalog: "", specs: specs,
                                                      preferredModel: ModelRouter.model(for: command))
                 for try await ev in stream {
                     switch ev {

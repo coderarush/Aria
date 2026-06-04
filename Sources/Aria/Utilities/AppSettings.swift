@@ -64,6 +64,9 @@ final class AppSettings: ObservableObject {
     @Published var conversationSilenceTimeout: Double { didSet { defaults.set(conversationSilenceTimeout, forKey: K.conversationSilenceTimeout) } }
     /// Experimental: only respond to the enrolled owner's voice.
     @Published var speakerVerificationEnabled: Bool { didSet { defaults.set(speakerVerificationEnabled, forKey: K.speakerVerificationEnabled) } }
+    /// Use a local Ollama model as a last-resort fallback (offline / all-quota-exhausted).
+    @Published var localModelEnabled: Bool { didSet { defaults.set(localModelEnabled, forKey: K.localModelEnabled) } }
+    @Published var localModelName: String { didSet { defaults.set(localModelName, forKey: K.localModelName) } }
 
     var accentChoice: AccentChoice {
         get { Theme.decodeChoice(accentChoiceRaw) }
@@ -93,6 +96,8 @@ final class AppSettings: ObservableObject {
         bargeInSensitivity = defaults.object(forKey: K.bargeInSensitivity) as? Double ?? 0.5
         conversationSilenceTimeout = defaults.object(forKey: K.conversationSilenceTimeout) as? Double ?? 9
         speakerVerificationEnabled = defaults.bool(forKey: K.speakerVerificationEnabled)
+        localModelEnabled = defaults.bool(forKey: K.localModelEnabled)
+        localModelName = defaults.string(forKey: K.localModelName) ?? "gemma2:2b"
     }
 
     /// Register/unregister the app as a login item (SMAppService, macOS 13+).
@@ -125,5 +130,7 @@ final class AppSettings: ObservableObject {
         static let bargeInSensitivity = "app.bargeInSensitivity"
         static let conversationSilenceTimeout = "app.conversationSilenceTimeout"
         static let speakerVerificationEnabled = "app.speakerVerificationEnabled"
+        static let localModelEnabled = "app.localModelEnabled"
+        static let localModelName = "app.localModelName"
     }
 }

@@ -66,4 +66,7 @@ enum KeychainManager {
 /// Well-known Keychain account keys.
 enum KeychainKey {
     static let geminiAPIKey = "gemini_api_key"
+    static let groqAPIKey = "groq_api_key"
+    static let cerebrasAPIKey = "cerebras_api_key"
+    static let openRouterAPIKey = "openrouter_api_key"
 }
