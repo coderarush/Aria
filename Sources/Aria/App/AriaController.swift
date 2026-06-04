@@ -238,11 +238,12 @@ final class AriaController {
                                                           accent: AppSettings.shared.accentColor)
         }
         refreshTheme()
-        settingsCancellable = Publishers.Merge(
+        settingsCancellable = Publishers.Merge3(
             AppSettings.shared.$accentChoiceRaw.map { _ in () },
-            AppSettings.shared.$glowPaletteID.map { _ in () })
+            AppSettings.shared.$glowPaletteID.map { _ in () },
+            AppSettings.shared.$bargeInSensitivity.map { _ in () })
             .receive(on: RunLoop.main)
-            .sink { _ in refreshTheme() }
+            .sink { [weak self] _ in refreshTheme(); self?.applyConversationSettings() }
         applyVoiceSettings()
         applyConversationSettings()
         voice.audioBus = audioBus

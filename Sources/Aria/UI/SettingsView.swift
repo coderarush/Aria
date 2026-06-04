@@ -149,6 +149,20 @@ struct ConversationSettingsTab: View {
                 Text("Talk to Aria in a continuous back-and-forth — after she answers, just speak your next question (no need to say “Hey Aria” again). She stops listening after this much silence.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+
+            Section {
+                Toggle("Let me interrupt her (talk-over)", isOn: $settings.bargeInEnabled)
+                if settings.bargeInEnabled {
+                    HStack {
+                        Text("Interrupt sensitivity")
+                        Slider(value: $settings.bargeInSensitivity, in: 0...1, step: 0.05)
+                        Text(settings.bargeInSensitivity < 0.34 ? "Low" : settings.bargeInSensitivity < 0.67 ? "Med" : "High")
+                            .monospacedDigit().foregroundStyle(.secondary)
+                    }
+                    Text("Start talking while Aria is speaking and she'll stop and listen — powered by on-device echo cancellation. Higher sensitivity interrupts more easily (but may trigger on background noise).")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            } header: { Text("Barge-in") }
         }
         .formStyle(.grouped)
     }
