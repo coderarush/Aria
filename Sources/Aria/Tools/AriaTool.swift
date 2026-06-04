@@ -9,12 +9,16 @@ protocol AriaTool {
     static var description: String { get }
     /// Whether running this needs explicit user confirmation (delete, send, …).
     var isDestructive: Bool { get }
+    /// Parameter hints keyed by input key, for building Gemini functionDeclarations.
+    /// Default: empty (tool takes no structured inputs).
+    static var paramHints: [String: String] { get }
     /// Execute with model-provided input.
     func run(input: [String: String]) async throws -> ToolResult
 }
 
 extension AriaTool {
     var isDestructive: Bool { false }
+    static var paramHints: [String: String] { [:] }
 }
 
 /// Outcome of a tool run. `output` is surfaced to the user / fed to the next step.

@@ -21,6 +21,17 @@ actor ToolRegistry {
             .joined(separator: "\n")
     }
 
+    /// Tool specs (name/description/params) for enabled builtins, for building
+    /// Gemini functionDeclarations.
+    func specs() async -> [ToolSpec] {
+        let disabled = await MainActor.run { AppSettings.shared.disabledTools }
+        return tools.values
+            .filter { !disabled.contains(type(of: $0).name) }
+            .map { ToolSpec(name: type(of: $0).name,
+                            description: type(of: $0).description,
+                            params: type(of: $0).paramHints) }
+    }
+
     /// The default built-in tool set.
     static func builtins() -> [AriaTool] {
         [

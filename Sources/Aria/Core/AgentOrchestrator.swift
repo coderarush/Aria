@@ -206,6 +206,60 @@ actor AgentOrchestrator {
                 "overwrite", "drop ", "kill"].contains { t.contains($0) }
     }
 
+    /// Streaming answer path (Phase 2: text + native function-calling loop).
+    /// Calls `onText` with each text delta; runs up to maxRounds agentic turns.
+    func handleStreaming(command: String, privacyMode: Bool,
+                         onText: @escaping @Sendable (String) -> Void) async {
+        let wantsScreen = !privacyMode && ModelRouter.needsScreen(for: command)
+        let screenshot: Data? = wantsScreen ? (try? await screen.capturePrimaryJPEG()) : nil
+        var history = await memory.recentContext()
+        history = Array(history.suffix(8))
+        let context = await Self.currentSystemContext()
+        let tools = ToolDeclarations.declarations(for: await registry.specs())
+        var transcript = command
+        var turnScreenshot = screenshot
+        var full = ""
+        let maxRounds = 4
+        do {
+            for _ in 0..<maxRounds {
+                var calls: [(name: String, args: [String: String])] = []
+                let stream = await gemini.streamSend(transcript: transcript, screenshotJPEG: turnScreenshot,
+                                                     history: history, context: context, toolCatalog: "", tools: tools,
+                                                     preferredModel: ModelRouter.model(for: command))
+                for try await ev in stream {
+                    switch ev {
+                    case .text(let t): full += t; onText(t)
+                    case .functionCall(let name, let args): calls.append((name, args))
+                    }
+                }
+                if calls.isEmpty { break }   // model is done talking/acting
+                var results = ""
+                let ctx = context
+                await withTaskGroup(of: (String, ToolResult).self) { group in
+                    for call in calls {
+                        group.addTask {
+                            let r = await self.execute(AgentAction(tool: call.name, input: call.args), priorOutput: "", context: ctx)
+                            return (call.name, r)
+                        }
+                    }
+                    for await (name, r) in group {
+                        results += "\n\(name): \(r.success ? r.output : "FAILED: \(r.output)")"
+                    }
+                }
+                history.append(ConversationTurn(transcript: transcript, responseMessage: full, responseType: .action))
+                transcript = "Tool results:\(results)\n\nContinue: speak the final answer to the user, or call more tools if needed."
+                turnScreenshot = nil
+            }
+        } catch {
+            if case GeminiClient.GeminiError.http(429) = error {
+                onText(" I'm getting rate-limited right now — give me a moment and try again.")
+            } else {
+                onText(" Sorry, I hit a problem reaching my brain.")
+            }
+        }
+        await record(command: command, response: AriaResponse(type: .answer, message: full, confidence: 1.0))
+    }
+
     // MARK: Local shortcuts
 
     private func localShortcut(for command: String) -> AriaResponse? {

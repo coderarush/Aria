@@ -19,6 +19,14 @@ final class AriaController {
     /// True while Aria is speaking; keeps wake suspended even if the pill
     /// auto-hides mid-utterance, so she can't hear herself and re-trigger.
     private var isSpeaking = false
+    private var streamVoice: StreamingVoice!
+    private var session: ConversationSession?
+    private var convSilenceTimer: Timer?
+    /// The in-flight streaming turn task; cancelled on barge-in.
+    private var currentTurnTask: Task<Void, Never>?
+    /// When the current TTS turn started; used to enforce a 0.5 s arm-grace
+    /// so we don't immediately barge-in on the very first audio burst.
+    private var speechStartedAt = Date.distantPast
 
     func start() {
         setupPanel()
@@ -184,6 +192,12 @@ final class AriaController {
 
     // MARK: Engine wiring
 
+    private func applyConversationSettings() {
+        // sensitivity 0…1 (1 = most sensitive) → threshold ~0.20 (loud) … 0.04 (sensitive)
+        let s = AppSettings.shared.bargeInSensitivity
+        wakeEngine.bargeInThreshold = Float(0.20 - s * 0.16)
+    }
+
     private func applyVoiceSettings() {
         let s = AppSettings.shared
         voice.enabled = s.voiceEnabled
@@ -206,6 +220,7 @@ final class AriaController {
             .receive(on: RunLoop.main)
             .sink { _ in refreshTheme() }
         applyVoiceSettings()
+        applyConversationSettings()
         voice.onStart = { [weak self] in
             self?.isSpeaking = true
             self?.wakeEngine.isSuspended = true
@@ -216,16 +231,26 @@ final class AriaController {
             // If the pill already hid while Aria was talking, re-arm wake now.
             if !self.islandViewModel.isVisible { self.wakeEngine.isSuspended = false }
         }
+        streamVoice = StreamingVoice(speakChunk: { [weak self] in self?.voice.speakChunk($0) },
+                                     stopAll: { [weak self] in self?.voice.stop() })
+        voice.onChunkFinished = { [weak self] in self?.streamVoice.chunkDidFinish() }
         wakeEngine.onWake = { [weak self] in
-            Log.trace("onWake — island listening")
-            self?.islandViewModel.beginListening()
+            guard let self else { return }
+            Log.trace("onWake — conversation start")
+            self.wakeEngine.conversationActive = true
+            self.session = ConversationSession(
+                onEnd: { [weak self] in self?.endConversation() },
+                onTurn: { [weak self] in self?.handleCommand($0) })
+            self.session?.start()
+            self.islandViewModel.beginListening()
         }
         wakeEngine.onAudioLevel = { [weak self] level in
             self?.islandViewModel.updateAudioLevel(level)
         }
         wakeEngine.onCommand = { [weak self] command in
-            Log.trace("onCommand fired: '\(command)'")
-            self?.handleCommand(command)
+            Log.trace("onCommand: '\(command)'")
+            self?.convSilenceTimer?.invalidate()      // user engaged; cancel end timer
+            self?.session?.userSaid(command)
         }
         wakeEngine.onCommandEmpty = { [weak self] in
             // Heard the wake word but no command — dismiss only if still listening.
@@ -236,6 +261,24 @@ final class AriaController {
             self?.islandViewModel.beginListening()
             self?.islandViewModel.showError(message)
         }
+        // Barge-in (talk-over) is disabled: it requires echo cancellation, which
+        // breaks recognition on this hardware. Without AEC the mic hears Aria's own
+        // voice and would false-trigger, so we don't wire onSpeechOnset. The model
+        // is continuous follow-up: wait for her to finish, then talk (no re-wake).
+    }
+
+    // MARK: Barge-in
+
+    private func handleBargeIn() {
+        guard AppSettings.shared.bargeInEnabled else { return }
+        guard isSpeaking else { return }                                    // only while she's talking
+        guard Date().timeIntervalSince(speechStartedAt) > 0.5 else { return } // arm-grace
+        Log.trace("barge-in — user interrupted")
+        streamVoice.stop()                  // stop TTS + clear queue
+        currentTurnTask?.cancel()           // cancel the in-flight stream
+        isSpeaking = false
+        convSilenceTimer?.invalidate()
+        wakeEngine.isSuspended = false      // capture the user's interrupting utterance
     }
 
     private func startListening() {
@@ -267,35 +310,64 @@ final class AriaController {
     // MARK: Command handling
 
     private func handleCommand(_ command: String) {
-        // Dismissal phrases.
         let lower = command.lowercased()
         if lower.contains("dismiss") || lower.contains("thanks aria") || lower.contains("never mind") {
-            voice.stop()
-            islandViewModel.dismiss()
-            return
+            streamVoice.stop(); session?.end(); return
         }
-
-        // Stop listening for new wakes while we work, so a stray "aria" can't
-        // interrupt or dismiss the island mid-task. Resumed when the island hides
-        // (see onVisibilityChange in setupPanel).
         wakeEngine.isSuspended = true
+        isSpeaking = true
+        speechStartedAt = Date()
+        applyVoiceSettings()
         islandViewModel.beginThinking()
-        let privacy = AppSettings.shared.privacyMode
-        Log.trace("handleCommand: '\(command)' privacy=\(privacy) — thinking")
-        Task {
-            await patternEngine.recordCommand(command)
-            Log.trace("calling orchestrator.handle")
-            let response = await orchestrator.handle(command: command, privacyMode: privacy)
-            Log.trace("orchestrator returned: type=\(response.type.rawValue) conf=\(response.confidence) msg=\(response.message.prefix(120))")
-            if response.confidence == 0 {
-                islandViewModel.showError(response.message)
-            } else {
-                islandViewModel.showResponse(response.message)
-                applyVoiceSettings()
-                voice.speak(response.message)
+        // Apple voice streams per sentence (instant). The Gemini cloud voice speaks
+        // the whole reply in ONE call at the end — per-sentence Gemini calls burn
+        // quota fast and fall back to the robotic Apple voice.
+        let streamPerSentence = AppSettings.shared.voiceEngineKind != "gemini"
+        var chunker = SentenceChunker()
+        streamVoice.onAllFinished = { [weak self] in
+            guard let self else { return }
+            self.isSpeaking = false
+            // Fresh recognition session so Aria's own voice (heard by the mic while
+            // she spoke) doesn't leak into the next turn, then resume listening.
+            self.wakeEngine.freshTurn()
+            self.wakeEngine.isSuspended = false
+            self.islandViewModel.beginListening()   // show "Listening…" for a follow-up
+            self.convSilenceTimer?.invalidate()
+            self.convSilenceTimer = Timer.scheduledTimer(withTimeInterval: AppSettings.shared.conversationSilenceTimeout, repeats: false) { [weak self] _ in
+                Task { @MainActor in self?.session?.end() }
             }
-            Log.trace("island updated, state=\(String(describing: islandViewModel.state))")
         }
+        currentTurnTask = Task { [weak self] in
+            guard let self else { return }
+            await self.orchestrator.handleStreaming(command: command, privacyMode: AppSettings.shared.privacyMode) { delta in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.islandViewModel.appendResponse(delta)   // caption streams; no auto-dismiss
+                    if streamPerSentence {
+                        for chunk in chunker.push(delta) { self.streamVoice.enqueue(chunk) }
+                    }
+                }
+            }
+            await MainActor.run {
+                if Task.isCancelled { return }   // barge-in cancelled this turn — don't resume speaking
+                if streamPerSentence {
+                    let tail = chunker.flush()
+                    if !tail.isEmpty { self.streamVoice.enqueue(tail) }
+                } else {
+                    // Gemini voice: speak the whole reply in a single call.
+                    let full = self.islandViewModel.responseText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !full.isEmpty { self.streamVoice.enqueue(full) }
+                }
+                // Safety: if nothing was spoken (empty reply/error), re-arm anyway.
+                if !self.streamVoice.isSpeaking { self.streamVoice.onAllFinished?() }
+            }
+        }
+    }
+
+    private func endConversation() {
+        convSilenceTimer?.invalidate(); convSilenceTimer = nil
+        wakeEngine.endConversation()
+        islandViewModel.dismiss()
     }
 
     func toggleManually() {

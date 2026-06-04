@@ -55,17 +55,15 @@ final class GeminiClientTests: XCTestCase {
         XCTAssertThrowsError(try GeminiClient.decodeAriaResponse(from: data))
     }
 
-    func testSystemPromptIsAriaPersonaAndKeepsSchema() {
+    func testSystemPromptIsAriaConversationalPersona() {
         let p = GeminiClient.systemPrompt
         XCTAssertTrue(p.contains("Aria"))
         XCTAssertFalse(p.contains("Friday"))
-        // New persona must be present (this is what should fail before the rewrite):
         let lower = p.lowercased()
         XCTAssertTrue(lower.contains("confident"))
         XCTAssertTrue(lower.contains("charming") || lower.contains("charm"))
-        // Still instructs the structured schema the orchestrator depends on:
-        XCTAssertTrue(p.contains("\"type\""))
-        XCTAssertTrue(p.contains("\"actions\""))
+        XCTAssertTrue(lower.contains("spoken") || lower.contains("conversation"))
+        XCTAssertTrue(lower.contains("tool"))   // mentions using tools/functions
     }
 
     // Encode a string as a JSON string literal (with quotes + escaping).

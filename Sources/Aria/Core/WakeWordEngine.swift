@@ -20,9 +20,16 @@ final class WakeWordEngine {
     /// Fired when the wake phrase was heard but no command followed.
     var onCommandEmpty: (() -> Void)?
     var onAudioLevel: ((Float) -> Void)?
+    /// Fired on the main actor when the VAD detects speech onset (used for barge-in).
+    var onSpeechOnset: (() -> Void)?
     /// Surfaced setup/recognition failures (shown on the orb).
     var onError: ((String) -> Void)?
 
+    private var bargeVAD = VoiceActivity(onsetFrames: 4)
+    /// Higher = less sensitive (needs louder speech to barge in).
+    var bargeInThreshold: Float = 0.08 {
+        didSet { bargeVAD = VoiceActivity(threshold: bargeInThreshold, onsetFrames: 4) }
+    }
     private var restartPending = false
 
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
@@ -58,6 +65,9 @@ final class WakeWordEngine {
     /// When true, incoming transcripts are ignored (used while a command is
     /// being processed so a stray "aria" can't interrupt or dismiss the orb).
     var isSuspended = false
+    /// When true, after a non-empty command finishes the engine stays in
+    /// .command mode (no re-wake required) for continuous multi-turn conversation.
+    var conversationActive = false
 
     // MARK: Lifecycle
 
@@ -132,6 +142,11 @@ final class WakeWordEngine {
     private func ensureAudioEngineRunning() throws {
         guard !audioEngine.isRunning else { return }
         let input = audioEngine.inputNode
+        // Echo cancellation (setVoiceProcessingEnabled) breaks SFSpeech recognition
+        // on this hardware no matter how the tap format is set — Aria goes deaf.
+        // Hearing is non-negotiable, so AEC stays OFF for good. `inputFormat` is the
+        // proven-working tap format. (Talk-over barge-in needs AEC and is therefore
+        // not available; continuous follow-up — wait, then talk — is the model.)
         let format = input.inputFormat(forBus: 0)
         // A zero sample rate means there is no usable input device.
         guard format.sampleRate > 0 else {
@@ -242,23 +257,41 @@ final class WakeWordEngine {
 
     private func finishCommand() {
         let command = commandBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
-        mode = .wake
-        commandBuffer = ""
-        committedCommand = ""
-        Log.trace("finishCommand: '\(command)' → restarting wake session")
+        Log.trace("finishCommand: '\(command)' → conversationActive=\(conversationActive)")
         if command.isEmpty {
             onCommandEmpty?()          // let the UI dismiss the idle orb
         } else {
             onCommand?(command)
         }
-        // Fresh session so the next wake doesn't see this command's transcript.
-        // Retry on failure — swallowing the error here would leave wake dead
-        // after a command (the "works once then won't wake again" bug).
-        do { try beginRecognition() }
-        catch {
-            Log.trace("finishCommand beginRecognition failed: \(error.localizedDescription) — retrying")
-            scheduleRestart()
+        if conversationActive && !command.isEmpty {
+            mode = .command          // stay listening for the next turn, no re-wake
+        } else {
+            mode = .wake
         }
+        commandBuffer = ""
+        committedCommand = ""
+        do { try beginRecognition() }
+        catch { Log.trace("finishCommand beginRecognition failed: \(error.localizedDescription)"); scheduleRestart() }
+    }
+
+    /// Leave conversation mode and go back to wake-word listening.
+    func endConversation() {
+        conversationActive = false
+        mode = .wake
+        commandBuffer = ""; committedCommand = ""
+        silenceTimer?.invalidate()
+        do { try beginRecognition() } catch { scheduleRestart() }
+    }
+
+    /// Start a CLEAN recognition session for the next conversation turn, discarding
+    /// any audio captured while Aria was speaking. Without echo cancellation the mic
+    /// hears her own voice during a reply; a fresh session ensures those words don't
+    /// leak into the next command (which caused a self-talking feedback loop).
+    func freshTurn() {
+        commandBuffer = ""; committedCommand = ""
+        silenceTimer?.invalidate()
+        mode = conversationActive ? .command : .wake
+        do { try beginRecognition() } catch { scheduleRestart() }
     }
 
     private func stripWakePhrase(from lower: String, original: String) -> String {
@@ -282,6 +315,10 @@ final class WakeWordEngine {
         for i in 0..<frames { sum += channel[i] * channel[i] }
         let rms = (sum / Float(frames)).squareRoot()
         let level = min(1, max(0, rms * 12))  // normalize to ~0...1
-        Task { @MainActor in self.onAudioLevel?(level) }
+        Task { @MainActor in
+            let r = self.bargeVAD.process(level)
+            if r.didOnset { self.onSpeechOnset?() }
+            self.onAudioLevel?(level)
+        }
     }
 }

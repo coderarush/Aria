@@ -33,10 +33,12 @@ actor GeminiClient {
     init(model: String = "gemini-2.5-flash",
          session: URLSession = .shared,
          apiKeyProvider: @escaping () -> String? = { KeychainManager.read(account: KeychainKey.geminiAPIKey) }) {
-        // Primary model first, then capable fallbacks (deduped). If one model is
-        // unavailable/overloaded for the user's key, requests fall through to the
-        // next instead of failing.
-        self.models = [model, "gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"]
+        // Primary model first, then fallbacks (deduped). The free tier meters RPM
+        // PER MODEL, so spreading across several models — including the higher-RPM,
+        // faster `-lite` variants — multiplies effective free throughput: if one
+        // model is rate-limited, the next has its own bucket.
+        self.models = [model, "gemini-2.5-flash", "gemini-2.0-flash",
+                       "gemini-2.5-flash-lite", "gemini-2.0-flash-lite"]
             .reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
         self.session = session
         self.apiKeyProvider = apiKeyProvider
@@ -69,6 +71,75 @@ actor GeminiClient {
 
         cache[cacheKey] = CacheEntry(response: response, at: Date())
         return response
+    }
+
+    /// Stream a turn from Gemini, yielding text deltas + function calls as they
+    /// arrive (`streamGenerateContent?alt=sse`). On a transient non-200 before any
+    /// bytes are received, falls through to the next model in `models`. A mid-
+    /// stream failure surfaces via the stream's error (caller speaks a recovery).
+    func streamSend(transcript: String,
+                    screenshotJPEG: Data?,
+                    history: [ConversationTurn],
+                    context: SystemContext,
+                    toolCatalog: String = "",
+                    tools: [[String: Any]]? = nil,
+                    preferredModel: String? = nil) -> AsyncThrowingStream<StreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    guard let apiKey = apiKeyProvider(), !apiKey.isEmpty else {
+                        throw GeminiError.missingAPIKey
+                    }
+                    let body = buildRequestBody(transcript: transcript,
+                                                screenshotJPEG: screenshotJPEG,
+                                                history: history, context: context,
+                                                toolCatalog: toolCatalog,
+                                                tools: tools,
+                                                jsonMode: false)
+                    let effectiveModels = ([preferredModel].compactMap { $0 } + models)
+                        .reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+                    var lastError: Error = GeminiError.emptyResponse
+                    // Free tier meters RPM PER MODEL. Try every model FAST (no delay)
+                    // to exploit their separate quota buckets; only if an entire pass
+                    // is rate-limited do we wait briefly and retry the cycle.
+                    let passes = 3
+                    for pass in 0..<passes {
+                        for model in effectiveModels {
+                            let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):streamGenerateContent?alt=sse&key=\(apiKey)")!
+                            var req = URLRequest(url: url)
+                            req.httpMethod = "POST"
+                            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                            req.httpBody = body
+                            do {
+                                let (bytes, resp) = try await session.bytes(for: req)
+                                let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+                                guard status == 200 else { throw GeminiError.http(status) }
+                                var parser = GeminiStreamParser()
+                                for try await line in bytes.lines {
+                                    try Task.checkCancellation()
+                                    for ev in parser.consume(line + "\n") { continuation.yield(ev) }
+                                }
+                                continuation.finish()
+                                return
+                            } catch let GeminiError.http(status) where [404, 408, 425, 429, 500, 502, 503, 504].contains(status) {
+                                lastError = GeminiError.http(status)
+                                continue   // next model immediately — separate free bucket
+                            }
+                        }
+                        // Whole pass limited across ALL models → brief wait, retry cycle.
+                        if pass < passes - 1 {
+                            let backoff = min(1.5 * pow(2.0, Double(pass)), 6)  // 1.5, 3s
+                            Log.trace("streamSend: all models limited; backoff \(backoff)s (pass \(pass + 1)/\(passes))")
+                            try? await Task.sleep(nanoseconds: UInt64(backoff * 1_000_000_000))
+                        }
+                    }
+                    continuation.finish(throwing: lastError)
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
     }
 
     /// Ask Gemini to write a self-contained script in `language` that performs
@@ -196,7 +267,9 @@ actor GeminiClient {
                                  screenshotJPEG: Data?,
                                  history: [ConversationTurn],
                                  context: SystemContext,
-                                 toolCatalog: String) -> Data {
+                                 toolCatalog: String,
+                                 tools: [[String: Any]]? = nil,
+                                 jsonMode: Bool = true) -> Data {
         var parts: [[String: Any]] = []
 
         let historyText = history.map {
@@ -235,16 +308,22 @@ actor GeminiClient {
             ])
         }
 
-        let payload: [String: Any] = [
+        // JSON response mode is for the structured (non-streaming) path only. The
+        // streaming voice path must emit natural prose + function calls, so it
+        // passes jsonMode:false (forcing JSON would make her speak JSON).
+        var generationConfig: [String: Any] = ["temperature": 0.4]
+        if jsonMode { generationConfig["response_mime_type"] = "application/json" }
+        var payload: [String: Any] = [
             "system_instruction": [
                 "parts": [["text": Self.systemPrompt]]
             ],
             "contents": [["role": "user", "parts": parts]],
-            "generationConfig": [
-                "temperature": 0.4,
-                "response_mime_type": "application/json"
-            ]
+            "generationConfig": generationConfig
         ]
+
+        if let tools, !tools.isEmpty {
+            payload["tools"] = [["functionDeclarations": tools]]
+        }
 
         return (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
     }
@@ -278,32 +357,24 @@ actor GeminiClient {
     }
 
     static let systemPrompt = """
-    You are Aria, an AI agent running natively on the user's Mac. You see their \
-    screen (provided as an image) and hear their voice. You are confident, warm, \
-    and a little charming — a sharp personal assistant who has it handled. You act; \
-    you don't lecture.
+    You are Aria, an AI agent that lives on the user's Mac. You talk with the user \
+    in a natural, back-and-forth voice conversation — your replies are spoken aloud, \
+    so keep them short, warm, and natural (usually one or two sentences). You are \
+    confident and a little charming: a sharp personal assistant who has it handled. \
+    Never campy, no corporate filler, no emoji, and never read JSON, markdown, or \
+    tool names aloud.
 
-    Voice & tone:
-    - Keep "message" to 1–2 short sentences. It is spoken aloud and shown in a small card.
-    - Confident and natural, with the occasional light touch of charm. Never campy, \
-    never corporate filler, no emoji.
-    - Confirm actions crisply: "On it." / "Done — Spotify's up." / "Say the word."
+    Answer general questions and well-known facts — including trivia and fun facts \
+    — directly from your own knowledge. Do NOT use web_search for things you \
+    already know; only search for current events, live data, or specifics you \
+    genuinely don't know. Never reply that you "couldn't find anything" for a \
+    general-knowledge question — just answer it.
 
-    You can work in multiple steps: request action(s), see their results, then \
-    either request more actions or give your final answer. For anything you don't \
-    know or that needs current information, use the web_search and web_fetch tools \
-    rather than guessing.
-
-    ALWAYS respond with a single JSON object, no prose outside it, matching this schema:
-    {
-      "type": "answer" | "action" | "multi_action" | "clarify",
-      "message": "short, natural text to show/speak to the user",
-      "confidence": 0.0-1.0,
-      "actions": [ { "tool": "tool_name", "input": { "key": "value" } } ],
-      "followup": "optional follow-up question, or null"
-    }
-
-    Use "answer" for direct responses, "clarify" when you genuinely need more info, \
-    and "action"/"multi_action" when the task needs tools.
+    You can see the user's screen when it's provided, and you have tools available \
+    (as functions) to take real actions on the Mac (open apps, files, etc.) — use \
+    them to actually do what the user asks instead of just describing it. You can \
+    work in multiple steps: call a tool, see the result, then continue or give your \
+    final spoken answer. If you genuinely need more information, ask one brief \
+    clarifying question instead of guessing.
     """
 }

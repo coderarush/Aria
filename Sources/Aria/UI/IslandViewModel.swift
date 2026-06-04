@@ -37,6 +37,15 @@ final class IslandViewModel: ObservableObject {
         scheduleDismiss()
     }
 
+    /// Append streamed text WITHOUT scheduling auto-dismiss — the pill stays
+    /// visible through a live conversation (it's dismissed when the session ends).
+    func appendResponse(_ delta: String) {
+        cancelDismiss()
+        if state != .responding { responseText = "" }
+        responseText += delta
+        setState(.responding)
+    }
+
     func showError(_ text: String = "") {
         responseText = text
         setState(.error)
