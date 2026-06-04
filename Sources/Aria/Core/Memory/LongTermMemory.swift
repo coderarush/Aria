@@ -16,6 +16,10 @@ struct MemoryFact: Codable, Identifiable, Equatable {
 /// persisted to `Application Support/Aria/memory.json`, recalled by relevance so Aria
 /// feels like it KNOWS you instead of resetting every session.
 actor LongTermMemory {
+    /// Shared instance so the orchestrator (writes/recall) and Settings (view/forget)
+    /// see the same in-memory state.
+    static let shared = LongTermMemory()
+
     private(set) var facts: [MemoryFact] = []
     private let maxFacts = 500
     private let fileURL: URL

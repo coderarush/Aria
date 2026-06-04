@@ -13,7 +13,7 @@ actor AgentOrchestrator {
     private let factory: DynamicToolFactory
     private let registry: ToolRegistry
     private let subAgents: SubAgentRegistry
-    private let longTerm = LongTermMemory()
+    private let longTerm = LongTermMemory.shared
 
     /// Asks the user to approve running generated code. Param: a human-readable
     /// prompt (incl. code when "show code" is on). Returns true to proceed.

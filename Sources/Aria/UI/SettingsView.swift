@@ -4,7 +4,7 @@ import SwiftUI
 struct SettingsView: View {
     enum Section: String, CaseIterable, Identifiable {
         case general = "General", voice = "Voice", conversation = "Conversation",
-             apiKey = "API Key", tools = "Tools", dynamic = "Dynamic", brain = "Brain", mirror = "Mirror", crew = "Crew"
+             apiKey = "API Key", memory = "Memory", tools = "Tools", dynamic = "Dynamic", brain = "Brain", mirror = "Mirror", crew = "Crew"
         var id: String { rawValue }
         var icon: String {
             switch self {
@@ -12,6 +12,7 @@ struct SettingsView: View {
             case .voice:        return "speaker.wave.2"
             case .conversation: return "bubble.left.and.bubble.right"
             case .apiKey:       return "key"
+            case .memory:       return "brain.head.profile"
             case .tools:        return "wrench.and.screwdriver"
             case .dynamic:      return "sparkles"
             case .brain:        return "brain"
@@ -46,6 +47,7 @@ struct SettingsView: View {
         case .voice:        VoiceSettingsTab()
         case .conversation: ConversationSettingsTab()
         case .apiKey:       APIKeyTab()
+        case .memory:       MemorySettingsTab()
         case .tools:        ToolsTab()
         case .dynamic:      DynamicToolsTab()
         case .brain:        BrainTab()
@@ -232,6 +234,58 @@ struct APIKeyTab: View {
                                      account: KeychainKey.geminiAPIKey)
             status = "Saved \(keyCount) key\(keyCount == 1 ? "" : "s") to Keychain."
         } catch { status = "Save failed: \(error.localizedDescription)" }
+    }
+}
+
+// MARK: Memory
+
+struct MemorySettingsTab: View {
+    @State private var facts: [MemoryFact] = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("What Aria Remembers")
+                .font(.title3.bold())
+            Text("Durable facts Aria recalls across sessions. Say “remember that …” to add one.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 4).padding(.bottom, 8)
+
+        Form {
+            Section {
+                if facts.isEmpty {
+                    Text("Nothing remembered yet.").foregroundStyle(.secondary).font(.callout)
+                } else {
+                    ForEach(facts) { fact in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(fact.text).font(.system(size: 13))
+                                Text(fact.createdAt.formatted(date: .abbreviated, time: .omitted))
+                                    .font(.caption2).foregroundStyle(.tertiary)
+                            }
+                            Spacer()
+                            Button(role: .destructive) {
+                                Task { await LongTermMemory.shared.forget(id: fact.id); await reload() }
+                            } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
+                        }
+                    }
+                }
+            } header: { Text("Memories (\(facts.count))") }
+
+            if !facts.isEmpty {
+                Section {
+                    Button("Forget everything", role: .destructive) {
+                        Task { await LongTermMemory.shared.clear(); await reload() }
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .task { await reload() }
+    }
+
+    private func reload() async {
+        facts = await LongTermMemory.shared.all().sorted { $0.createdAt > $1.createdAt }
     }
 }
 
