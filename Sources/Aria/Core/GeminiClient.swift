@@ -51,7 +51,7 @@ actor GeminiClient {
         if let p = preferred { scheduler.record(p); return p }
         while true {
             if let m = scheduler.reserve() { return m }
-            let wait = min(max(scheduler.waitTime(), 0.5), 65)
+            let wait = min(max(scheduler.waitTime(), 0.5), 8)
             Log.trace("scheduler: all buckets busy; pacing \(wait)s")
             try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
         }
@@ -111,7 +111,10 @@ actor GeminiClient {
                                                 jsonMode: false)
                     var lastError: Error = GeminiError.emptyResponse
                     let maxAttempts = 6        // budget for genuinely-broken (5xx/404/…) errors
-                    let maxQuotaWaits = 20     // 429s pace via reserveModel; don't burn the attempt budget
+                    // Interactive chat: pace only briefly to ride out a per-minute spike
+                    // (~2 × ~8 s), then fail fast and surface an honest message. A hard
+                    // daily-cap (limit:0) won't free for hours — don't hang on "thinking".
+                    let maxQuotaWaits = 2
                     var attempt = 0
                     var quotaWaits = 0
                     var first = true
@@ -140,7 +143,7 @@ actor GeminiClient {
                         } catch let GeminiError.http(status) where status == 429 {
                             lastError = GeminiError.http(status)
                             quotaWaits += 1
-                            scheduler.penalize(model)   // route around this model; reserveModel now paces
+                            scheduler.penalize(model, seconds: 8)   // route around this model; reserveModel paces briefly
                             Log.trace("streamSend: \(model) http(429) quota; pacing (\(quotaWaits)/\(maxQuotaWaits))")
                             continue
                         } catch let GeminiError.http(status) where [404, 408, 425, 500, 502, 503, 504].contains(status) {
@@ -257,7 +260,7 @@ actor GeminiClient {
     private func performWithFallback(apiKey: String, body: Data) async throws -> Data {
         var lastError: Error = GeminiError.emptyResponse
         let maxAttempts = 6
-        let maxQuotaWaits = 20
+        let maxQuotaWaits = 3      // brief pacing for per-minute spikes; fail fast on a hard cap
         var attempt = 0
         var quotaWaits = 0
         while attempt < maxAttempts && quotaWaits < maxQuotaWaits {
@@ -270,7 +273,7 @@ actor GeminiClient {
             } catch let GeminiError.http(status) where status == 429 {
                 lastError = GeminiError.http(status)
                 quotaWaits += 1
-                scheduler.penalize(model)   // route around this model; reserveModel now paces
+                scheduler.penalize(model, seconds: 8)   // route around this model; reserveModel paces briefly
                 Log.trace("gemini: \(model) http(429); pacing (\(quotaWaits)/\(maxQuotaWaits))")
                 continue
             } catch let GeminiError.http(status) where [404, 408, 425, 500, 502, 503, 504].contains(status) {

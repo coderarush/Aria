@@ -278,7 +278,7 @@ actor AgentOrchestrator {
             }
         } catch {
             if case GeminiClient.GeminiError.http(429) = error {
-                onText(" I'm getting rate-limited right now — give me a moment and try again.")
+                onText(" I've hit my free-tier limit for now — it resets after a bit. Try me again shortly.")
             } else {
                 onText(" Sorry, I hit a problem reaching my brain.")
             }
