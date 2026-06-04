@@ -54,17 +54,31 @@ final class ToolTests: XCTestCase {
         XCTAssertFalse(text.contains("<"))
     }
 
-    func testWebSearchSummarizeAbstract() {
-        let json = #"{"AbstractText":"Swift is a language","AbstractURL":"https://swift.org","RelatedTopics":[]}"#
-        let out = WebSearchTool.summarize(Data(json.utf8), query: "swift")
-        XCTAssertTrue(out.contains("Swift is a language"))
-        XCTAssertTrue(out.contains("swift.org"))
+    func testWebSearchParsesHTMLResults() {
+        // A trimmed sample of DuckDuckGo's html results page.
+        let html = """
+        <div class="result">
+          <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fmics&rut=abc">Best USB Mics 2024</a>
+          <a class="result__snippet">Our top pick is the Blue Yeti for most people.</a>
+        </div>
+        <div class="result">
+          <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fother.com%2Freview">Mic Review</a>
+          <a class="result__snippet">The Shure MV7 is great for podcasting.</a>
+        </div>
+        """
+        let results = WebSearchTool.parseResults(html)
+        XCTAssertEqual(results.count, 2)
+        XCTAssertEqual(results[0].title, "Best USB Mics 2024")
+        XCTAssertEqual(results[0].url, "https://example.com/mics")        // uddg decoded
+        XCTAssertTrue(results[0].snippet.contains("Blue Yeti"))
+        XCTAssertEqual(results[1].url, "https://other.com/review")
     }
 
-    func testWebSearchSummarizeRelated() {
-        let json = #"{"AbstractText":"","RelatedTopics":[{"Text":"Topic one"},{"Text":"Topic two"}]}"#
-        let out = WebSearchTool.summarize(Data(json.utf8), query: "x")
-        XCTAssertTrue(out.contains("Topic one"))
+    func testWebSearchRealURLDecodesRedirect() {
+        XCTAssertEqual(
+            WebSearchTool.realURL(from: "//duckduckgo.com/l/?uddg=https%3A%2F%2Fa.com%2Fb%3Fx%3D1"),
+            "https://a.com/b?x=1")
+        XCTAssertEqual(WebSearchTool.realURL(from: "https://direct.com/page"), "https://direct.com/page")
     }
 
     func testClipboardRoundTrip() async throws {

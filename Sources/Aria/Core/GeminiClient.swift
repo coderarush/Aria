@@ -29,8 +29,6 @@ actor GeminiClient {
     private var cache: [String: CacheEntry] = [:]
     private let cacheTTL: TimeInterval = 30
 
-    private let maxRetries = 5
-
     init(model: String = "gemini-2.5-flash",
          session: URLSession = .shared,
          apiKeyProvider: @escaping () -> String? = { KeychainManager.read(account: KeychainKey.geminiAPIKey) }) {
@@ -229,66 +227,59 @@ actor GeminiClient {
         return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    // MARK: Networking + retry
+    // MARK: Networking
 
-    /// Transient statuses worth retrying: rate limiting (429), server/overload
-    /// (5xx), and — observed with newer "AQ." API keys — intermittent 404s from
-    /// the load balancer (the same model returns 200 on a retry).
-    private static let retryableStatuses: Set<Int> = [404, 408, 425, 429, 500, 502, 503, 504]
-
-    private func backoffSeconds(_ attempt: Int) -> Double {
-        min(pow(2.0, Double(attempt)) * 0.4, 6)  // 0.4, 0.8, 1.6, 3.2, 6 …
-    }
-
-    private func performWithRetry(url: URL, body: Data) async throws -> Data {
-        var attempt = 0
-        while true {
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = body
-
-            let data: Data
-            let status: Int
-            do {
-                let (d, response) = try await session.data(for: request)
-                data = d
-                status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            } catch {
-                // Network-level failure (timeout, dropped connection) — retry too.
-                guard attempt < self.maxRetries else { throw error }
-                try await Task.sleep(nanoseconds: UInt64(self.backoffSeconds(attempt) * 1_000_000_000))
-                attempt += 1
-                continue
-            }
-
-            if status == 200 { return data }
-
-            if Self.retryableStatuses.contains(status), attempt < self.maxRetries {
-                let backoff = self.backoffSeconds(attempt)
-                Log.gemini.warning("HTTP \(status); retry \(attempt + 1)/\(self.maxRetries) in \(backoff)s")
-                try await Task.sleep(nanoseconds: UInt64(backoff * 1_000_000_000))
-                attempt += 1
-                continue
-            }
-            throw GeminiError.http(status)
-        }
-    }
+    // (Retry/backoff is gone — pacing + model-spread is now the RequestScheduler's
+    // job, shared by both the streaming and non-streaming paths.)
 
     /// Try each configured model in order; if one keeps failing after retries
     /// (e.g. a model that 404s or stays overloaded for this key), fall through to
     /// the next. Throws the last error only if every model fails.
+    /// One request, no internal retry — pacing/spreading is the scheduler's job.
+    private func performOnce(url: URL, body: Data) async throws -> Data {
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        let (data, response) = try await session.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200 else { throw GeminiError.http(status) }
+        return data
+    }
+
+    /// Non-streaming generation (chat send, planner, agents). Routes EVERY call
+    /// through the same RequestScheduler as streaming, so the whole app — not just
+    /// the streaming path — inherits the free-tier guarantee: a 429 paces to a free
+    /// bucket and retries instead of grinding slow per-model backoff (which used to
+    /// hang multi-call autonomous tasks for minutes). Only genuinely-broken models
+    /// exhaust the attempt budget.
     private func performWithFallback(apiKey: String, body: Data) async throws -> Data {
         var lastError: Error = GeminiError.emptyResponse
-        for model in models {
+        let maxAttempts = 6
+        let maxQuotaWaits = 20
+        var attempt = 0
+        var quotaWaits = 0
+        while attempt < maxAttempts && quotaWaits < maxQuotaWaits {
+            let model = await reserveModel()
             let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent?key=\(apiKey)")!
             do {
-                let data = try await performWithRetry(url: url, body: body)
+                let data = try await performOnce(url: url, body: body)
                 Log.trace("gemini: \(model) ok")
                 return data
+            } catch let GeminiError.http(status) where status == 429 {
+                lastError = GeminiError.http(status)
+                quotaWaits += 1
+                Log.trace("gemini: \(model) http(429); pacing (\(quotaWaits)/\(maxQuotaWaits))")
+                continue
+            } catch let GeminiError.http(status) where [404, 408, 425, 500, 502, 503, 504].contains(status) {
+                lastError = GeminiError.http(status)
+                attempt += 1
+                Log.trace("gemini: \(model) http(\(status)); attempt \(attempt)/\(maxAttempts)")
+                continue
             } catch {
-                Log.trace("gemini: \(model) failed (\(error)); trying next model")
                 lastError = error
+                attempt += 1
+                Log.trace("gemini: \(model) error (\(error)); attempt \(attempt)/\(maxAttempts)")
                 continue
             }
         }

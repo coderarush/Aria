@@ -51,14 +51,26 @@ final class VoiceEngine: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDel
     private func speakWithGemini(_ text: String) {
         Task { [weak self] in
             guard let self else { return }
-            do {
-                let wav = try await Self.synthesizeGemini(text: text,
-                                                          voice: self.geminiVoiceName,
-                                                          apiKey: self.keyProvider() ?? "")
-                try self.play(wav)            // onFinish fires from AVAudioPlayer delegate
-            } catch {
-                Log.trace("gemini TTS failed (\(error)); falling back to Apple voice")
-                self.speakWithApple(text)     // onFinish fires from speech delegate
+            let key = self.keyProvider() ?? ""
+            // Give Gemini one paced retry on a momentary 429 before dropping to the
+            // Apple voice — under normal use this keeps the natural voice instead of
+            // flipping to robotic on a transient rate-limit.
+            for attempt in 0..<2 {
+                do {
+                    let wav = try await Self.synthesizeGemini(text: text, voice: self.geminiVoiceName, apiKey: key)
+                    try self.play(wav)        // onFinish fires from AVAudioPlayer delegate
+                    return
+                } catch {
+                    let is429 = (error as NSError).code == 429
+                    if is429, attempt == 0 {
+                        Log.trace("gemini TTS 429 — pacing then retrying once")
+                        try? await Task.sleep(nanoseconds: 1_200_000_000)
+                        continue
+                    }
+                    Log.trace("gemini TTS failed (\(error)); falling back to Apple voice")
+                    self.speakWithApple(text) // onFinish fires from speech delegate
+                    return
+                }
             }
         }
     }

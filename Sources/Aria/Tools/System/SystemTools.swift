@@ -139,12 +139,15 @@ struct SaveNoteTool: AriaTool {
         """
         let notes = await AppleScriptTool.execute(notesScript)
         if notes.success {
+            Log.trace("save_note: created Apple Note “\(title)”")
             // Also mirror to clipboard so it's instantly pasteable.
             await Self.copyToClipboard(content)
             return .ok("Saved a note titled “\(title)” in Apple Notes (and copied it to your clipboard).")
         }
+        Log.trace("save_note: Notes failed (\(notes.output)); falling back to a Desktop file")
 
-        // 2) Fallback: write a Markdown file to ~/Desktop/Aria Notes/ + clipboard + notify.
+        // 2) Fallback: write a Markdown file to ~/Desktop/Aria Notes/, open it so the
+        //    user can't miss it, copy to clipboard, and notify.
         let dir = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Desktop/Aria Notes")
         let fileURL = dir.appendingPathComponent("\(Self.slug(title)).md")
         do {
@@ -152,9 +155,11 @@ struct SaveNoteTool: AriaTool {
             let doc = "# \(title)\n\n\(content)\n"
             try doc.write(to: fileURL, atomically: true, encoding: .utf8)
             await Self.copyToClipboard(content)
+            await MainActor.run { _ = NSWorkspace.shared.open(fileURL) }   // surface it immediately
             _ = await AppleScriptTool.execute(
                 "display notification \"Saved “\(Self.asLiteral(title))” to your Desktop\" with title \"Aria\"")
-            return .ok("Couldn't reach Apple Notes, so I saved it to “\(fileURL.path)” and copied it to your clipboard.")
+            Log.trace("save_note: wrote + opened \(fileURL.path)")
+            return .ok("Couldn't reach Apple Notes, so I saved it to your Desktop (Aria Notes/\(fileURL.lastPathComponent)), opened it, and copied it to your clipboard.")
         } catch {
             // 3) Last resort: clipboard only — still give it to the user.
             await Self.copyToClipboard(content)
