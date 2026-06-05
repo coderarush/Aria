@@ -1,8 +1,24 @@
 # Aria v8 — "Alive" (organic, bubbly presence) — Design Proposal
 
 **Date:** 2026-06-04
-**Status:** In progress
+**Status:** Built — staging 1–3 done; only on-device tuning (4) remains (needs the user).
 **Builds on:** Aria v7
+
+## Delivered
+
+- **Alive presence:** bubble body, springy state pops, bouncier caption, face orb
+  (toned: 54pt, soft glow), speaking breath envelope, **thinking swirl** (orbital ring).
+- **Settings crash fixed:** NavigationSplitView → plain sidebar HStack+List (root-caused
+  from crash report: re-entrant NSSplitViewController layout → executor-check SIGSEGV).
+- **Beat-Clicky capability** (Aria *acts*, not just guides; free + private):
+  - *Ambient screen awareness* — focused window/field + selected text fed each turn, so
+    "summarize this / reply to her / translate the selection" just work (no screenshot).
+  - *Spoken play-by-play* — short present-tense narration as each step runs (toggle).
+  - *Type-target verify + self-heal* — ui_type fails honestly when no field is focused
+    instead of typing into the void; the model clicks first and the engine retries.
+
+Remaining: on-device tuning of motion/timing + battery check, and (optional) swapping the
+synthetic speaking envelope for real TTS playback-amplitude metering.
 
 ## Vision (from the user)
 
