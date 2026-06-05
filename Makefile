@@ -23,7 +23,10 @@ ifeq ($(strip $(SIGN_ID)),)
 SIGN_ID := -
 endif
 
-.PHONY: build test run release clean xcode cert
+.PHONY: build test run release dmg notarize clean xcode cert
+
+DMG   := $(BUILD_DIR)/$(APP_NAME).dmg
+STAGE := $(BUILD_DIR)/dmg-stage
 
 build:
 	swift build
@@ -49,6 +52,28 @@ release:
 		$(APP_BUNDLE) || codesign --force --deep --sign "$(SIGN_ID)" $(APP_BUNDLE)
 	@echo "Built $(APP_BUNDLE) (signed: $(SIGN_ID)) — open with: open $(APP_BUNDLE)"
 	@if [ "$(SIGN_ID)" = "-" ]; then echo "NOTE: ad-hoc signed — macOS will re-ask for permissions after each rebuild. Run 'make cert' once to make them stick."; fi
+
+# Package the signed app into a distributable .dmg (drag-to-Applications layout).
+# Works with any identity, but only a notarized build (see `notarize`) opens without
+# a Gatekeeper warning on someone else's Mac.
+dmg: release
+	rm -rf $(STAGE) $(DMG)
+	mkdir -p $(STAGE)
+	cp -R $(APP_BUNDLE) $(STAGE)/
+	ln -s /Applications $(STAGE)/Applications
+	hdiutil create -volname "$(APP_NAME)" -srcfolder $(STAGE) -ov -format ULFO $(DMG)
+	rm -rf $(STAGE)
+	@echo "Built $(DMG) — this is the file you upload to Gumroad / Lemon Squeezy."
+
+# Notarize the .dmg for public distribution. Requires a paid Apple Developer ID and a
+# one-time stored credential profile:
+#   xcrun notarytool store-credentials "aria-notary" \
+#       --apple-id YOU@EXAMPLE.COM --team-id YOURTEAMID --password APP_SPECIFIC_PASSWORD
+# Also set SIGN_ID to your "Developer ID Application: …" identity before building.
+notarize: dmg
+	xcrun notarytool submit $(DMG) --keychain-profile "aria-notary" --wait
+	xcrun stapler staple $(DMG)
+	@echo "Notarized + stapled $(DMG) — opens cleanly on any Mac."
 
 # Create a stable self-signed code-signing certificate named "Aria Self-Signed"
 # in the login keychain. With it, macOS keys permissions on the identity (stable)
