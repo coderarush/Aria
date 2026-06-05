@@ -41,6 +41,11 @@ struct IslandView: View {
                 .opacity(active ? 1 : 0)
                 .animation(.easeInOut(duration: 0.55), value: active)
                 .allowsHitTesting(false)
+            bubbles
+                .opacity(active ? 1 : 0)
+                .scaleEffect(active ? 1 : 0.6)
+                .animation(.spring(response: 0.6, dampingFraction: 0.6), value: active)
+                .allowsHitTesting(false)
         }
         .overlay(alignment: .bottom) { caption }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -72,6 +77,34 @@ struct IslandView: View {
         }
         .ignoresSafeArea()
         .animation(.easeInOut(duration: 0.3), value: intensity)
+    }
+
+    /// v8 — Aria's living body: soft multi-color blobs that drift, breathe, and swell
+    /// with the voice. A continuous Canvas so it feels organic, not stepped. Heavier
+    /// motion while listening/thinking; calm otherwise.
+    private var bubbles: some View {
+        TimelineView(.animation) { tl in
+            let t = tl.date.timeIntervalSinceReferenceDate
+            let level = viewModel.state == .listening ? Double(min(max(viewModel.audioLevel, 0), 1)) : 0
+            let busy = viewModel.state == .thinking || viewModel.state == .responding
+            Canvas { ctx, size in
+                let pal = palette
+                let count = 9
+                for i in 0..<count {
+                    let ph = Double(i) * 0.79
+                    // Drift along the bottom + sides, orbiting faster while busy.
+                    let speed = busy ? 0.55 : 0.28
+                    let x = size.width * (0.5 + 0.46 * sin(t * speed + ph))
+                    let y = size.height * (0.9 - 0.16 * Double(i % 3)) - sin(t * 0.9 + ph) * 26
+                    let pulse = 1 + 0.22 * sin(t * 1.5 + ph) + level * 0.6
+                    let r = (30 + Double(i % 4) * 18) * pulse
+                    let c = pal[i % max(pal.count, 1)].opacity((0.30 + level * 0.35) * Double(intensity))
+                    ctx.fill(Path(ellipseIn: CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)), with: .color(c))
+                }
+            }
+            .blur(radius: 34)
+            .ignoresSafeArea()
+        }
     }
 
     private var caption: some View {
