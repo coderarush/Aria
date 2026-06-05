@@ -1,7 +1,19 @@
 import React, { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence, useScroll, useTransform } from "framer-motion";
+import VoiceOrb from "./VoiceOrb.jsx";
 
 const EASE = [0.16, 1, 0.3, 1];
+
+/* kinetic headline line: clip-reveals upward */
+function KLine({ children, delay = 0 }) {
+  return (
+    <span className="kline">
+      <motion.span initial={{ y: "115%" }} animate={{ y: 0 }} transition={{ duration: 0.95, ease: EASE, delay }}>
+        {children}
+      </motion.span>
+    </span>
+  );
+}
 
 /* ---------- reusable reveal ---------- */
 function Reveal({ children, delay = 0, y = 26, className, ...rest }) {
@@ -194,22 +206,25 @@ export default function App() {
         </div>
       </nav>
 
-      {/* HERO */}
+      {/* HERO — the orb is the protagonist */}
       <header className="hero wrap" id="top">
-        <motion.div variants={stagger} initial="hidden" animate="show">
-          <motion.div variants={item} className="eyebrow">A spoken assistant for macOS</motion.div>
-          <motion.h1 variants={item} style={{ marginTop: 20 }}>Ask out loud.<br />Aria does it.</motion.h1>
-          <motion.p variants={item} className="lede" style={{ margin: "24px auto 0" }}>
-            Not another chat window. Say what you want and it researches, writes, remembers, and <b>works the apps on your screen</b> — clicking and typing for you.
-          </motion.p>
-          <motion.div variants={item} className="cta">
-            <motion.a className="btn" href="#price" whileHover={{ y: -3, scale: 1.02 }} whileTap={{ scale: 0.97 }} transition={{ type: "spring", stiffness: 350, damping: 18 }}>Download for Mac</motion.a>
-            <motion.a className="btn ghost" href="#demo" whileHover={{ y: -3 }} whileTap={{ scale: 0.97 }} transition={{ type: "spring", stiffness: 350, damping: 18 }}>See it work</motion.a>
-          </motion.div>
-          <motion.div variants={item} className="note">One purchase · free to run · macOS 14+</motion.div>
+        <motion.div className="orbWrap" style={{ y: orbY, opacity: orbOp }} initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ duration: 1.1, ease: EASE }}>
+          <VoiceOrb size={420} />
         </motion.div>
 
-        <motion.div style={{ y: orbY, opacity: orbOp }}><Orb /></motion.div>
+        <motion.div className="eyebrow heroEy" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5, duration: 0.8 }}>A spoken assistant for macOS</motion.div>
+        <h1 className="heroH1">
+          <KLine delay={0.2}>Ask out loud.</KLine>
+          <KLine delay={0.34}>Aria <em>does it.</em></KLine>
+        </h1>
+        <motion.p className="lede heroLede" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.7, duration: 0.8, ease: EASE }}>
+          Not another chat window. Say what you want and it researches, writes, remembers, and <b>works the apps on your screen</b> for you.
+        </motion.p>
+        <motion.div className="cta" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.84, duration: 0.8, ease: EASE }}>
+          <motion.a className="btn" href="#price" whileHover={{ y: -3, scale: 1.02 }} whileTap={{ scale: 0.97 }} transition={{ type: "spring", stiffness: 350, damping: 18 }}>Download for Mac</motion.a>
+          <motion.a className="btn ghost" href="#demo" whileHover={{ y: -3 }} whileTap={{ scale: 0.97 }} transition={{ type: "spring", stiffness: 350, damping: 18 }}>See it work</motion.a>
+        </motion.div>
+        <motion.div className="note" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1, duration: 0.8 }}>One purchase · free to run · macOS 14+</motion.div>
 
         <Reveal className="stage" id="demo" delay={0.1}><Console /></Reveal>
       </header>
