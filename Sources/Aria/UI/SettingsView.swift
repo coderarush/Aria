@@ -34,10 +34,33 @@ struct SettingsView: View {
         // was opened from the menu-bar item. This keeps the same look without the
         // NSSplitViewController layout path.
         HStack(spacing: 0) {
-            List(Section.allCases, selection: $selection) { section in
-                Label(section.rawValue, systemImage: section.icon).tag(section)
+            // Plain button column instead of List(selection:). SwiftUI's List builds a
+            // DynamicViewList whose row evaluation hits the Swift-6 executor-isolation
+            // check and crashes (see Info.plist / AriaApp legacy override). This avoids
+            // the List code path entirely — belt-and-suspenders with the runtime override.
+            ScrollView {
+                VStack(spacing: 2) {
+                    ForEach(Section.allCases) { section in
+                        Button {
+                            selection = section
+                        } label: {
+                            HStack(spacing: 9) {
+                                Image(systemName: section.icon)
+                                    .frame(width: 18)
+                                Text(section.rawValue)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(selection == section ? Color.accentColor.opacity(0.18) : .clear,
+                                        in: RoundedRectangle(cornerRadius: 7))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(8)
             }
-            .listStyle(.sidebar)
             .frame(width: 190)
 
             Divider()

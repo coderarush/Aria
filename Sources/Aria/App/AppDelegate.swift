@@ -28,14 +28,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         migrateAPIKeyIfNeeded()
         setupStatusItem()
-        // On a fresh install, walk the user through permissions BEFORE starting audio
-        // capture — otherwise the system mic prompt fires before the welcome explains
-        // why, and the wake engine spins up without mic access. Start the controller
-        // immediately on every later launch; on first launch, start it only once
-        // onboarding finishes (see the onComplete callback below).
-        if AppSettings.shared.onboardingComplete {
-            startControllerOnce()
-        }
+        // ALWAYS start listening immediately — never leave Aria dead waiting on the
+        // onboarding window (which, as an accessory app, may not even surface). On a
+        // fresh install the mic prompt fires now; onboarding then explains it. A working
+        // assistant beats perfect prompt ordering.
+        startControllerOnce()
         showOnboardingIfNeeded()
     }
 
@@ -66,8 +63,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         })
         window.delegate = self   // catch a manual close (red X) so Aria still boots
         onboardingWindow = window
+        NSApp.setActivationPolicy(.regular)   // accessory apps won't surface a window otherwise
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
     }
 
     // MARK: Menu bar
