@@ -26,18 +26,28 @@ struct SettingsView: View {
     @State private var selection: Section = .general
 
     var body: some View {
-        NavigationSplitView {
+        // A plain sidebar HStack instead of NavigationSplitView. NavigationSplitView
+        // hosts an NSSplitViewController whose viewDidLoad runs a *synchronous*
+        // systemLayoutSizeFittingSize, forcing re-entrant SwiftUI list evaluation
+        // during AppKit constraint solving — that path intermittently crashed in
+        // swift_task_isCurrentExecutorWithFlagsImpl (EXC_BAD_ACCESS) when the window
+        // was opened from the menu-bar item. This keeps the same look without the
+        // NSSplitViewController layout path.
+        HStack(spacing: 0) {
             List(Section.allCases, selection: $selection) { section in
                 Label(section.rawValue, systemImage: section.icon).tag(section)
             }
-            .navigationSplitViewColumnWidth(min: 170, ideal: 180, max: 220)
-        } detail: {
+            .listStyle(.sidebar)
+            .frame(width: 190)
+
+            Divider()
+
             ScrollView {
                 detailView
                     .padding(24)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .navigationTitle(selection.rawValue)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(width: 720, height: 500)
     }

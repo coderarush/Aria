@@ -132,17 +132,17 @@ struct IslandView: View {
             let t = tl.date.timeIntervalSinceReferenceDate
             let level = viewModel.state == .listening ? Double(min(max(viewModel.audioLevel, 0), 1)) : 0
             let busy = viewModel.state == .thinking
-            let s = 1 + 0.09 * sin(t * (busy ? 4.0 : 2.0)) + level * 0.55
+            let s = 1 + 0.07 * sin(t * (busy ? 4.0 : 2.0)) + level * 0.38
             let c0 = palette.first ?? viewModel.accent
             let c1 = palette.count > 1 ? palette[1] : c0
             Circle()
-                .fill(RadialGradient(colors: [.white, c0.opacity(0.92), c1.opacity(0.42)],
-                                     center: .init(x: 0.4, y: 0.36), startRadius: 1, endRadius: 42))
-                .frame(width: 76, height: 76)
+                .fill(RadialGradient(colors: [.white.opacity(0.95), c0.opacity(0.78), c1.opacity(0.28)],
+                                     center: .init(x: 0.4, y: 0.36), startRadius: 1, endRadius: 28))
+                .frame(width: 54, height: 54)
                 .scaleEffect(s)
-                .shadow(color: c0.opacity(0.55), radius: 26)
+                .shadow(color: c0.opacity(0.32), radius: 14)
         }
-        .frame(width: 110, height: 110)
+        .frame(width: 80, height: 80)
     }
 
     private var caption: some View {
