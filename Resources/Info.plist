@@ -14,6 +14,8 @@
     <string>5.0.0</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleExecutable</key>
     <string>Aria</string>
     <key>LSMinimumSystemVersion</key>

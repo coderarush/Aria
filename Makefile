@@ -47,6 +47,7 @@ release:
 	mkdir -p $(APP_BUNDLE)/Contents/Resources
 	cp $(RELEASE_BIN) $(APP_BUNDLE)/Contents/MacOS/$(APP_NAME)
 	cp $(INFO_PLIST) $(APP_BUNDLE)/Contents/Info.plist
+	cp Resources/AppIcon.icns $(APP_BUNDLE)/Contents/Resources/AppIcon.icns
 	codesign --force --deep --sign "$(SIGN_ID)" \
 		--entitlements Resources/Aria.entitlements \
 		$(APP_BUNDLE) || codesign --force --deep --sign "$(SIGN_ID)" $(APP_BUNDLE)

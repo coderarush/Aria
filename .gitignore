@@ -15,3 +15,7 @@ agentdb.rvf.lock
 
 # Design skills (downloaded for local use, not product source)
 .claude/skills/
+
+# Icon build intermediates (AppIcon.icns is committed, the rest are generated)
+Resources/AppIcon.iconset/
+Resources/icon-1024.png
