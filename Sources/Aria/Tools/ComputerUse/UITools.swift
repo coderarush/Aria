@@ -58,7 +58,8 @@ struct UITypeTool: AriaTool {
         // Verify a text field is actually focused first — otherwise the keystrokes vanish
         // and we'd falsely report success. An honest failure lets the model click the field
         // and self-heal (the autonomy engine retries the step).
-        let focusedRole = await MainActor.run { ScreenContext.snapshot().focusedRole }
+        let pid = await MainActor.run { AXReader.frontmostTarget()?.processIdentifier }
+        let focusedRole = pid.map { ScreenContext.snapshot(pid: $0).focusedRole } ?? ""
         guard AXReader.canTypeInto(focusedRole: focusedRole) else {
             return .fail("No text field is focused — click the field you want to type into first, then I'll type.")
         }

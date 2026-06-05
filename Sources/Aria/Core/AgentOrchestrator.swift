@@ -48,7 +48,7 @@ actor AgentOrchestrator {
 
         let screenshot: Data? = privacyMode ? nil : try? await screen.capturePrimaryJPEG()
         var history = await memory.recentContext()
-        let context = await Self.currentSystemContext(includeScreen: !privacyMode)
+        let context = await systemContext(privacyMode: privacyMode)
         let maxSteps = 4
 
         do {
@@ -250,7 +250,7 @@ actor AgentOrchestrator {
         let screenshot: Data? = wantsScreen ? (try? await screen.capturePrimaryJPEG()) : nil
         var history = await memory.recentContext()
         history = Array(history.suffix(8))
-        let context = await Self.currentSystemContext(includeScreen: !privacyMode)
+        let context = await systemContext(privacyMode: privacyMode)
         let specs = await registry.specs()
         // Recall relevant long-term facts and prime the turn with them.
         let recalled = await longTerm.recall(for: command, limit: 4)
@@ -323,16 +323,19 @@ actor AgentOrchestrator {
 
     // MARK: System context
 
-    @MainActor static func currentSystemContext(includeScreen: Bool = false) -> GeminiClient.SystemContext {
+    @MainActor static func currentSystemContext() -> GeminiClient.SystemContext {
         let app = NSWorkspace.shared.frontmostApplication?.localizedName ?? "Unknown"
-        var ctx = GeminiClient.SystemContext(
-            currentApp: app,
-            time: Date(),
-            username: NSUserName())
-        // Ambient screen awareness — only when not in privacy mode (selected text can be
-        // sensitive). Cheap AX read; nothing leaves the machine that a screenshot wouldn't.
-        if includeScreen {
-            let s = ScreenContext.snapshot()
+        return GeminiClient.SystemContext(currentApp: app, time: Date(), username: NSUserName())
+    }
+
+    /// Base system context plus ambient screen context. The AX read runs HERE, on the agent
+    /// actor's executor (off the main thread) and time-bounded — so a slow Accessibility call
+    /// can never freeze the main thread (which previously broke the whole turn: no reply, no
+    /// voice, no re-arm, and a crash when Settings was opened afterward).
+    func systemContext(privacyMode: Bool) async -> GeminiClient.SystemContext {
+        var ctx = await MainActor.run { Self.currentSystemContext() }
+        if !privacyMode, let pid = await MainActor.run(body: { AXReader.frontmostTarget()?.processIdentifier }) {
+            let s = ScreenContext.snapshot(pid: pid)   // off-main, bounded
             ctx.windowTitle = s.windowTitle
             ctx.selection = s.selectedText
             ctx.focusedField = s.focusedRole
