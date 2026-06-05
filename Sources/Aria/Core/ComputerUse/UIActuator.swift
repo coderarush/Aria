@@ -20,6 +20,13 @@ enum UIActuator {
         CGEvent(mouseEventSource: src, mouseType: .leftMouseUp, mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
     }
 
+    /// Scroll the area under the pointer (pixels; +dy scrolls down content up).
+    static func scroll(dx: Int, dy: Int) {
+        let src = CGEventSource(stateID: .hidSystemState)
+        CGEvent(scrollWheelEvent2Source: src, units: .pixel, wheelCount: 2,
+                wheel1: Int32(-dy), wheel2: Int32(-dx), wheel3: 0)?.post(tap: .cghidEventTap)
+    }
+
     /// Type arbitrary text into the focused field (Unicode, no keycodes needed).
     static func type(_ text: String) {
         let src = CGEventSource(stateID: .hidSystemState)

@@ -41,6 +41,14 @@ final class ComputerUseTests: XCTestCase {
         XCTAssertNil(VisionLocator.parseFraction("no json"))
     }
 
+    func testMatchScoreRanksExactOverContains() {
+        XCTAssertEqual(AXReader.matchScore(label: "Export", query: "Export"), 100)        // exact
+        XCTAssertGreaterThan(AXReader.matchScore(label: "Export as PNG", query: "Export"), // prefix
+                             AXReader.matchScore(label: "Re-export all", query: "export")) // contains
+        XCTAssertEqual(AXReader.matchScore(label: "Save", query: "Delete"), 0)            // no match
+        XCTAssertEqual(AXReader.matchScore(label: "", query: "x"), 0)
+    }
+
     func testPilotParsesAction() {
         let a = PilotAgent.parse(#"{"tool":"ui_click","input":{"label":"Export"}}"#)
         XCTAssertEqual(a?.tool, "ui_click")

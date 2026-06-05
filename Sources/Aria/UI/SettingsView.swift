@@ -129,6 +129,7 @@ struct GeneralSettingsTab: View {
 
 struct ConversationSettingsTab: View {
     @StateObject private var settings = AppSettings.shared
+    @State private var axOK = AXReader.hasPermission
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -172,8 +173,26 @@ struct ConversationSettingsTab: View {
                 Text("Experimental. After enabling, click “Teach Aria my voice”, then say “Hey Aria” a few times. She'll bias toward your voice and ignore others. Basic on-device voiceprint — not a hard security guarantee.")
                     .font(.caption).foregroundStyle(.secondary)
             } header: { Text("Speaker verification") }
+
+            Section {
+                HStack {
+                    Text("Accessibility access")
+                    Spacer()
+                    Text(axOK ? "Granted" : "Not granted")
+                        .font(.callout).foregroundStyle(axOK ? Color.green : Color.secondary)
+                }
+                if !axOK {
+                    Button("Grant access\u{2026}") {
+                        AXReader.requestPermission()
+                        axOK = AXReader.hasPermission
+                    }
+                }
+                Text("Lets Aria see and operate your apps \u{2014} click, type, run menus, scroll \u{2014} by voice. Required for computer-use commands. Aria asks before anything destructive and shows an indicator while in control, which you can stop.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } header: { Text("Computer use") }
         }
         .formStyle(.grouped)
+        .onAppear { axOK = AXReader.hasPermission }
     }
 }
 

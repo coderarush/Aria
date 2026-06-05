@@ -19,7 +19,28 @@ enum AXReader {
     static var hasPermission: Bool { AXIsProcessTrusted() }
 
     static func frontmostAppName() -> String {
-        NSWorkspace.shared.frontmostApplication?.localizedName ?? "the app"
+        frontmostTarget()?.localizedName ?? "the app"
+    }
+
+    /// The app to operate on: the frontmost app that ISN'T Aria itself (so reading the
+    /// UI tree targets the user's app, never our own panels).
+    static func frontmostTarget() -> NSRunningApplication? {
+        let ws = NSWorkspace.shared
+        let me = Bundle.main.bundleIdentifier
+        if let f = ws.frontmostApplication, f.bundleIdentifier != me { return f }
+        return ws.runningApplications.first { $0.isActive && $0.bundleIdentifier != me } ?? ws.frontmostApplication
+    }
+
+    /// Score how well an element label matches a query: exact > prefix > contains.
+    static func matchScore(label: String, query: String) -> Int {
+        let l = label.lowercased(), q = query.lowercased()
+        guard !l.isEmpty, !q.isEmpty else { return 0 }
+        if l == q { return 100 }
+        if l.hasPrefix(q) { return 80 }
+        if q.hasPrefix(l) { return 70 }
+        if l.contains(q) { return 50 }
+        if q.contains(l) { return 30 }
+        return 0
     }
 
     /// Prompt for the Accessibility permission (opens the system dialog once).
@@ -54,21 +75,20 @@ enum AXReader {
 
     /// Read actionable controls of the frontmost app.
     static func readFrontmost(limit: Int = 200) -> [UIElement] {
-        guard hasPermission, let app = NSWorkspace.shared.frontmostApplication else { return [] }
+        guard hasPermission, let app = frontmostTarget() else { return [] }
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
         var out: [UIElement] = []
         walk(axApp, into: &out, limit: limit, depth: 0)
         return out
     }
 
-    /// Find the live AX element best matching a label (+ optional role) — for acting on.
+    /// Find the live AX element best matching a label (+ optional role), by score.
     static func find(role: String?, label: String) -> AXUIElement? {
-        guard hasPermission, let app = NSWorkspace.shared.frontmostApplication else { return nil }
+        guard hasPermission, let app = frontmostTarget() else { return nil }
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
-        let want = label.lowercased()
-        var best: AXUIElement?
-        findWalk(axApp, role: role, want: want, best: &best, depth: 0)
-        return best
+        var best: (el: AXUIElement, score: Int)?
+        findWalk(axApp, role: role, want: label, best: &best, depth: 0)
+        return best?.el
     }
 
     // MARK: tree walking
@@ -88,15 +108,17 @@ enum AXReader {
         for c in children(el) { walk(c, into: &out, limit: limit, depth: depth + 1) }
     }
 
-    private static func findWalk(_ el: AXUIElement, role: String?, want: String, best: inout AXUIElement?, depth: Int) {
-        if best != nil || depth > 30 { return }
+    private static func findWalk(_ el: AXUIElement, role: String?, want: String,
+                                 best: inout (el: AXUIElement, score: Int)?, depth: Int) {
+        if depth > 30 || (best?.score ?? 0) >= 100 { return }   // 100 = exact match, can't beat it
         let r = str(el, kAXRoleAttribute)
         if isActionable(role: r), role == nil || r == role {
             let label = bestLabel(title: str(el, kAXTitleAttribute),
                                   description: str(el, kAXDescriptionAttribute),
                                   roleDescription: str(el, kAXRoleDescriptionAttribute),
-                                  value: str(el, kAXValueAttribute)).lowercased()
-            if !label.isEmpty, label.contains(want) || want.contains(label) { best = el; return }
+                                  value: str(el, kAXValueAttribute))
+            let sc = matchScore(label: label, query: want)
+            if sc > 0, sc > (best?.score ?? 0) { best = (el, sc) }
         }
         for c in children(el) { findWalk(c, role: role, want: want, best: &best, depth: depth + 1) }
     }

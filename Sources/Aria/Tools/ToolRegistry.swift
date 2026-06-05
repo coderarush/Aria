@@ -51,7 +51,8 @@ actor ToolRegistry {
             UIReadTool(),
             UIClickTool(),
             UITypeTool(),
-            UIKeyTool()
+            UIKeyTool(),
+            UIScrollTool()
         ]
     }
 }

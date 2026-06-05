@@ -60,6 +60,29 @@ struct UITypeTool: AriaTool {
     }
 }
 
+/// Scroll the frontmost app.
+struct UIScrollTool: AriaTool {
+    static let name = "ui_scroll"
+    static let description = "Scroll the frontmost app. Input: {direction: up|down|left|right, amount? (pixels, default 400)}."
+    static let paramHints: [String: String] = ["direction": "up, down, left, or right", "amount": "pixels to scroll"]
+
+    func run(input: [String: String]) async throws -> ToolResult {
+        guard await MainActor.run(body: { AXReader.hasPermission }) else {
+            return .fail("Accessibility access is off — enable Aria in System Settings → Privacy & Security → Accessibility.")
+        }
+        let amt = Int(input["amount"] ?? "400") ?? 400
+        let (dx, dy): (Int, Int)
+        switch (input["direction"] ?? "down").lowercased() {
+        case "up": (dx, dy) = (0, -amt)
+        case "left": (dx, dy) = (-amt, 0)
+        case "right": (dx, dy) = (amt, 0)
+        default: (dx, dy) = (0, amt)   // down
+        }
+        await MainActor.run { NotificationCenter.default.post(name: .ariaUIActivity, object: nil); UIActuator.scroll(dx: dx, dy: dy) }
+        return .ok("Scrolled \(input["direction"] ?? "down").")
+    }
+}
+
 /// Press a keyboard shortcut.
 struct UIKeyTool: AriaTool {
     static let name = "ui_key"

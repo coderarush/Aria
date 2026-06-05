@@ -175,7 +175,7 @@ struct PilotAgent: SubAgent {
     let name = "Pilot"
     let description = "Operate any app's interface — click buttons, fill fields, run menus — to accomplish a goal on screen."
     let persona = "the operator — drives apps hands-on"
-    let allowedTools = ["ui_read", "ui_click", "ui_type", "ui_key", "open_app"]
+    let allowedTools = ["ui_read", "ui_click", "ui_type", "ui_key", "ui_scroll", "open_app"]
 
     func execute(task: String, context: AgentContext) async -> AgentResult {
         var log = ""
@@ -191,7 +191,8 @@ struct PilotAgent: SubAgent {
 
             Reply with ONE next action as a single JSON object and nothing else:
             {"tool":"ui_click","input":{"label":"…"}}  OR  {"tool":"ui_type","input":{"text":"…"}}
-            {"tool":"ui_key","input":{"combo":"cmd+s"}}  OR  {"tool":"done","input":{"summary":"…"}}
+            {"tool":"ui_key","input":{"combo":"cmd+s"}}  OR  {"tool":"ui_scroll","input":{"direction":"down"}}
+            {"tool":"done","input":{"summary":"…"}}
             Use "done" when the goal is complete or impossible.
             """
             let raw = (try? await context.gemini.generateText(prompt: prompt, temperature: 0.1)) ?? ""
