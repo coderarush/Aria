@@ -19,3 +19,5 @@ agentdb.rvf.lock
 # Icon build intermediates (AppIcon.icns is committed, the rest are generated)
 Resources/AppIcon.iconset/
 Resources/icon-1024.png
+site/node_modules/
+site/dist/
