@@ -49,6 +49,15 @@ struct IslandView: View {
                 .allowsHitTesting(false)
         }
         .overlay(alignment: .bottom) { caption }
+        .overlay(alignment: .bottom) {
+            faceOrb
+                .opacity(active ? 1 : 0)
+                .scaleEffect(active ? 1 : 0.4)
+                .padding(.bottom, showCaption ? 178 : 120)
+                .animation(.spring(response: 0.55, dampingFraction: 0.6), value: active)
+                .animation(.spring(response: 0.5, dampingFraction: 0.75), value: showCaption)
+                .allowsHitTesting(false)
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             withAnimation(.linear(duration: 18).repeatForever(autoreverses: false)) { rotate = 360 }
@@ -113,6 +122,27 @@ struct IslandView: View {
             .blur(radius: 34)
             .ignoresSafeArea()
         }
+    }
+
+    /// v8 — Aria's "face": a small soft orb above the caption that breathes, swells
+    /// with the voice, and quickens while thinking. Bottom-anchored, never covers the
+    /// user's work.
+    private var faceOrb: some View {
+        TimelineView(.animation) { tl in
+            let t = tl.date.timeIntervalSinceReferenceDate
+            let level = viewModel.state == .listening ? Double(min(max(viewModel.audioLevel, 0), 1)) : 0
+            let busy = viewModel.state == .thinking
+            let s = 1 + 0.09 * sin(t * (busy ? 4.0 : 2.0)) + level * 0.55
+            let c0 = palette.first ?? viewModel.accent
+            let c1 = palette.count > 1 ? palette[1] : c0
+            Circle()
+                .fill(RadialGradient(colors: [.white, c0.opacity(0.92), c1.opacity(0.42)],
+                                     center: .init(x: 0.4, y: 0.36), startRadius: 1, endRadius: 42))
+                .frame(width: 76, height: 76)
+                .scaleEffect(s)
+                .shadow(color: c0.opacity(0.55), radius: 26)
+        }
+        .frame(width: 110, height: 110)
     }
 
     private var caption: some View {
