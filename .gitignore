@@ -12,3 +12,6 @@ agentdb.rvf
 agentdb.rvf.lock
 *.rvf
 *.rvf.lock
+
+# Design skills (downloaded for local use, not product source)
+.claude/skills/
