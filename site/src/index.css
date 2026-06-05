@@ -104,6 +104,26 @@ body {
 .chip b { font-weight: 600; }
 .chip span { color: var(--ink-faint); }
 
+/* how it works */
+.how { padding: 90px 0; border-top: 1px solid var(--line); }
+.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 36px; margin-top: 26px; }
+.step .num { color: var(--accent-deep); display: block; margin-bottom: 14px; }
+.step h3 { font-size: 2rem; margin-bottom: 12px; }
+.step p { color: var(--ink-soft); }
+
+/* free + private split */
+.split { padding: 90px 0; border-top: 1px solid var(--line); }
+.splitGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 50px; align-items: start; }
+.splitGrid h2 { font-size: clamp(2rem, 4vw, 3.2rem); }
+.splitGrid p { color: var(--ink-soft); margin-bottom: 18px; }
+
+/* faq */
+.faq { padding: 90px 0; border-top: 1px solid var(--line); }
+.faq h2 { font-size: clamp(2rem, 4.5vw, 3rem); margin-bottom: 40px; }
+.qaList { display: grid; grid-template-columns: 1fr 1fr; gap: 40px 56px; }
+.qa h4 { font-family: "Bricolage Grotesque"; font-weight: 700; font-size: 1.25rem; margin-bottom: 10px; }
+.qa p { color: var(--ink-soft); }
+
 /* close */
 .close { text-align: center; padding: 110px 0 90px; border-top: 1px solid var(--line); }
 .close h2 { font-size: clamp(2.6rem, 6vw, 4.6rem); }
@@ -117,5 +137,8 @@ footer a:hover { color: var(--ink); }
   .hero { grid-template-columns: 1fr; text-align: left; }
   .heroBlob { order: -1; }
   .row { grid-template-columns: 1fr; gap: 8px; }
+  .steps { grid-template-columns: 1fr; gap: 28px; }
+  .splitGrid { grid-template-columns: 1fr; gap: 24px; }
+  .qaList { grid-template-columns: 1fr; gap: 28px; }
   .nav .links a:not(.btn) { display: none; }
 }

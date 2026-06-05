@@ -47,6 +47,23 @@ const phrases = [
   ["“Find the export button and click it.”", "she sees the screen"],
 ];
 
+const steps = [
+  ["Wake", "She listens for “Hey Aria” entirely on your Mac. No always-open stream to the cloud, no hot-word sent anywhere — the mic never leaves the machine to hear her name."],
+  ["Understand", "She reads what's in front of you — active app, window, the field you're in, the text you've selected — and works out what “this”, “that”, and “her” actually mean."],
+  ["Act", "She calls real tools to do the task across your apps, checks her own work, and tells you when it's done. Anything destructive — Send, Pay, Delete — asks first."],
+];
+
+const faqs = [
+  ["Is it really free?",
+   "Yes. Aria runs on Google's Gemini free tier with your own key, and rotates across several keys plus free fallback providers (Groq, Cerebras, OpenRouter). No subscription, no metered usage, no card."],
+  ["Does it send my screen to the cloud?",
+   "Only when a task needs it, and only the relevant context. Wake-word detection is on-device, screenshots are never written to disk, and secure fields like passwords are hidden from her."],
+  ["How is this different from a screen-aware helper?",
+   "Most of them are aware of your screen and guide you step by step. Aria does the steps — she operates the apps herself — and she's free and open source."],
+  ["What do I need to run it?",
+   "A Mac (Apple Silicon or Intel) on macOS 14 or later, and a free Gemini API key. That's it."],
+];
+
 export default function App() {
   return (
     <>
@@ -114,6 +131,43 @@ export default function App() {
         </div>
       </section>
 
+      <section className="how">
+        <div className="wrap">
+          <Reveal><span className="mono eyebrow">How it works</span></Reveal>
+          <div className="steps">
+            {steps.map(([title, body], i) => (
+              <Reveal key={title} i={i} className="step">
+                <span className="mono num">0{i + 1}</span>
+                <h3 className="display">{title}</h3>
+                <p>{body}</p>
+              </Reveal>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="split">
+        <div className="wrap splitGrid">
+          <Reveal>
+            <h2 className="display">Free, because<br />you bring the key.</h2>
+          </Reveal>
+          <Reveal i={1}>
+            <p>
+              Aria runs on Google's Gemini free tier with your own key — and rotates across
+              several keys plus free fallbacks (Groq, Cerebras, OpenRouter) so she keeps
+              working when one runs out. It stays free because you bring the key, not because
+              we resell you back your own data.
+            </p>
+            <p>
+              And it's private by construction: she has no backend. The wake word runs
+              on-device, keys live in your macOS Keychain, screenshots are never written to
+              disk, and password fields are hidden from her. The only calls that leave your
+              Mac go to the provider you chose.
+            </p>
+          </Reveal>
+        </div>
+      </section>
+
       <section id="say" className="say">
         <div className="wrap">
           <Reveal>
@@ -124,6 +178,20 @@ export default function App() {
             {phrases.map(([say, ctx], i) => (
               <Reveal key={say} i={i % 3}>
                 <div className="chip"><b>{say}</b> <span>— {ctx}</span></div>
+              </Reveal>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="faq">
+        <div className="wrap">
+          <Reveal><h2 className="display">Questions.</h2></Reveal>
+          <div className="qaList">
+            {faqs.map(([q, a], i) => (
+              <Reveal key={q} i={i % 2} className="qa">
+                <h4>{q}</h4>
+                <p>{a}</p>
               </Reveal>
             ))}
           </div>
