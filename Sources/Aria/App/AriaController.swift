@@ -280,6 +280,8 @@ final class AriaController {
         NotificationCenter.default.addObserver(forName: .ariaUIActivity, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.computerUseIndicator.pulse() }
         }
+        // Quiet update check on launch (surfaces in Settings → General).
+        Task { await UpdateChecker.shared.check() }
         applyVoiceSettings()
         applyConversationSettings()
         voice.audioBus = audioBus

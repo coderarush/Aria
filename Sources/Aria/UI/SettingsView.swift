@@ -119,6 +119,7 @@ struct LicenseTab: View {
 
 struct GeneralSettingsTab: View {
     @StateObject private var settings = AppSettings.shared
+    @StateObject private var updater = UpdateChecker.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -153,6 +154,25 @@ struct GeneralSettingsTab: View {
                     ForEach(Theme.glowPalettes, id: \.id) { Text($0.name).tag($0.id) }
                 }
             } header: { Text("Accent Color") }
+
+            Section {
+                HStack {
+                    Text("Version")
+                    Spacer()
+                    Text(updater.currentVersion).foregroundStyle(.secondary).monospacedDigit()
+                }
+                if let v = updater.newVersion, let url = updater.releaseURL {
+                    HStack {
+                        Label("Version \(v) is available", systemImage: "arrow.down.circle.fill").foregroundStyle(.green)
+                        Spacer()
+                        Link("Download", destination: url)
+                    }
+                } else {
+                    Button(updater.checking ? "Checking\u{2026}" : "Check for updates") {
+                        Task { await updater.check() }
+                    }.disabled(updater.checking)
+                }
+            } header: { Text("Updates") }
 
             Section {
                 HStack {
