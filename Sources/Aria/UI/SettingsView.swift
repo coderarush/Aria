@@ -4,7 +4,7 @@ import SwiftUI
 struct SettingsView: View {
     enum Section: String, CaseIterable, Identifiable {
         case general = "General", voice = "Voice", conversation = "Conversation",
-             apiKey = "API Key", memory = "Memory", tools = "Tools", dynamic = "Dynamic", brain = "Brain", mirror = "Mirror", crew = "Crew"
+             apiKey = "API Key", memory = "Memory", tools = "Tools", dynamic = "Dynamic", brain = "Brain", mirror = "Mirror", crew = "Crew", license = "License"
         var id: String { rawValue }
         var icon: String {
             switch self {
@@ -18,6 +18,7 @@ struct SettingsView: View {
             case .brain:        return "brain"
             case .mirror:       return "rectangle.on.rectangle"
             case .crew:         return "person.3"
+            case .license:      return "checkmark.seal"
             }
         }
     }
@@ -53,7 +54,64 @@ struct SettingsView: View {
         case .brain:        BrainTab()
         case .mirror:       MirrorTab()
         case .crew:         CrewSettingsTab()
+        case .license:      LicenseTab()
         }
+    }
+}
+
+// MARK: License
+
+struct LicenseTab: View {
+    @StateObject private var lic = LicenseManager.shared
+    @State private var key = ""
+    @State private var msg = ""
+    @State private var busy = false
+
+    private var statusText: String {
+        switch lic.status {
+        case .licensed: return "Licensed"
+        case .trial(let d): return "Trial — \(d) day\(d == 1 ? "" : "s") left"
+        case .expired: return "Trial expired"
+        }
+    }
+    private var statusColor: Color {
+        switch lic.status { case .licensed: return .green; case .trial: return .secondary; case .expired: return .orange }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("License").font(.title3.bold())
+            Text("One purchase, kept forever. Activate the key from your receipt.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 4).padding(.bottom, 8)
+
+        Form {
+            Section {
+                HStack { Text("Status"); Spacer(); Text(statusText).foregroundStyle(statusColor) }
+            }
+            if !lic.isLicensed {
+                Section {
+                    TextField("License key", text: $key)
+                    HStack {
+                        Button(busy ? "Activating\u{2026}" : "Activate") { activate() }
+                            .buttonStyle(.borderedProminent).disabled(busy || key.isEmpty)
+                        Link("Buy a license", destination: URL(string: "https://github.com/coderarush/Aria")!)
+                    }
+                    if !msg.isEmpty { Text(msg).font(.caption).foregroundStyle(.secondary) }
+                } header: { Text("Activate") }
+            } else {
+                Section {
+                    Button("Deactivate on this Mac", role: .destructive) { lic.deactivate(); msg = "" }
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private func activate() {
+        busy = true; msg = ""
+        Task { let r = await lic.activate(key: key); msg = r.message; busy = false }
     }
 }
 
