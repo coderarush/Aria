@@ -12,3 +12,12 @@ agentdb.rvf
 agentdb.rvf.lock
 *.rvf
 *.rvf.lock
+
+# Design skills (downloaded for local use, not product source)
+.claude/skills/
+
+# Icon build intermediates (AppIcon.icns is committed, the rest are generated)
+Resources/AppIcon.iconset/
+Resources/icon-1024.png
+site/node_modules/
+site/dist/

@@ -13,6 +13,7 @@ final class AriaController {
     private let voice = VoiceEngine()
     private let bargeController = BargeController()
     private let speakerGate = SpeakerGate()
+    private let computerUseIndicator = ComputerUseIndicator()
     private let orchestrator = AgentOrchestrator()
     private let patternEngine = PatternEngine()
     private var panel: IslandPanel?
@@ -269,6 +270,18 @@ final class AriaController {
         NotificationCenter.default.addObserver(forName: .ariaEnrollVoice, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.enrollOwnerVoice() }
         }
+        // Computer-use: show the visible "controlling your Mac" indicator while ui_* runs.
+        computerUseIndicator.onStop = { [weak self] in
+            self?.currentTurnTask?.cancel()
+            self?.taskActive = false
+            self?.streamVoice.stop()
+            self?.wakeEngine.isSuspended = false
+        }
+        NotificationCenter.default.addObserver(forName: .ariaUIActivity, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.computerUseIndicator.pulse() }
+        }
+        // Quiet update check on launch (surfaces in Settings → General).
+        Task { await UpdateChecker.shared.check() }
         applyVoiceSettings()
         applyConversationSettings()
         voice.audioBus = audioBus
@@ -316,12 +329,18 @@ final class AriaController {
         // recognizer (audio thread → nonisolated acceptCleanedFrame) and to the
         // BargeController, which watches its energy while Aria speaks. On talk-over
         // it stops her and re-arms to capture what you say.
-        audioBus.onCleanedFrame = { [weak self] frame in
-            self?.wakeEngine.acceptCleanedFrame(frame)
-            self?.bargeController.feed(frame)
+        // These run on the AUDIO thread — capture the consumers directly so we never
+        // read a main-actor-isolated property (self.wakeEngine/…) off the main actor,
+        // which traps in release builds. acceptCleanedFrame/feed/setPlaying are all
+        // nonisolated + internally locked, so calling them from the audio thread is safe.
+        let wake = wakeEngine
+        let barge = bargeController
+        audioBus.onCleanedFrame = { frame in
+            wake.acceptCleanedFrame(frame)
+            barge.feed(frame)
         }
-        audioBus.onPlayStateChange = { [weak self] playing in
-            self?.bargeController.setPlaying(playing)
+        audioBus.onPlayStateChange = { playing in
+            barge.setPlaying(playing)
         }
         bargeController.onBarge = { [weak self] in
             Task { @MainActor in self?.handleBarge() }

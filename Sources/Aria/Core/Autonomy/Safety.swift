@@ -4,10 +4,15 @@ import Foundation
 /// confirm, even in fully-autonomous mode.
 enum Safety {
     private static let dangerTools: Set<String> = ["send_mail", "send_message", "send", "delete_file"]
+    /// Tools that never perform a destructive action, so their input text (which may
+    /// happen to contain "delete", "send", etc. as content) must not trip the gate.
+    private static let safeTools: Set<String> = ["ui_read", "ui_type", "ui_scroll",
+                                                 "web_search", "web_fetch", "file_read"]
     private static let dangerWords = ["rm ", "rm -", "delete", "remove", "send", "email", "post",
                                       "overwrite", "drop ", "kill", "shutdown", "format", "purchase", "pay"]
     static func isDestructive(tool: String, input: [String: String]) -> Bool {
         if dangerTools.contains(tool) { return true }
+        if safeTools.contains(tool) { return false }   // reads/searches/typing aren't destructive
         let blob = (tool + " " + input.values.joined(separator: " ")).lowercased()
         return dangerWords.contains { blob.contains($0) }
     }

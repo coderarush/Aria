@@ -81,6 +81,6 @@ actor SubAgentRegistry {
     }
 
     static func builtins() -> [SubAgent] {
-        [ResearchAgent(), LyraAgent(), CodeWriterAgent(), CometAgent(), TaskPlannerAgent()]
+        [ResearchAgent(), LyraAgent(), CodeWriterAgent(), CometAgent(), TaskPlannerAgent(), PilotAgent()]
     }
 }
