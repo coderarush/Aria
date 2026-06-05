@@ -8,6 +8,7 @@ struct IslandView: View {
     @ObservedObject var viewModel: IslandViewModel
     @State private var rotate = 0.0
     @State private var breathe = false
+    @State private var pulse = false   // v8: springy "pop" on every state change
 
     private var active: Bool { viewModel.isVisible && viewModel.state != .idle }
 
@@ -43,7 +44,7 @@ struct IslandView: View {
                 .allowsHitTesting(false)
             bubbles
                 .opacity(active ? 1 : 0)
-                .scaleEffect(active ? 1 : 0.6)
+                .scaleEffect((active ? 1 : 0.6) * (pulse ? 1.07 : 1.0))
                 .animation(.spring(response: 0.6, dampingFraction: 0.6), value: active)
                 .allowsHitTesting(false)
         }
@@ -52,6 +53,13 @@ struct IslandView: View {
         .onAppear {
             withAnimation(.linear(duration: 18).repeatForever(autoreverses: false)) { rotate = 360 }
             withAnimation(.easeInOut(duration: 2.6).repeatForever(autoreverses: true)) { breathe = true }
+        }
+        .onChange(of: viewModel.state) { _, _ in
+            // A lively springy pop whenever she changes state (wake, think, answer).
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.45)) { pulse = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
+                withAnimation(.spring(response: 0.55, dampingFraction: 0.7)) { pulse = false }
+            }
         }
     }
 
@@ -124,7 +132,7 @@ struct IslandView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .animation(.spring(response: 0.45, dampingFraction: 0.85), value: showCaption)
-        .animation(.spring(response: 0.45, dampingFraction: 0.85), value: viewModel.responseText)
+        .animation(.spring(response: 0.5, dampingFraction: 0.62), value: showCaption)
+        .animation(.spring(response: 0.5, dampingFraction: 0.7), value: viewModel.responseText)
     }
 }
