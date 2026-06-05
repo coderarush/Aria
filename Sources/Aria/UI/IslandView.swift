@@ -113,16 +113,27 @@ struct IslandView: View {
             let level = viewModel.state == .listening ? Double(min(max(viewModel.audioLevel, 0), 1)) : 0
             let speaking = viewModel.state == .responding ? Self.speechEnv(t) : 0
             let energy = level + speaking * 0.5   // mic while listening, her voice while talking
-            let busy = viewModel.state == .thinking || viewModel.state == .responding
+            let thinking = viewModel.state == .thinking
+            let busy = thinking || viewModel.state == .responding
             Canvas { ctx, size in
                 let pal = palette
                 let count = 9
                 for i in 0..<count {
                     let ph = Double(i) * 0.79
-                    // Drift along the bottom + sides, orbiting faster while busy.
-                    let speed = busy ? 0.55 : 0.28
-                    let x = size.width * (0.5 + 0.46 * sin(t * speed + ph))
-                    let y = size.height * (0.9 - 0.16 * Double(i % 3)) - sin(t * 0.9 + ph) * 26
+                    let x: Double, y: Double
+                    if thinking {
+                        // Thinking swirl: blobs gather into a rotating ring near the bottom
+                        // center — a clear "processing" signal, distinct from the idle drift.
+                        let cx = size.width * 0.5, cy = size.height * 0.8
+                        let ang = t * 1.5 + Double(i) * (2.0 * .pi / Double(count))
+                        x = cx + cos(ang) * 120
+                        y = cy + sin(ang) * 58
+                    } else {
+                        // Drift along the bottom + sides, orbiting faster while she speaks.
+                        let speed = busy ? 0.55 : 0.28
+                        x = size.width * (0.5 + 0.46 * sin(t * speed + ph))
+                        y = size.height * (0.9 - 0.16 * Double(i % 3)) - sin(t * 0.9 + ph) * 26
+                    }
                     let pulse = 1 + 0.22 * sin(t * 1.5 + ph) + energy * 0.6
                     let r = (30 + Double(i % 4) * 18) * pulse
                     let c = pal[i % max(pal.count, 1)].opacity((0.30 + energy * 0.35) * Double(intensity))
