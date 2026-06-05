@@ -17,6 +17,24 @@ actor GeminiClient {
         var currentApp: String
         var time: Date
         var username: String
+        // Ambient screen awareness (empty unless granted + non-private). Lets the model
+        // resolve "this / here / her / the selection" without asking.
+        var windowTitle: String = ""
+        var selection: String = ""
+        var focusedField: String = ""
+
+        /// Extra ambient lines for the SYSTEM CONTEXT block — only what's known, so the
+        /// prompt stays tight when nothing is focused.
+        var ambientLines: String {
+            var out = ""
+            if !windowTitle.isEmpty { out += "\n- Active window: “\(windowTitle)”" }
+            if !focusedField.isEmpty { out += "\n- Focused field: \(focusedField)" }
+            if !selection.isEmpty {
+                let s = selection.count > 600 ? String(selection.prefix(600)) + "…" : selection
+                out += "\n- Selected text: “\(s)”"
+            }
+            return out
+        }
     }
 
     private let models: [String]
@@ -385,7 +403,7 @@ actor GeminiClient {
         SYSTEM CONTEXT:
         - Current app: \(context.currentApp)
         - Time: \(ISO8601DateFormatter().string(from: context.time))
-        - User: \(context.username)
+        - User: \(context.username)\(context.ambientLines)
         \(toolsBlock)
 
         RECENT CONVERSATION:
@@ -474,5 +492,12 @@ actor GeminiClient {
     work in multiple steps: call a tool, see the result, then continue or give your \
     final spoken answer. If you genuinely need more information, ask one brief \
     clarifying question instead of guessing.
+
+    SYSTEM CONTEXT tells you what the user is looking at right now — the active app, \
+    window, focused field, and any selected text. Use it to resolve words like \
+    "this", "that", "here", "her", or "the selection" without asking what they mean. \
+    If they say "summarize this" and there's selected text, summarize that text; if \
+    not, read the screen. When they reference the thing in front of them, act on the \
+    SYSTEM CONTEXT — don't make them describe it.
     """
 }

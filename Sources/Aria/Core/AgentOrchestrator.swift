@@ -48,7 +48,7 @@ actor AgentOrchestrator {
 
         let screenshot: Data? = privacyMode ? nil : try? await screen.capturePrimaryJPEG()
         var history = await memory.recentContext()
-        let context = await Self.currentSystemContext()
+        let context = await Self.currentSystemContext(includeScreen: !privacyMode)
         let maxSteps = 4
 
         do {
@@ -250,7 +250,7 @@ actor AgentOrchestrator {
         let screenshot: Data? = wantsScreen ? (try? await screen.capturePrimaryJPEG()) : nil
         var history = await memory.recentContext()
         history = Array(history.suffix(8))
-        let context = await Self.currentSystemContext()
+        let context = await Self.currentSystemContext(includeScreen: !privacyMode)
         let specs = await registry.specs()
         // Recall relevant long-term facts and prime the turn with them.
         let recalled = await longTerm.recall(for: command, limit: 4)
@@ -323,12 +323,20 @@ actor AgentOrchestrator {
 
     // MARK: System context
 
-    @MainActor
-    static func currentSystemContext() -> GeminiClient.SystemContext {
+    @MainActor static func currentSystemContext(includeScreen: Bool = false) -> GeminiClient.SystemContext {
         let app = NSWorkspace.shared.frontmostApplication?.localizedName ?? "Unknown"
-        return GeminiClient.SystemContext(
+        var ctx = GeminiClient.SystemContext(
             currentApp: app,
             time: Date(),
             username: NSUserName())
+        // Ambient screen awareness — only when not in privacy mode (selected text can be
+        // sensitive). Cheap AX read; nothing leaves the machine that a screenshot wouldn't.
+        if includeScreen {
+            let s = ScreenContext.snapshot()
+            ctx.windowTitle = s.windowTitle
+            ctx.selection = s.selectedText
+            ctx.focusedField = s.focusedRole
+        }
+        return ctx
     }
 }
