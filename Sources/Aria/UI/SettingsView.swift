@@ -1,6 +1,55 @@
 import SwiftUI
 
-/// Aria's settings window — sidebar layout.
+/// Crash-safe stand-ins for Form/Section. On macOS 26, SwiftUI's Form/List build a lazy
+/// DynamicViewList whose row evaluation calls swift_task_isCurrentExecutorWithFlags and
+/// crashes with EXC_BAD_ACCESS (the executor-isolation check dereferences a bad ref). These
+/// are plain, eager VStacks — same grouped look, but no List under the hood, so the body
+/// builds on the main actor and never trips the check.
+private struct SForm<Content: View>: View {
+    @ViewBuilder var content: Content
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) { content }
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct SSection<Content: View>: View {
+    var title: String?
+    @ViewBuilder var content: Content
+    init(_ title: String? = nil, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            if let title {
+                Text(title).font(.caption).fontWeight(.semibold)
+                    .foregroundStyle(.secondary).textCase(.uppercase)
+            }
+            VStack(alignment: .leading, spacing: 12) { content }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.06)))
+        }
+    }
+}
+
+/// A tab heading (title + subtitle).
+private struct TabHead: View {
+    let title: String
+    let subtitle: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.title3.bold())
+            Text(subtitle).font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 4).padding(.bottom, 8)
+    }
+}
+
+/// Aria's settings window — plain sidebar + scrolling detail. Deliberately no
+/// NavigationSplitView / List / Form anywhere (see SForm above for why).
 struct SettingsView: View {
     enum Section: String, CaseIterable, Identifiable {
         case general = "General", voice = "Voice", conversation = "Conversation",
@@ -26,18 +75,7 @@ struct SettingsView: View {
     @State private var selection: Section = .general
 
     var body: some View {
-        // A plain sidebar HStack instead of NavigationSplitView. NavigationSplitView
-        // hosts an NSSplitViewController whose viewDidLoad runs a *synchronous*
-        // systemLayoutSizeFittingSize, forcing re-entrant SwiftUI list evaluation
-        // during AppKit constraint solving — that path intermittently crashed in
-        // swift_task_isCurrentExecutorWithFlagsImpl (EXC_BAD_ACCESS) when the window
-        // was opened from the menu-bar item. This keeps the same look without the
-        // NSSplitViewController layout path.
         HStack(spacing: 0) {
-            // Plain button column instead of List(selection:). SwiftUI's List builds a
-            // DynamicViewList whose row evaluation hits the Swift-6 executor-isolation
-            // check and crashes (see Info.plist / AriaApp legacy override). This avoids
-            // the List code path entirely — belt-and-suspenders with the runtime override.
             ScrollView {
                 VStack(spacing: 2) {
                     ForEach(Section.allCases) { section in
@@ -45,8 +83,7 @@ struct SettingsView: View {
                             selection = section
                         } label: {
                             HStack(spacing: 9) {
-                                Image(systemName: section.icon)
-                                    .frame(width: 18)
+                                Image(systemName: section.icon).frame(width: 18)
                                 Text(section.rawValue)
                                 Spacer(minLength: 0)
                             }
@@ -112,19 +149,13 @@ struct LicenseTab: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("License").font(.title3.bold())
-            Text("One purchase, kept forever. Activate the key from your receipt.")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 4).padding(.bottom, 8)
-
-        Form {
-            Section {
+        TabHead(title: "License", subtitle: "One purchase, kept forever. Activate the key from your receipt.")
+        SForm {
+            SSection {
                 HStack { Text("Status"); Spacer(); Text(statusText).foregroundStyle(statusColor) }
             }
             if !lic.isLicensed {
-                Section {
+                SSection("Activate") {
                     TextField("License key", text: $key)
                     HStack {
                         Button(busy ? "Activating\u{2026}" : "Activate") { activate() }
@@ -132,14 +163,13 @@ struct LicenseTab: View {
                         Link("Buy a license", destination: URL(string: "https://github.com/coderarush/Aria")!)
                     }
                     if !msg.isEmpty { Text(msg).font(.caption).foregroundStyle(.secondary) }
-                } header: { Text("Activate") }
+                }
             } else {
-                Section {
+                SSection {
                     Button("Deactivate on this Mac", role: .destructive) { lic.deactivate(); msg = "" }
                 }
             }
         }
-        .formStyle(.grouped)
     }
 
     private func activate() {
@@ -155,18 +185,9 @@ struct GeneralSettingsTab: View {
     @StateObject private var updater = UpdateChecker.shared
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Appearance & Behavior")
-                .font(.title3.bold())
-            Text("Customize Aria\u{2019}s look and runtime behavior.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 4)
-        .padding(.bottom, 8)
-
-        Form {
-            Section {
+        TabHead(title: "Appearance & Behavior", subtitle: "Customize Aria\u{2019}s look and runtime behavior.")
+        SForm {
+            SSection("Accent Color") {
                 Picker("Accent", selection: Binding(
                     get: { settings.accentChoiceRaw },
                     set: { settings.accentChoiceRaw = $0 })) {
@@ -186,9 +207,9 @@ struct GeneralSettingsTab: View {
                 Picker("Aurora palette", selection: $settings.glowPaletteID) {
                     ForEach(Theme.glowPalettes, id: \.id) { Text($0.name).tag($0.id) }
                 }
-            } header: { Text("Accent Color") }
+            }
 
-            Section {
+            SSection("Updates") {
                 HStack {
                     Text("Version")
                     Spacer()
@@ -205,9 +226,9 @@ struct GeneralSettingsTab: View {
                         Task { await updater.check() }
                     }.disabled(updater.checking)
                 }
-            } header: { Text("Updates") }
+            }
 
-            Section {
+            SSection("Behavior") {
                 HStack {
                     Text("Response duration")
                     Slider(value: $settings.responseDuration, in: 3...20, step: 1)
@@ -215,9 +236,8 @@ struct GeneralSettingsTab: View {
                 }
                 Toggle("Privacy mode (disable screen capture)", isOn: $settings.privacyMode)
                 Toggle("Launch at login", isOn: $settings.launchAtLogin)
-            } header: { Text("Behavior") }
+            }
         }
-        .formStyle(.grouped)
     }
 
     private let customTag = "custom:#3B82F6"
@@ -243,18 +263,9 @@ struct ConversationSettingsTab: View {
     @State private var axOK = AXReader.hasPermission
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Conversation")
-                .font(.title3.bold())
-            Text("How Aria listens and lets you interrupt.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 4)
-        .padding(.bottom, 8)
-
-        Form {
-            Section {
+        TabHead(title: "Conversation", subtitle: "How Aria listens and lets you interrupt.")
+        SForm {
+            SSection {
                 HStack {
                     Text("End conversation after silence")
                     Slider(value: $settings.conversationSilenceTimeout, in: 5...20, step: 1)
@@ -264,7 +275,7 @@ struct ConversationSettingsTab: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
-            Section {
+            SSection("Barge-in") {
                 Toggle("Let me interrupt her (talk-over)", isOn: $settings.bargeInEnabled)
                 if settings.bargeInEnabled {
                     HStack {
@@ -276,22 +287,22 @@ struct ConversationSettingsTab: View {
                     Text("Start talking while Aria is speaking and she'll stop and listen — powered by on-device echo cancellation. Higher sensitivity interrupts more easily (but may trigger on background noise).")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-            } header: { Text("Barge-in") }
+            }
 
-            Section {
+            SSection("Play-by-play") {
                 Toggle("Narrate steps aloud", isOn: $settings.spokenStepNarration)
                 Text("During a multi-step task, Aria says a short play-by-play as she works (“Searching the web…”, “Saving your note…”). Turn off to keep her quiet between the plan and the result.")
                     .font(.caption).foregroundStyle(.secondary)
-            } header: { Text("Play-by-play") }
+            }
 
-            Section {
+            SSection("Speaker verification") {
                 Toggle("Only respond to my voice", isOn: $settings.speakerVerificationEnabled)
                 Button("Teach Aria my voice") { NotificationCenter.default.post(name: .ariaEnrollVoice, object: nil) }
                 Text("Experimental. After enabling, click “Teach Aria my voice”, then say “Hey Aria” a few times. She'll bias toward your voice and ignore others. Basic on-device voiceprint — not a hard security guarantee.")
                     .font(.caption).foregroundStyle(.secondary)
-            } header: { Text("Speaker verification") }
+            }
 
-            Section {
+            SSection("Computer use") {
                 HStack {
                     Text("Accessibility access")
                     Spacer()
@@ -306,9 +317,8 @@ struct ConversationSettingsTab: View {
                 }
                 Text("Lets Aria see and operate your apps \u{2014} click, type, run menus, scroll \u{2014} by voice. Required for computer-use commands. Aria asks before anything destructive and shows an indicator while in control, which you can stop.")
                     .font(.caption).foregroundStyle(.secondary)
-            } header: { Text("Computer use") }
+            }
         }
-        .formStyle(.grouped)
         .onAppear { axOK = AXReader.hasPermission }
     }
 }
@@ -329,18 +339,9 @@ struct APIKeyTab: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Your Gemini Keys")
-                .font(.title3.bold())
-            Text("Stored securely in the macOS Keychain. Never transmitted by Aria.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 4)
-        .padding(.bottom, 8)
-
-        Form {
-            Section {
+        TabHead(title: "Your Gemini Keys", subtitle: "Stored securely in the macOS Keychain. Never transmitted by Aria.")
+        SForm {
+            SSection("API Keys") {
                 TextEditor(text: $key)
                     .font(.system(.body, design: .monospaced))
                     .frame(minHeight: 90)
@@ -357,31 +358,30 @@ struct APIKeyTab: View {
                 if !status.isEmpty { Text(status).foregroundStyle(.green).font(.caption) }
                 Text("One key per line. Aria rotates across them — when one hits its daily free-tier limit, she switches to the next. **Click Save** after pasting.")
                     .font(.caption).foregroundStyle(.secondary)
-            } header: { Text("API Keys") }
+            }
 
-            Section {
+            SSection("More free quota") {
                 Text("Get free keys at aistudio.google.com. Each Google project has its own free daily quota, so adding 2–3 keys from different projects multiplies how much you can do for free.")
                     .font(.caption).foregroundStyle(.secondary)
-            } header: { Text("More free quota") }
+            }
 
-            Section {
+            SSection("Free fallback providers") {
                 SecureField("Groq key (groq.com — free, fast)", text: $groq)
                 SecureField("Cerebras key (cerebras.ai — free, fast)", text: $cerebras)
                 SecureField("OpenRouter key (openrouter.ai — free tier)", text: $openRouter)
                 Text("When your Gemini quota runs out, Aria automatically continues on these free, fast providers — so she keeps working. Each is free to sign up; add any you like, then Save.")
                     .font(.caption).foregroundStyle(.secondary)
-            } header: { Text("Free fallback providers") }
+            }
 
-            Section {
+            SSection("Local model") {
                 Toggle("Use a local model when everything else is out (Ollama)", isOn: $settings.localModelEnabled)
                 if settings.localModelEnabled {
                     TextField("Ollama model", text: $settings.localModelName)
                     Text("Last resort — works offline. Requires Ollama running (ollama.com) with the model pulled. Slower, but never hits a limit.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-            } header: { Text("Local model") }
+            }
         }
-        .formStyle(.grouped)
         .onAppear {
             key = KeychainManager.read(account: KeychainKey.geminiAPIKey) ?? ""
             groq = KeychainManager.read(account: KeychainKey.groqAPIKey) ?? ""
@@ -409,16 +409,9 @@ struct MemorySettingsTab: View {
     @State private var facts: [MemoryFact] = []
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("What Aria Remembers")
-                .font(.title3.bold())
-            Text("Durable facts Aria recalls across sessions. Say “remember that …” to add one.")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 4).padding(.bottom, 8)
-
-        Form {
-            Section {
+        TabHead(title: "What Aria Remembers", subtitle: "Durable facts Aria recalls across sessions. Say “remember that …” to add one.")
+        SForm {
+            SSection("Memories (\(facts.count))") {
                 if facts.isEmpty {
                     Text("Nothing remembered yet.").foregroundStyle(.secondary).font(.callout)
                 } else {
@@ -434,19 +427,19 @@ struct MemorySettingsTab: View {
                                 Task { await LongTermMemory.shared.forget(id: fact.id); await reload() }
                             } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
                         }
+                        Divider()
                     }
                 }
-            } header: { Text("Memories (\(facts.count))") }
+            }
 
             if !facts.isEmpty {
-                Section {
+                SSection {
                     Button("Forget everything", role: .destructive) {
                         Task { await LongTermMemory.shared.clear(); await reload() }
                     }
                 }
             }
         }
-        .formStyle(.grouped)
         .task { await reload() }
     }
 
@@ -462,18 +455,9 @@ struct ToolsTab: View {
     private let toolNames = ToolRegistry.builtins().map { type(of: $0).name }.sorted()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Tool Permissions")
-                .font(.title3.bold())
-            Text("Choose which built-in tools Aria can use on your behalf.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 4)
-        .padding(.bottom, 8)
-
-        Form {
-            Section {
+        TabHead(title: "Tool Permissions", subtitle: "Choose which built-in tools Aria can use on your behalf.")
+        SForm {
+            SSection("Enabled Tools") {
                 ForEach(toolNames, id: \.self) { name in
                     Toggle(name, isOn: Binding(
                         get: { !settings.disabledTools.contains(name) },
@@ -482,9 +466,8 @@ struct ToolsTab: View {
                             else { settings.disabledTools.insert(name) }
                         }))
                 }
-            } header: { Text("Enabled Tools") }
+            }
         }
-        .formStyle(.grouped)
     }
 }
 
@@ -494,30 +477,19 @@ struct DynamicToolsTab: View {
     @State private var s = DynamicToolSettings.load()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Dynamic Tools")
-                .font(.title3.bold())
-            Text("Let Aria generate and run code to extend its own capabilities.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 4)
-        .padding(.bottom, 8)
-
-        Form {
-            Section {
+        TabHead(title: "Dynamic Tools", subtitle: "Let Aria generate and run code to extend its own capabilities.")
+        SForm {
+            SSection("Execution") {
                 Toggle("Allow Aria to write and run code", isOn: $s.allowCodeExecution)
                 Toggle("Show code before running", isOn: $s.showCodeBeforeRun)
                 Toggle("Ask before saving new tools", isOn: $s.askBeforeSaving)
                 Toggle("Sync community tools", isOn: $s.syncCommunityTools)
-            } header: { Text("Execution") }
-
-            Section {
+            }
+            SSection("Storage") {
                 Text("Generated tools live in Application Support/Aria/tools.")
                     .font(.caption).foregroundStyle(.secondary)
-            } header: { Text("Storage") }
+            }
         }
-        .formStyle(.grouped)
         .onChange(of: s.allowCodeExecution) { _, _ in s.save() }
         .onChange(of: s.showCodeBeforeRun) { _, _ in s.save() }
         .onChange(of: s.askBeforeSaving) { _, _ in s.save() }
@@ -531,18 +503,9 @@ struct BrainTab: View {
     @State private var s = LearningSettings.load()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("On-Device Learning")
-                .font(.title3.bold())
-            Text("Aria observes your patterns locally to get smarter over time.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 4)
-        .padding(.bottom, 8)
-
-        Form {
-            Section {
+        TabHead(title: "On-Device Learning", subtitle: "Aria observes your patterns locally to get smarter over time.")
+        SForm {
+            SSection("Behavior") {
                 Toggle("Learning enabled", isOn: $s.enabled)
                 Toggle("Pause all automations", isOn: $s.automationsPaused)
                 HStack {
@@ -550,16 +513,14 @@ struct BrainTab: View {
                     Slider(value: $s.sensitivity, in: 0.6...0.9, step: 0.05)
                     Text(label(for: s.sensitivity)).font(.caption).frame(width: 90, alignment: .trailing)
                 }
-            } header: { Text("Behavior") }
-
-            Section {
+            }
+            SSection("About") {
                 Text("Conservative requires more confidence before suggesting; Aggressive suggests sooner.")
                     .font(.caption).foregroundStyle(.secondary)
                 Text("All learning happens on-device. Nothing is sent anywhere.")
                     .font(.caption).foregroundStyle(.secondary)
-            } header: { Text("About") }
+            }
         }
-        .formStyle(.grouped)
         .onChange(of: s.enabled) { _, _ in s.save() }
         .onChange(of: s.automationsPaused) { _, _ in s.save() }
         .onChange(of: s.sensitivity) { _, _ in s.save() }
@@ -577,18 +538,9 @@ struct MirrorTab: View {
     @State private var portText = "8765"
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Mirror Bridge")
-                .font(.title3.bold())
-            Text("Stream Aria\u{2019}s context to companion apps on your local network.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 4)
-        .padding(.bottom, 8)
-
-        Form {
-            Section {
+        TabHead(title: "Mirror Bridge", subtitle: "Stream Aria\u{2019}s context to companion apps on your local network.")
+        SForm {
+            SSection("Connection") {
                 Toggle("Enable Mirror Bridge", isOn: $s.enabled)
                 TextField("Port", text: $portText)
                 HStack {
@@ -596,13 +548,11 @@ struct MirrorTab: View {
                     Text(s.enabled ? MirrorBridge.ConnectionState.notConnected.rawValue : "Disabled")
                         .foregroundStyle(.secondary)
                 }
-            } header: { Text("Connection") }
-
-            Section {
+            }
+            SSection("Help") {
                 Text("Set-up guide coming soon.").font(.caption).foregroundStyle(.secondary)
-            } header: { Text("Help") }
+            }
         }
-        .formStyle(.grouped)
         .onAppear { portText = String(s.port) }
         .onChange(of: s.enabled) { _, _ in persist() }
         .onChange(of: portText) { _, _ in persist() }
@@ -620,29 +570,21 @@ struct CrewSettingsTab: View {
     private let crew = SubAgentRegistry.crewInfo()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Crew")
-                .font(.title3.bold())
-            Text("Aria\u{2019}s specialist sub-agents \u{2014} each handles a kind of work.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 4)
-        .padding(.bottom, 8)
-
-        Form {
-            Section {
+        TabHead(title: "Crew", subtitle: "Aria\u{2019}s specialist sub-agents \u{2014} each handles a kind of work.")
+        SForm {
+            SSection {
                 ForEach(crew, id: \.name) { c in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(c.name).font(.headline)
                         Text(c.persona).font(.caption).foregroundStyle(.secondary)
                         Text(c.description).font(.caption2).foregroundStyle(.tertiary)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 2)
+                    if c.name != crew.last?.name { Divider() }
                 }
             }
         }
-        .formStyle(.grouped)
     }
 }
 
@@ -653,26 +595,16 @@ struct VoiceSettingsTab: View {
     private let geminiVoices = ["Kore", "Puck", "Charon", "Fenrir", "Aoede", "Leda", "Orus", "Zephyr"]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("How Aria Speaks")
-                .font(.title3.bold())
-            Text("Aria speaks with a natural Gemini voice.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 4)
-        .padding(.bottom, 8)
-
-        Form {
-            Section {
+        TabHead(title: "How Aria Speaks", subtitle: "Aria speaks with a natural Gemini voice.")
+        SForm {
+            SSection("Voice") {
                 Toggle("Speak responses aloud", isOn: $settings.voiceEnabled)
                 Picker("Voice", selection: $settings.geminiVoiceName) {
                     ForEach(geminiVoices, id: \.self) { Text($0).tag($0) }
                 }
                 Text("Aria uses Gemini's natural cloud voice (your Gemini key). If it's momentarily busy she stays quiet for that line — the caption always shows the reply.")
                     .font(.caption).foregroundStyle(.secondary)
-            } header: { Text("Voice") }
+            }
         }
-        .formStyle(.grouped)
     }
 }
