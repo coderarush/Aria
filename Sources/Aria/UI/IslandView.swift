@@ -12,6 +12,14 @@ struct IslandView: View {
 
     private var active: Bool { viewModel.isVisible && viewModel.state != .idle }
 
+    /// A synthetic, irregular "speech" envelope (~0…1) that makes the orb breathe like
+    /// she's talking while she responds. Detuned sines → an organic, non-repeating cadence.
+    /// (Stand-in until real TTS playback-amplitude metering lands — tunable on-device.)
+    static func speechEnv(_ t: Double) -> Double {
+        let e = 0.55 + 0.45 * (0.55 * sin(t * 8.0) + 0.30 * sin(t * 12.7) + 0.15 * sin(t * 5.3))
+        return max(0, min(1, e))
+    }
+
     /// Palette for the ring. Looping the first color to the end makes the angular
     /// gradient seamless (no hard seam where it wraps).
     private var palette: [Color] {
@@ -103,6 +111,8 @@ struct IslandView: View {
         TimelineView(.animation) { tl in
             let t = tl.date.timeIntervalSinceReferenceDate
             let level = viewModel.state == .listening ? Double(min(max(viewModel.audioLevel, 0), 1)) : 0
+            let speaking = viewModel.state == .responding ? Self.speechEnv(t) : 0
+            let energy = level + speaking * 0.5   // mic while listening, her voice while talking
             let busy = viewModel.state == .thinking || viewModel.state == .responding
             Canvas { ctx, size in
                 let pal = palette
@@ -113,9 +123,9 @@ struct IslandView: View {
                     let speed = busy ? 0.55 : 0.28
                     let x = size.width * (0.5 + 0.46 * sin(t * speed + ph))
                     let y = size.height * (0.9 - 0.16 * Double(i % 3)) - sin(t * 0.9 + ph) * 26
-                    let pulse = 1 + 0.22 * sin(t * 1.5 + ph) + level * 0.6
+                    let pulse = 1 + 0.22 * sin(t * 1.5 + ph) + energy * 0.6
                     let r = (30 + Double(i % 4) * 18) * pulse
-                    let c = pal[i % max(pal.count, 1)].opacity((0.30 + level * 0.35) * Double(intensity))
+                    let c = pal[i % max(pal.count, 1)].opacity((0.30 + energy * 0.35) * Double(intensity))
                     ctx.fill(Path(ellipseIn: CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)), with: .color(c))
                 }
             }
@@ -131,8 +141,9 @@ struct IslandView: View {
         TimelineView(.animation) { tl in
             let t = tl.date.timeIntervalSinceReferenceDate
             let level = viewModel.state == .listening ? Double(min(max(viewModel.audioLevel, 0), 1)) : 0
+            let speaking = viewModel.state == .responding ? Self.speechEnv(t) : 0
             let busy = viewModel.state == .thinking
-            let s = 1 + 0.07 * sin(t * (busy ? 4.0 : 2.0)) + level * 0.38
+            let s = 1 + 0.07 * sin(t * (busy ? 4.0 : 2.0)) + level * 0.38 + speaking * 0.26
             let c0 = palette.first ?? viewModel.accent
             let c1 = palette.count > 1 ? palette[1] : c0
             Circle()
@@ -140,7 +151,7 @@ struct IslandView: View {
                                      center: .init(x: 0.4, y: 0.36), startRadius: 1, endRadius: 28))
                 .frame(width: 54, height: 54)
                 .scaleEffect(s)
-                .shadow(color: c0.opacity(0.32), radius: 14)
+                .shadow(color: c0.opacity(0.32 + speaking * 0.18), radius: 14 + speaking * 8)
         }
         .frame(width: 80, height: 80)
     }

@@ -2,6 +2,16 @@ import XCTest
 @testable import Aria
 
 final class ComputerUseTests: XCTestCase {
+    func testCanTypeIntoEditableRolesOnly() {
+        XCTAssertTrue(AXReader.canTypeInto(focusedRole: "AXTextField"))
+        XCTAssertTrue(AXReader.canTypeInto(focusedRole: "TextArea"))
+        XCTAssertTrue(AXReader.canTypeInto(focusedRole: "AXComboBox"))
+        XCTAssertFalse(AXReader.canTypeInto(focusedRole: "AXButton"))   // not a text field
+        XCTAssertFalse(AXReader.canTypeInto(focusedRole: ""))           // nothing focused
+        XCTAssertFalse(AXReader.canTypeInto(focusedRole: "AXStaticText"))
+        XCTAssertTrue(AXReader.canTypeInto(focusedRole: "AXWebArea"))   // unknown → permissive
+    }
+
     func testActionableRoles() {
         XCTAssertTrue(AXReader.isActionable(role: "AXButton"))
         XCTAssertTrue(AXReader.isActionable(role: "AXTextField"))

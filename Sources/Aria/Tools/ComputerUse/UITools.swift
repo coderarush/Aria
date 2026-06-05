@@ -55,6 +55,13 @@ struct UITypeTool: AriaTool {
         guard await MainActor.run(body: { AXReader.hasPermission }) else {
             return .fail("Accessibility access is off — enable Aria in System Settings → Privacy & Security → Accessibility.")
         }
+        // Verify a text field is actually focused first — otherwise the keystrokes vanish
+        // and we'd falsely report success. An honest failure lets the model click the field
+        // and self-heal (the autonomy engine retries the step).
+        let focusedRole = await MainActor.run { ScreenContext.snapshot().focusedRole }
+        guard AXReader.canTypeInto(focusedRole: focusedRole) else {
+            return .fail("No text field is focused — click the field you want to type into first, then I'll type.")
+        }
         await MainActor.run { NotificationCenter.default.post(name: .ariaUIActivity, object: nil); UIActuator.type(text) }
         return .ok("Typed \(text.count) characters.")
     }

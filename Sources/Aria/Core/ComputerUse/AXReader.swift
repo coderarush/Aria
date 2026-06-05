@@ -56,6 +56,22 @@ enum AXReader {
     ]
     static func isActionable(role: String) -> Bool { actionableRoles.contains(role) }
 
+    /// Can we type into the currently-focused element? Used to verify a text field is
+    /// actually focused BEFORE typing — otherwise keystrokes vanish into nothing and we'd
+    /// falsely report success. `role` is the AX role with or without the "AX" prefix.
+    /// Permissive for unknown roles (e.g. web areas) so we never block legitimate typing.
+    static func canTypeInto(focusedRole role: String) -> Bool {
+        let r = role.replacingOccurrences(of: "AX", with: "")
+        let editable: Set<String> = ["TextField", "TextArea", "ComboBox", "SearchField", "SecureTextField"]
+        if editable.contains(r) { return true }
+        // Clearly non-text targets (or nothing focused: "") → can't type here.
+        let blocked: Set<String> = ["", "Button", "Link", "CheckBox", "RadioButton", "MenuItem",
+                                    "MenuButton", "PopUpButton", "Image", "StaticText", "Slider",
+                                    "Cell", "Row", "Tab", "DisclosureTriangle", "Group", "Heading"]
+        if blocked.contains(r) { return false }
+        return true   // unknown role — allow rather than block real typing
+    }
+
     /// Pick the most useful human label from the available attributes.
     static func bestLabel(title: String, description: String, roleDescription: String, value: String) -> String {
         for c in [title, description, value, roleDescription] where !c.trimmingCharacters(in: .whitespaces).isEmpty {

@@ -479,6 +479,14 @@ final class AriaController {
                         self.taskViewModel.show(plan)
                     case .stepStarted(let i):
                         self.taskViewModel.markRunning(i)
+                        // Spoken play-by-play: a short "Searching the web…" as each step
+                        // begins. The plan-start narrate already gave the overview, so skip
+                        // the first step to avoid repeating it.
+                        if i > 0, AppSettings.shared.spokenStepNarration,
+                           let steps = self.taskViewModel.plan?.steps, steps.indices.contains(i) {
+                            let line = TaskNarration.spoken(for: steps[i].summary)
+                            if !line.isEmpty { self.streamVoice.enqueue(line) }
+                        }
                     case .stepFinished(let i, let ok, let result):
                         self.taskViewModel.markFinished(i, ok: ok, result: result)
                     case .narrate(let line):
