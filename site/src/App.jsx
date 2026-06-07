@@ -31,11 +31,15 @@ const features = [
   ["01", "She acts — she doesn't lecture.",
    "Ask, and Aria opens the app, finds the button, types the message, sends it. Other screen assistants narrate the steps and leave the doing to you. Aria does the doing."],
   ["02", "Lives in your menu bar.",
-   "No window to manage, no tab to keep open. Say “Hey Aria” and she rises from the corner, listens, and gets out of the way. On-device wake word — the mic never leaves your Mac to hear her name."],
+   "No window to manage, no tab to keep open. Say “Hey Aria” and she rises from the corner as a single living orb, listens, and gets out of the way. On-device wake word — the mic never leaves your Mac to hear her name."],
   ["03", "Sees what you're looking at.",
    "She reads the focused window, the selected text, the field you're in. “Summarize this”, “reply to her”, “translate the selection” just work — no screenshots to attach, nothing to explain."],
-  ["04", "Free, on your own key.",
-   "Aria runs on Google's free Gemini tier with your own key. No subscription, no metered usage, no card. It stays free because you bring the key — not because we resell you back your own data."],
+  ["04", "Plans the task, and talks as she works.",
+   "Give her a goal, not just a command. She breaks it into steps, runs them across your apps, checks her own work and retries when something slips — narrating a short play-by-play out loud so you always know where she is."],
+  ["05", "Remembers what matters.",
+   "Tell her once — “remember my sister's name is Mara”, “I write in British English” — and she keeps it across sessions, on top of the thread of the conversation you're in. She picks up where you left off."],
+  ["06", "Free, on your own key.",
+   "Aria runs on Google's free Gemini tier with your own key, and falls back across Groq, Cerebras and OpenRouter — or a fully local model — so she keeps working. No subscription, no metered usage, no card."],
 ];
 
 const phrases = [
@@ -58,6 +62,8 @@ const faqs = [
    "Yes. Aria runs on Google's Gemini free tier with your own key, and rotates across several keys plus free fallback providers (Groq, Cerebras, OpenRouter). No subscription, no metered usage, no card."],
   ["Does it send my screen to the cloud?",
    "Only when a task needs it, and only the relevant context. Wake-word detection is on-device, screenshots are never written to disk, and secure fields like passwords are hidden from her."],
+  ["Will she click things without asking?",
+   "Not the ones that matter. Anything irreversible — Send, Pay, Delete — stops and asks first. While she's driving your apps, a “Aria is controlling your Mac” indicator with a Stop button stays on screen. You're always in the loop."],
   ["How is this different from a screen-aware helper?",
    "Most of them are aware of your screen and guide you step by step. Aria does the steps — she operates the apps herself — and she's free and open source."],
   ["What do I need to run it?",
