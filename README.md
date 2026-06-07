@@ -113,11 +113,27 @@ Sources/Aria/
 ├── Tools/      AriaTool implementations (files, web, apps, EventKit, computer-use…)
 ├── UI/         IslandView + MorphingBlob, IslandViewModel, SettingsView, OnboardingView
 └── Utilities/  KeychainManager, PermissionsManager, AppSettings, Logger
+
+Sources/CSpeexDSP/   vendored Speex echo canceller (C) — the AEC far-end reference
+                     that lets her talk and listen at once without hearing herself
 ```
 
 Swift 6, SwiftUI + AppKit, structured concurrency (async/await + actors), MVVM. 166 unit
 tests cover the model protocol, agent loop, tool declarations, autonomy, computer-use logic,
 memory, voice chunking, and the wake/barge state machines.
+
+### Release builds — disable whole-module optimization
+
+**Build release with `-no-whole-module-optimization` (already wired into `make release` and
+`Package.swift`).** On Swift 6.3 / macOS 26.3, WMO miscompiles SwiftUI's actor-isolation:
+an optimized release build crashes on the **first tap of any SwiftUI control** (e.g. the
+Settings sidebar) inside `swift_task_isCurrentExecutorWithFlags` → `objc_msgSend`
+(`EXC_BAD_ACCESS`, null executor identity). Per-file `-O` is unaffected — only the
+cross-module pass breaks it, so we keep optimization and just turn WMO off; the cost is
+negligible here (the only hot real-time path, echo cancellation, is C). Debug builds are not
+WMO and never hit it. If this crash returns, the WMO flag was dropped from the build — not a
+code regression. (The runtime env var `SWIFT_IS_CURRENT_EXECUTOR_LEGACY_MODE_OVERRIDE=legacy`
+does **not** fix it in this toolchain; don't reach for it.)
 
 ## Privacy
 

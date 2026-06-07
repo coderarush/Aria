@@ -22,15 +22,6 @@
     <string>14.0</string>
     <key>LSUIElement</key>
     <true/>
-    <!-- Swift 6 made swift_task_isCurrentExecutorWithFlags() TRAP when it can't confirm
-         isolation, instead of returning the legacy best-effort answer. SwiftUI's List /
-         AttributeGraph internals hit this during layout and crash (EXC_BAD_ACCESS in
-         swift_task_isMainExecutor). "legacy" restores the non-trapping behavior. -->
-    <key>LSEnvironment</key>
-    <dict>
-        <key>SWIFT_IS_CURRENT_EXECUTOR_LEGACY_MODE_OVERRIDE</key>
-        <string>legacy</string>
-    </dict>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
