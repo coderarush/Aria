@@ -25,13 +25,26 @@ Google's Gemini free tier with your own key.
 - **Acts, doesn't narrate.** A real tool + sub-agent system: open apps, click and type in
   any app (Accessibility tree, with a vision fallback for canvas/Electron UIs), run menus,
   scroll, search and fetch the web, read and write files, calendar and reminders (EventKit),
-  clipboard, AppleScript, shell.
+  **email (Apple Mail — read, search, draft, send; works with Gmail accounts)**, clipboard,
+  AppleScript, shell.
 - **Ambient screen awareness.** Each turn she reads your focused window, the field you're in,
   and any selected text — so “summarize this”, “reply to her”, “translate the selection” just
-  work, with no screenshot to attach. Deep content escalates to on-command screen vision.
+  work, with no screenshot to attach. When she actually needs to *see* (a diagram, an image),
+  she looks on demand; she can also pull your **clipboard**, **Finder selection**, and **open
+  browser tabs** when the task calls for them — only when relevant, never by default.
 - **Multi-step autonomy with play-by-play.** She plans, executes step by step, retries and
   self-heals, and says a short spoken play-by-play as she works (“Searching the web…”).
-- **Remembers.** Durable cross-session facts (“remember that…”) plus conversation memory.
+  Outputs flow forward across the whole workflow, so “research A, research B, write a report”
+  actually combines both.
+- **Long-running & resumable.** Kick off a multi-step objective and walk away — she notifies
+  you when it's done, and if the app quits or crashes mid-task she offers to **resume right
+  where she left off**.
+- **Undo + a visible activity log.** Every action she takes is recorded (Settings → Activity),
+  and you can **undo** her last reversible change (a file write, a clipboard change). Say
+  “undo that.”
+- **Remembers — and uses it.** Durable cross-session facts (“remember that…”) plus
+  conversation memory, now fed into her planning so she applies what she knows about you
+  instead of asking twice.
 - **Free, on your key.** Bring a free [Gemini](https://aistudio.google.com) key (rotates
   across several), with automatic fallback to Groq / Cerebras / OpenRouter, and Ollama as an
   offline last resort. No subscription, no metered usage, no servers.
@@ -72,7 +85,7 @@ free Gemini key in Settings → API Key.
 ```bash
 git clone https://github.com/coderarush/Aria.git
 cd Aria
-make test       # 166 unit tests
+make test       # 195 unit tests
 make release    # assemble Aria.app (ad-hoc signed)
 open .build/Aria.app
 ```
@@ -94,10 +107,15 @@ Keychain and sent only to the provider you configured.
 | Say | Aria does |
 |---|---|
 | “Summarize this.” | reads the focused window / selection, summarizes |
-| “Reply to her — I'm running late.” | composes in the open mail thread |
+| “Check my email.” | reads your inbox (Apple Mail / Gmail) |
+| “Draft a reply to Sarah saying I'm running late.” | prepares a draft for you to review |
 | “Open my notes and start a list.” | drives apps across steps, by herself |
 | “What's on my calendar Thursday?” | EventKit, on-device |
-| “Translate the selection to French.” | acts on whatever's highlighted |
+| “Rename the selected files in Finder.” | acts on your Finder selection |
+| “Summarize the article I'm reading.” | reads the active browser tab |
+| “Format what I just copied.” | pulls your clipboard, on demand |
+| “Undo that.” | rolls back her last reversible change |
+| “Resume.” | picks up an interrupted task where it left off |
 | “Find the export button and click it.” | sees the screen and clicks it |
 
 ## Architecture
@@ -106,11 +124,14 @@ Keychain and sent only to the provider you configured.
 Sources/Aria/
 ├── App/        AriaApp, AppDelegate (menu bar), AriaController (wiring)
 ├── Core/       WakeWordEngine, AudioBus (+ AEC), GeminiClient, AgentOrchestrator,
-│   ├── ComputerUse/   AXReader, UIActuator, ScreenContext, VisionLocator
-│   ├── Autonomy/      AutonomyEngine, Safety, TaskNarration
+│              ActivityLog (durable, traceable), UndoStack (rollback)
+│   ├── ComputerUse/   AXReader, UIActuator, ScreenContext, VisionLocator, ContextRelevance
+│   ├── Autonomy/      AutonomyEngine, Safety, TaskNarration, TaskStore (resumable tasks)
+│   ├── Memory/        LongTermMemory, MemoryCapture
 │   ├── Licensing/     LicenseManager, UpdateChecker
 │   └── Providers/     OpenAI-compatible fallback (Groq/Cerebras/OpenRouter/Ollama)
-├── Tools/      AriaTool implementations (files, web, apps, EventKit, computer-use…)
+├── Tools/      AriaTool implementations (files, web, apps, EventKit, email/Mail,
+│              Finder, browser, computer-use, vision, undo…)
 ├── UI/         IslandView + MorphingBlob, IslandViewModel, SettingsView, OnboardingView
 └── Utilities/  KeychainManager, PermissionsManager, AppSettings, Logger
 
@@ -118,9 +139,10 @@ Sources/CSpeexDSP/   vendored Speex echo canceller (C) — the AEC far-end refer
                      that lets her talk and listen at once without hearing herself
 ```
 
-Swift 6, SwiftUI + AppKit, structured concurrency (async/await + actors), MVVM. 166 unit
+Swift 6, SwiftUI + AppKit, structured concurrency (async/await + actors), MVVM. 195 unit
 tests cover the model protocol, agent loop, tool declarations, autonomy, computer-use logic,
-memory, voice chunking, and the wake/barge state machines.
+memory, the activity log, undo, resumable-task journaling, context relevance, voice chunking,
+and the wake/barge state machines.
 
 ### Release builds — disable whole-module optimization
 

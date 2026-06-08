@@ -29,25 +29,29 @@ function Reveal({ children, i = 0, className }) {
 
 const features = [
   ["01", "She acts — she doesn't lecture.",
-   "Ask, and Aria opens the app, finds the button, types the message, sends it. Other screen assistants narrate the steps and leave the doing to you. Aria does the doing."],
+   "Ask, and Aria opens the app, finds the button, types the message, sends it. She drives your apps, files, calendar, and email — read your inbox, draft a reply, send it (after she asks). Other screen assistants narrate the steps and leave the doing to you. Aria does the doing."],
   ["02", "Lives in your menu bar.",
    "No window to manage, no tab to keep open. Say “Hey Aria” and she rises from the corner as a single living orb, listens, and gets out of the way. On-device wake word — the mic never leaves your Mac to hear her name."],
   ["03", "Sees what you're looking at.",
-   "She reads the focused window, the selected text, the field you're in. “Summarize this”, “reply to her”, “translate the selection” just work — no screenshots to attach, nothing to explain."],
-  ["04", "Plans the task, and talks as she works.",
-   "Give her a goal, not just a command. She breaks it into steps, runs them across your apps, checks her own work and retries when something slips — narrating a short play-by-play out loud so you always know where she is."],
-  ["05", "Remembers what matters.",
-   "Tell her once — “remember my sister's name is Mara”, “I write in British English” — and she keeps it across sessions, on top of the thread of the conversation you're in. She picks up where you left off."],
-  ["06", "Free, on your own key.",
+   "She reads the focused window, the selected text, the field you're in — and, when the task calls for it, your clipboard, your Finder selection, the tab you're reading, or a real look at the screen. “Summarize this”, “reply to her”, “rename these” just work — only when it's relevant, never by default."],
+  ["04", "Plans the task, runs it, finishes it.",
+   "Give her a goal, not just a command. She breaks it into steps, runs them across your apps, passes each result forward, checks her own work and retries when something slips — narrating a short play-by-play. Walk away: she notifies you when it's done, and if she's interrupted she picks the task back up where she left off."],
+  ["05", "Remembers — and uses it.",
+   "Tell her once — “remember my sister's name is Mara”, “I write in British English” — and she keeps it across sessions and brings it into her planning, so she applies what she knows instead of asking twice."],
+  ["06", "Safe, and reversible.",
+   "Anything irreversible — Send, Pay, Delete — asks first. Every action she takes is written to a visible activity log, and you can undo her last change: “undo that.”"],
+  ["07", "Free, on your own key.",
    "Aria runs on Google's free Gemini tier with your own key, and falls back across Groq, Cerebras and OpenRouter — or a fully local model — so she keeps working. No subscription, no metered usage, no card."],
 ];
 
 const phrases = [
   ["“Summarize this.”", "the article you're reading"],
-  ["“Reply to her — I'm running late.”", "the email that's open"],
-  ["“Open my notes and start a list.”", "across apps, by herself"],
+  ["“Check my email.”", "your inbox — Mail or Gmail"],
+  ["“Draft a reply — I'm running late.”", "ready for you to send"],
+  ["“Rename the selected files.”", "your Finder selection"],
   ["“What's on my calendar Thursday?”", "EventKit, on-device"],
-  ["“Translate the selection to French.”", "whatever's highlighted"],
+  ["“Undo that.”", "rolls back her last change"],
+  ["“Resume.”", "picks the task back up"],
   ["“Find the export button and click it.”", "she sees the screen"],
 ];
 

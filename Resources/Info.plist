@@ -9,9 +9,9 @@
     <key>CFBundleIdentifier</key>
     <string>com.aria.agent</string>
     <key>CFBundleVersion</key>
-    <string>5.0.0</string>
+    <string>8.0.0</string>
     <key>CFBundleShortVersionString</key>
-    <string>5.0.0</string>
+    <string>8.0.0</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleIconFile</key>
@@ -36,5 +36,7 @@
     <string>Aria creates and reads your reminders when you ask.</string>
     <key>NSContactsUsageDescription</key>
     <string>Aria looks up contacts when you ask it to message or email someone.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Aria controls apps like Mail, Finder, Notes, and your browser to complete tasks you ask for.</string>
 </dict>
 </plist>

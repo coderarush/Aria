@@ -9,8 +9,15 @@ import Foundation
 /// Reading/searching give Aria email *context* (the P3 gap). Drafting *prepares* a
 /// visible message but never sends. Sending goes through `send_mail`, which is gated
 /// for confirmation at the execution chokepoint (Safety lists it as destructive).
+/// Escape a string for an AppleScript double-quoted literal. Critically, AppleScript
+/// source can't contain raw newlines/tabs inside a string — a multi-line email body
+/// would break the script — so those become \n \r \t escapes too (backslashes first).
 private func asLiteral(_ s: String) -> String {
-    s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+    s.replacingOccurrences(of: "\\", with: "\\\\")
+     .replacingOccurrences(of: "\"", with: "\\\"")
+     .replacingOccurrences(of: "\n", with: "\\n")
+     .replacingOccurrences(of: "\r", with: "\\r")
+     .replacingOccurrences(of: "\t", with: "\\t")
 }
 
 /// Read the most recent inbox messages (sender, subject, date).
