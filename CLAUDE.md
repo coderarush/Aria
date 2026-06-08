@@ -2,6 +2,10 @@
 
 **Status:** Internal pre-release V8 → target V1 public launch.
 **Branch:** `aria-v8`.
+**Current focus:** P1 Reliability — done (single confirm gate, retry discipline,
+model-outage surfacing, unified destructive gate, durable activity log + UI, undo
+system). Now on **P2 Execution speed** (fast-model planning/recovery, parallel turn
+setup).
 
 ## What Aria is
 Execution-first intelligence + execution layer for macOS. Voice-first, keyboard-accessible.

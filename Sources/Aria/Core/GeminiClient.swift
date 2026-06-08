@@ -244,14 +244,15 @@ actor GeminiClient {
     /// Plain text/JSON generation — no code framing, no JSON-schema mandate. Used by
     /// the planner and by agents synthesizing prose. Spreads across model buckets via
     /// performWithFallback (free-tier safe). Returns the model's text, fences stripped.
-    func generateText(prompt: String, temperature: Double = 0.3) async throws -> String {
+    func generateText(prompt: String, temperature: Double = 0.3,
+                      preferredModel: String? = nil) async throws -> String {
         let payload: [String: Any] = [
             "contents": [["role": "user", "parts": [["text": prompt]]]],
             "generationConfig": ["temperature": temperature]
         ]
         let body = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
         do {
-            let data = try await performWithFallback(body: body)
+            let data = try await performWithFallback(body: body, preferredModel: preferredModel)
             return Self.stripCodeFences(Self.extractText(from: data))
         } catch {
             // Gemini exhausted/unavailable — continue on a free fallback provider.
@@ -337,7 +338,7 @@ actor GeminiClient {
     /// bucket and retries instead of grinding slow per-model backoff (which used to
     /// hang multi-call autonomous tasks for minutes). Only genuinely-broken models
     /// exhaust the attempt budget.
-    private func performWithFallback(body: Data) async throws -> Data {
+    private func performWithFallback(body: Data, preferredModel: String? = nil) async throws -> Data {
         keyRotator.update(keys: currentKeys())
         guard !keyRotator.isEmpty else { throw GeminiError.missingAPIKey }
         var lastError: Error = GeminiError.emptyResponse
@@ -349,7 +350,10 @@ actor GeminiClient {
             guard let apiKey = await reserveKey(paceIfBlocked: true) else {
                 quotaWaits += 1; continue   // all keys cooling — bounded, then fail fast
             }
-            let model = await reserveModel()
+            // Honor a caller's preferred (faster) model on the first try only; after
+            // any failure, fall back to normal rotation so we still route around it.
+            let firstTry = (attempt == 0 && quotaWaits == 0)
+            let model = await reserveModel(preferred: firstTry ? preferredModel : nil)
             let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent?key=\(apiKey)")!
             do {
                 let data = try await performOnce(url: url, body: body)

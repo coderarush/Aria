@@ -13,6 +13,11 @@ enum ModelRouter {
         return complexHints.contains(where: c.contains) ? "gemini-2.5-pro" : "gemini-2.5-flash-lite"
     }
 
+    /// Fast model for structured, latency-sensitive calls (autonomy planning and
+    /// recovery): low latency + higher free RPM, and it keeps `flash` free for the
+    /// heavier per-step work so steps wait less on the quota bucket.
+    static let fastStructured = "gemini-2.5-flash-lite"
+
     static func needsScreen(for command: String) -> Bool {
         let c = command.lowercased()
         return screenHints.contains(where: c.contains)

@@ -252,14 +252,20 @@ actor AgentOrchestrator {
             return
         }
 
+        // These five turn-setup reads are independent — run them concurrently so the
+        // first model call waits on the slowest, not the sum (lower time-to-first-token).
         let wantsScreen = !privacyMode && ModelRouter.needsScreen(for: command)
-        let screenshot: Data? = wantsScreen ? (try? await screen.capturePrimaryJPEG()) : nil
-        var history = await memory.recentContext()
-        history = Array(history.suffix(8))
-        let context = await systemContext(privacyMode: privacyMode)
-        let specs = await registry.specs()
-        // Recall relevant long-term facts and prime the turn with them.
-        let recalled = await longTerm.recall(for: command, limit: 4)
+        async let screenshotLoad: Data? = wantsScreen ? (try? await screen.capturePrimaryJPEG()) : nil
+        async let historyLoad = memory.recentContext()
+        async let contextLoad = systemContext(privacyMode: privacyMode)
+        async let specsLoad = registry.specs()
+        async let recalledLoad = longTerm.recall(for: command, limit: 4)   // relevant long-term facts
+
+        let screenshot = await screenshotLoad
+        var history = Array(await historyLoad.suffix(8))
+        let context = await contextLoad
+        let specs = await specsLoad
+        let recalled = await recalledLoad
         var transcript = command
         if !recalled.isEmpty {
             let known = recalled.map { "- \($0.text)" }.joined(separator: "\n")

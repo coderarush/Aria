@@ -12,4 +12,9 @@ final class ModelRouterTests: XCTestCase {
         XCTAssertTrue(ModelRouter.needsScreen(for: "what's on my screen"))
         XCTAssertFalse(ModelRouter.needsScreen(for: "tell me a joke"))
     }
+    // Planning/recovery use a fast model, never the slow `pro`.
+    func testFastStructuredIsALiteModel() {
+        XCTAssertEqual(ModelRouter.fastStructured, "gemini-2.5-flash-lite")
+        XCTAssertNotEqual(ModelRouter.fastStructured, "gemini-2.5-pro")
+    }
 }
