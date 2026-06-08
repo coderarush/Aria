@@ -257,7 +257,7 @@ actor AgentOrchestrator {
         let wantsScreen = !privacyMode && ModelRouter.needsScreen(for: command)
         async let screenshotLoad: Data? = wantsScreen ? (try? await screen.capturePrimaryJPEG()) : nil
         async let historyLoad = memory.recentContext()
-        async let contextLoad = systemContext(privacyMode: privacyMode)
+        async let contextLoad = systemContext(privacyMode: privacyMode, command: command)
         async let specsLoad = registry.specs()
         async let recalledLoad = longTerm.recall(for: command, limit: 4)   // relevant long-term facts
 
@@ -344,13 +344,19 @@ actor AgentOrchestrator {
     /// actor's executor (off the main thread) and time-bounded — so a slow Accessibility call
     /// can never freeze the main thread (which previously broke the whole turn: no reply, no
     /// voice, no re-arm, and a crash when Settings was opened afterward).
-    func systemContext(privacyMode: Bool) async -> GeminiClient.SystemContext {
+    func systemContext(privacyMode: Bool, command: String? = nil) async -> GeminiClient.SystemContext {
         var ctx = await MainActor.run { Self.currentSystemContext() }
         if !privacyMode, let pid = await MainActor.run(body: { AXReader.frontmostTarget()?.processIdentifier }) {
             let s = ScreenContext.snapshot(pid: pid)   // off-main, bounded
             ctx.windowTitle = s.windowTitle
             ctx.selection = s.selectedText
             ctx.focusedField = s.focusedRole
+        }
+        // Clipboard is attached only when the command refers to it — intentional, and
+        // it keeps private clipboard data out of every other turn.
+        if !privacyMode, let command, ContextRelevance.wantsClipboard(command) {
+            let clip = await MainActor.run { NSPasteboard.general.string(forType: .string) ?? "" }
+            ctx.clipboard = ScreenContext.cap(clip, 1000)
         }
         return ctx
     }

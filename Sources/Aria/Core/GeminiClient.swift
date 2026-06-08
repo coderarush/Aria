@@ -22,6 +22,9 @@ actor GeminiClient {
         var windowTitle: String = ""
         var selection: String = ""
         var focusedField: String = ""
+        /// Clipboard text — attached only when the command refers to it (see
+        /// ContextRelevance), so private clipboard data never rides along by default.
+        var clipboard: String = ""
 
         /// Extra ambient lines for the SYSTEM CONTEXT block — only what's known, so the
         /// prompt stays tight when nothing is focused.
@@ -32,6 +35,10 @@ actor GeminiClient {
             if !selection.isEmpty {
                 let s = selection.count > 600 ? String(selection.prefix(600)) + "…" : selection
                 out += "\n- Selected text: “\(s)”"
+            }
+            if !clipboard.isEmpty {
+                let s = clipboard.count > 600 ? String(clipboard.prefix(600)) + "…" : clipboard
+                out += "\n- Clipboard: “\(s)”"
             }
             return out
         }

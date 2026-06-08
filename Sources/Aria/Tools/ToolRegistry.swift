@@ -39,6 +39,7 @@ actor ToolRegistry {
             AppleScriptTool(),
             FileWriteTool(),
             FileReadTool(),
+            FinderSelectionTool(),
             ClipboardTool(),
             SaveNoteTool(),
             UndoTool(),

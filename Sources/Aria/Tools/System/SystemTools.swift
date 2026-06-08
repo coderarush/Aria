@@ -43,6 +43,38 @@ struct AppleScriptTool: AriaTool {
     }
 }
 
+/// The files/folders the user currently has selected in Finder — strong context for
+/// "rename these", "move this", "organize the selected files". On-demand (the model
+/// calls it when relevant) so it stays off the per-turn hot path; degrades gracefully
+/// if Automation access for Finder isn't granted.
+struct FinderSelectionTool: AriaTool {
+    static let name = "finder_selection"
+    static let description = "Get the files/folders the user has selected in Finder, as full paths. Use for 'these files', 'the selected files', 'rename/move/organize this'. Input: {}."
+    static let paramHints: [String: String] = [:]
+
+    func run(input: [String: String]) async throws -> ToolResult {
+        let script = """
+        tell application "Finder"
+            set sel to selection
+            if (count of sel) is 0 then return ""
+            set out to ""
+            repeat with f in sel
+                set out to out & POSIX path of (f as alias) & linefeed
+            end repeat
+            return out
+        end tell
+        """
+        let r = await AppleScriptTool.execute(script)
+        guard r.success else {
+            return .fail("I couldn't read the Finder selection — Aria may need Automation access for Finder (System Settings → Privacy & Security → Automation).")
+        }
+        let paths = r.output.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
+        return paths.isEmpty
+            ? .ok("No files are selected in Finder.")
+            : .ok("Selected in Finder (\(paths.count)):\n" + paths.joined(separator: "\n"))
+    }
+}
+
 /// Create or overwrite a file. Destructive (overwrite).
 struct FileWriteTool: AriaTool {
     static let name = "file_write"
