@@ -47,6 +47,15 @@ final class AutonomyEngineTests: XCTestCase {
         XCTAssertFalse(other.lowercased().contains("couldn't work out"))
     }
 
+    // #5: a blind retry is skipped for declines and missing-input (won't change);
+    // other failures stay retryable.
+    func testNonRetryableFailureClassification() {
+        XCTAssertTrue(ToolResult.cancelled().isNonRetryableFailure)
+        XCTAssertTrue(ToolResult.fail("Missing input 'content' for file_write.").isNonRetryableFailure)
+        XCTAssertFalse(ToolResult.fail("shell failed: exit 1").isNonRetryableFailure)
+        XCTAssertFalse(ToolResult.ok("done").isNonRetryableFailure)
+    }
+
     // #4: financial / system danger words must trip the gate via the unified list.
     func testSafetyCoversFinancialAndSystemActions() {
         XCTAssertTrue(Safety.isDestructive(summary: "pay the invoice"))

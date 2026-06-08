@@ -57,10 +57,15 @@ struct FileWriteTool: AriaTool {
         guard let path = input["path"], !path.isEmpty else { throw ToolError.missingInput("path") }
         let content = input["content"] ?? ""
         let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+        // Capture prior state for undo: whether the file existed and its old bytes.
+        let existedBefore = FileManager.default.fileExists(atPath: url.path)
+        let previous = existedBefore ? (try? String(contentsOf: url, encoding: .utf8)) : nil
         do {
             try FileManager.default.createDirectory(
                 at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try content.write(to: url, atomically: true, encoding: .utf8)
+            await UndoStack.shared.record(
+                .fileWrite(path: url.path, previousContent: existedBefore ? (previous ?? "") : nil))
             return .ok("Wrote \(content.utf8.count) bytes to \(url.path)")
         } catch {
             return .fail("Write failed: \(error.localizedDescription)")
@@ -100,9 +105,11 @@ struct ClipboardTool: AriaTool {
         return await MainActor.run {
             let pb = NSPasteboard.general
             if action == "write" {
+                let previous = pb.string(forType: .string)   // capture for undo
                 let text = input["text"] ?? ""
                 pb.clearContents()
                 pb.setString(text, forType: .string)
+                Task { await UndoStack.shared.record(.clipboardWrite(previous: previous)) }
                 return .ok("Copied to clipboard.")
             } else {
                 return .ok(pb.string(forType: .string) ?? "(clipboard empty)")

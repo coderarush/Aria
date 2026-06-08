@@ -71,15 +71,14 @@ actor AutonomyEngine {
             let step = plan.steps[i]
             Log.trace("autonomy: step \(i + 1)/\(plan.steps.count) — \(step.summary)")
 
-            // Safety gate — destructive tool OR agent steps (verb is in the summary
-            // for agents, in the tool/input for tools).
-            let needsConfirm: Bool
-            switch step.executor {
-            case .tool(let t):  needsConfirm = Safety.isDestructive(tool: t, input: step.input)
-            case .agent(let a): needsConfirm = Safety.isDestructive(tool: a, input: step.input)
-                                    || Safety.isDestructive(summary: step.summary)
-            }
-            if needsConfirm {
+            // Safety gate. Tool steps are gated at the execution chokepoint
+            // (AgentOrchestrator.execute), which confirms EVERY destructive tool for
+            // every caller — so we don't ALSO prompt here (that was a double-prompt).
+            // Agent steps get an upfront gate: their danger verb lives in the summary
+            // ("send the email to John"), and a long agent run deserves a heads-up
+            // before it starts rather than only at the leaf action.
+            if case .agent(let a) = step.executor,
+               Safety.isDestructive(tool: a, input: step.input) || Safety.isDestructive(summary: step.summary) {
                 let okToRun = await confirm("Aria wants to \(step.summary). Allow?")
                 if !okToRun {
                     plan.steps[i].status = .failed
@@ -90,11 +89,15 @@ actor AutonomyEngine {
             }
 
             var result = await execute(step, prior: prior)
-            // Don't retry or recover something the user explicitly declined — that
-            // would re-prompt them for the same action they just said no to.
-            if !result.success, !result.wasDeclined {
-                result = await execute(step, prior: prior)   // verify: retry once
+            // Retry once, but only for failures a blind retry might fix — not a user
+            // decline and not a missing-input error (those won't change). A short
+            // backoff gives a transient (network/AX) hiccup time to clear.
+            if !result.success, !result.isNonRetryableFailure {
+                try? await Task.sleep(nanoseconds: 400_000_000)   // 0.4s backoff
+                result = await execute(step, prior: prior)
             }
+            // Recover (alternative action) for anything still failing except a decline —
+            // a missing-input CAN be fixed by a different action, a decline must not be.
             if !result.success, !result.wasDeclined {
                 result = await recover(step: step, prior: prior, goal: goal)   // never dead-end
             }

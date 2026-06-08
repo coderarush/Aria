@@ -41,6 +41,7 @@ actor ToolRegistry {
             FileReadTool(),
             ClipboardTool(),
             SaveNoteTool(),
+            UndoTool(),
             CalendarTool(),
             RemindersTool(),
             NotificationTool(),

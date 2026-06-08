@@ -53,6 +53,13 @@ struct ToolResult: Equatable {
     /// avoid retrying or "recovering" something the user just said no to — which
     /// would otherwise re-prompt them for the same action.
     var wasDeclined: Bool { !success && output == ToolResult.notApprovedMessage }
+
+    /// A failure that a blind retry won't fix: the user declined, or a required
+    /// input was missing. The autonomy loop skips its retry for these (recovery,
+    /// which tries a *different* action, may still help a missing-input).
+    var isNonRetryableFailure: Bool {
+        !success && (wasDeclined || output.hasPrefix("Missing input"))
+    }
 }
 
 enum ToolError: Error, Equatable {

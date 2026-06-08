@@ -53,7 +53,7 @@ private struct TabHead: View {
 struct SettingsView: View {
     enum Section: String, CaseIterable, Identifiable {
         case general = "General", voice = "Voice", conversation = "Conversation",
-             apiKey = "API Key", memory = "Memory", tools = "Tools", dynamic = "Dynamic", brain = "Brain", mirror = "Mirror", crew = "Crew", license = "License"
+             apiKey = "API Key", memory = "Memory", activity = "Activity", tools = "Tools", dynamic = "Dynamic", brain = "Brain", mirror = "Mirror", crew = "Crew", license = "License"
         var id: String { rawValue }
         var icon: String {
             switch self {
@@ -62,6 +62,7 @@ struct SettingsView: View {
             case .conversation: return "bubble.left.and.bubble.right"
             case .apiKey:       return "key"
             case .memory:       return "brain.head.profile"
+            case .activity:     return "list.bullet.rectangle"
             case .tools:        return "wrench.and.screwdriver"
             case .dynamic:      return "sparkles"
             case .brain:        return "brain"
@@ -119,6 +120,7 @@ struct SettingsView: View {
         case .conversation: ConversationSettingsTab()
         case .apiKey:       APIKeyTab()
         case .memory:       MemorySettingsTab()
+        case .activity:     ActivityTab()
         case .tools:        ToolsTab()
         case .dynamic:      DynamicToolsTab()
         case .brain:        BrainTab()
@@ -445,6 +447,64 @@ struct MemorySettingsTab: View {
 
     private func reload() async {
         facts = await LongTermMemory.shared.all().sorted { $0.createdAt > $1.createdAt }
+    }
+}
+
+// MARK: Activity
+
+struct ActivityTab: View {
+    @State private var entries: [ActivityEntry] = []
+
+    var body: some View {
+        TabHead(title: "Activity", subtitle: "A traceable log of every action Aria has taken. Newest first.")
+        SForm {
+            SSection("Recent actions (\(entries.count))") {
+                if entries.isEmpty {
+                    Text("No actions recorded yet.").foregroundStyle(.secondary).font(.callout)
+                } else {
+                    ForEach(entries) { e in
+                        HStack(alignment: .top, spacing: 9) {
+                            Circle().fill(color(for: e.outcome)).frame(width: 8, height: 8).padding(.top, 5)
+                            VStack(alignment: .leading, spacing: 1) {
+                                HStack(spacing: 6) {
+                                    Text(e.tool).font(.system(size: 13, weight: .semibold))
+                                    if !e.detail.isEmpty {
+                                        Text(e.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                    }
+                                }
+                                if !e.summary.isEmpty {
+                                    Text(e.summary).font(.caption2).foregroundStyle(.tertiary).lineLimit(2)
+                                }
+                                Text(e.date.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.caption2).foregroundStyle(.tertiary)
+                            }
+                            Spacer(minLength: 0)
+                            Text(e.outcome.rawValue).font(.caption2).foregroundStyle(color(for: e.outcome))
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        if e.id != entries.last?.id { Divider() }
+                    }
+                }
+            }
+            if !entries.isEmpty {
+                SSection {
+                    Button("Clear activity log", role: .destructive) {
+                        Task { await ActivityLog.shared.clear(); await reload() }
+                    }
+                }
+            }
+        }
+        .task { await reload() }
+    }
+
+    private func reload() async { entries = await ActivityLog.shared.recent(100) }
+
+    private func color(for outcome: ActivityEntry.Outcome) -> Color {
+        switch outcome {
+        case .ok:       return .green
+        case .failed:   return .orange
+        case .declined: return .secondary
+        }
     }
 }
 
