@@ -150,7 +150,7 @@ actor AgentOrchestrator {
             if tool.isDestructive || Safety.isDestructive(tool: action.tool, input: action.input) {
                 let approved = await (confirmationHandler?(
                     "Run \(action.tool) with \(action.input)?") ?? false)
-                guard approved else { return .fail("Cancelled — not approved.") }
+                guard approved else { return .cancelled() }
             }
             do { return try await tool.run(input: action.input) }
             catch ToolError.missingInput(let key) { return .fail("Missing input '\(key)' for \(action.tool).") }
@@ -178,12 +178,12 @@ actor AgentOrchestrator {
         }
 
         // Confirmation gate: destructive intent or "show code before run".
-        if isDestructive(task) || settings.showCodeBeforeRun {
+        if Safety.isDestructive(summary: task) || settings.showCodeBeforeRun {
             let prompt = settings.showCodeBeforeRun
                 ? "Aria wants to run this \(language.rawValue):\n\n\(tool.code)"
                 : "This may modify or send data. Run it?"
             let approved = await (confirmationHandler?(prompt) ?? false)
-            guard approved else { return .fail("Cancelled — not approved.") }
+            guard approved else { return .cancelled() }
         }
 
         let result = await factory.execute(tool, timeout: 60)
@@ -205,12 +205,6 @@ actor AgentOrchestrator {
             .map { "\($0.key)=\($0.value)" }
             .joined(separator: ", ")
         return inputs.isEmpty ? action.tool : "\(action.tool): \(inputs)"
-    }
-
-    private func isDestructive(_ task: String) -> Bool {
-        let t = task.lowercased()
-        return ["delete", "remove", "rm ", "send", "post", "email", "submit",
-                "overwrite", "drop ", "kill"].contains { t.contains($0) }
     }
 
     /// Run a multi-step autonomous task. Emits `TaskEvent` values as each planning

@@ -9,7 +9,8 @@ enum Safety {
     private static let safeTools: Set<String> = ["ui_read", "ui_type", "ui_scroll",
                                                  "web_search", "web_fetch", "file_read"]
     private static let dangerWords = ["rm ", "rm -", "delete", "remove", "send", "email", "post",
-                                      "overwrite", "drop ", "kill", "shutdown", "format", "purchase", "pay"]
+                                      "submit", "overwrite", "drop ", "kill", "shutdown", "format",
+                                      "purchase", "pay"]
     static func isDestructive(tool: String, input: [String: String]) -> Bool {
         if dangerTools.contains(tool) { return true }
         if safeTools.contains(tool) { return false }   // reads/searches/typing aren't destructive

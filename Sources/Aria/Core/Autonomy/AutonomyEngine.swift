@@ -44,7 +44,17 @@ actor AutonomyEngine {
     }
 
     func run(goal: String, emit: @escaping @Sendable (TaskEvent) -> Void) async {
-        let steps = await makePlan(goal: goal)
+        let steps: [TaskStep]
+        switch await makePlan(goal: goal) {
+        case .transportFailure(let message):
+            // Model unreachable (network/API/key). Surface it plainly instead of
+            // pretending we couldn't figure the task out — and skip the doomed
+            // Atlas fallback, which needs the same connection.
+            emit(.finished(ok: false, summary: message))
+            return
+        case .steps(let planned):
+            steps = planned
+        }
         guard !steps.isEmpty else {
             emit(.finished(ok: false, summary: "I couldn't work out how to do that one."))
             return
@@ -80,8 +90,12 @@ actor AutonomyEngine {
             }
 
             var result = await execute(step, prior: prior)
-            if !result.success { result = await execute(step, prior: prior) }   // verify: retry once
-            if !result.success {
+            // Don't retry or recover something the user explicitly declined — that
+            // would re-prompt them for the same action they just said no to.
+            if !result.success, !result.wasDeclined {
+                result = await execute(step, prior: prior)   // verify: retry once
+            }
+            if !result.success, !result.wasDeclined {
                 result = await recover(step: step, prior: prior, goal: goal)   // never dead-end
             }
 
@@ -107,20 +121,50 @@ actor AutonomyEngine {
 
     // MARK: Planning
 
-    private func makePlan(goal: String) async -> [TaskStep] {
+    /// Outcome of planning: either steps to run, or the model was unreachable.
+    enum PlanOutcome { case steps([TaskStep]); case transportFailure(String) }
+
+    private func makePlan(goal: String) async -> PlanOutcome {
         let prompt = await planPrompt(goal: goal)
+        var gotResponse = false        // model replied at least once (vs. never reachable)
+        var lastError: Error?
         for attempt in 0..<2 {
             let p = attempt == 0 ? prompt
                 : prompt + "\n\nReminder: output ONLY the raw JSON array — no prose, no code fences."
-            let raw = (try? await gemini.generateText(prompt: p, temperature: 0.2)) ?? ""
-            let steps = PlanParser.steps(fromJSON: raw)
-            if !steps.isEmpty { return steps }
-            Log.trace("autonomy: empty plan (attempt \(attempt + 1)); retrying")
+            do {
+                let raw = try await gemini.generateText(prompt: p, temperature: 0.2)
+                gotResponse = true
+                let steps = PlanParser.steps(fromJSON: raw)
+                if !steps.isEmpty { return .steps(steps) }
+                Log.trace("autonomy: empty plan (attempt \(attempt + 1)); retrying")
+            } catch {
+                lastError = error
+                Log.trace("autonomy: plan call failed (attempt \(attempt + 1)): \(error.localizedDescription)")
+            }
         }
-        // Last resort: never dead-end on planning — hand the whole goal to Atlas, who
-        // breaks it down and operates the Mac directly.
+        // Every attempt threw and the model never responded → it's unreachable.
+        // Don't fall into a doomed Atlas step that needs the same connection.
+        if !gotResponse, let lastError {
+            return .transportFailure(Self.transportMessage(for: lastError))
+        }
+        // Model responded but never produced a usable plan — hand the whole goal to
+        // Atlas, who breaks it down and operates the Mac directly. (never dead-end)
         Log.trace("autonomy: falling back to a single Atlas step")
-        return [TaskStep(summary: goal, executor: .agent("Atlas"))]
+        return .steps([TaskStep(summary: goal, executor: .agent("Atlas"))])
+    }
+
+    /// User-facing, explainable message for a model-unreachable failure.
+    static func transportMessage(for error: Error) -> String {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost,
+                 .cannotConnectToHost, .cannotFindHost, .timedOut, .dnsLookupFailed:
+                return "I can't reach the model right now — check your internet connection and try again."
+            default:
+                break
+            }
+        }
+        return "I'm having trouble reaching the model — check your API key and connection, then try again."
     }
 
     private func planPrompt(goal: String) async -> String {
