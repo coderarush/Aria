@@ -326,6 +326,10 @@ actor GeminiClient {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = body
+        // Fail fast instead of hanging on the 60s default: a stalled non-streaming
+        // call should bounce to the next model/provider quickly, not freeze the turn.
+        // (flash/-lite JSON replies land in a few seconds; 30s is generous headroom.)
+        request.timeoutInterval = 30
         let (data, response) = try await session.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard status == 200 else { throw GeminiError.http(status) }
