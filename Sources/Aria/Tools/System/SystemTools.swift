@@ -75,6 +75,53 @@ struct FinderSelectionTool: AriaTool {
     }
 }
 
+/// The open tabs (title + URL) of the active web browser — context for "this page",
+/// "summarize this article", "what tabs do I have open". Only queries a browser that's
+/// frontmost, so it never launches one; on-demand, off the per-turn hot path.
+struct BrowserTabsTool: AriaTool {
+    static let name = "browser_tabs"
+    static let description = "List the open tabs (titles + URLs) of the active browser — for 'this page', 'summarize this article', 'what tabs are open'. Works when Safari or Chrome is frontmost. Input: {}."
+    static let paramHints: [String: String] = [:]
+
+    func run(input: [String: String]) async throws -> ToolResult {
+        let front = await MainActor.run { NSWorkspace.shared.frontmostApplication?.localizedName ?? "" }
+        let script: String
+        switch front {
+        case "Safari":
+            script = """
+            tell application "Safari"
+                set out to ""
+                repeat with t in tabs of front window
+                    set out to out & (name of t) & " — " & (URL of t) & linefeed
+                end repeat
+                return out
+            end tell
+            """
+        case "Google Chrome", "Chromium", "Brave Browser", "Microsoft Edge", "Arc":
+            // Chromium-family browsers share Chrome's scripting dictionary.
+            script = """
+            tell application "\(front)"
+                set out to ""
+                repeat with t in tabs of front window
+                    set out to out & (title of t) & " — " & (URL of t) & linefeed
+                end repeat
+                return out
+            end tell
+            """
+        default:
+            return .ok("No web browser is frontmost (active app: \(front.isEmpty ? "unknown" : front)). Switch to Safari or Chrome and ask again.")
+        }
+        let r = await AppleScriptTool.execute(script)
+        guard r.success else {
+            return .fail("I couldn't read \(front)'s tabs — Aria may need Automation access for \(front) (System Settings → Privacy & Security → Automation).")
+        }
+        let tabs = r.output.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
+        return tabs.isEmpty
+            ? .ok("No open tabs found in \(front).")
+            : .ok("\(front) tabs (\(tabs.count)):\n" + tabs.joined(separator: "\n"))
+    }
+}
+
 /// Create or overwrite a file. Destructive (overwrite).
 struct FileWriteTool: AriaTool {
     static let name = "file_write"

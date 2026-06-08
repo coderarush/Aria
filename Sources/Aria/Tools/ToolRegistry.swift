@@ -40,6 +40,7 @@ actor ToolRegistry {
             FileWriteTool(),
             FileReadTool(),
             FinderSelectionTool(),
+            BrowserTabsTool(),
             ClipboardTool(),
             SaveNoteTool(),
             UndoTool(),
