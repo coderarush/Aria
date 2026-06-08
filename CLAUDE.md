@@ -19,8 +19,11 @@ first-party Gmail API (future). **P5 Memory**: planner now recalls long-term fac
 (`AutonomyEngine.knownBlock`) so it applies preferences. **P6 Long-running**: resumable
 workflows (`Core/Autonomy/TaskStore.swift` journals each step; `AutonomyEngine.resume`;
 voice "resume" via `ResumeIntent`) + completion notification for multi-step tasks.
-Follow-up: proactive launch surfacing of a pending task (left out — avoid touching the
-launch/onboarding path). All 6 directive priorities now addressed.
+Launch now proactively notifies about an interrupted task (`offerResumeIfPending` in
+start(), notification-only, 2s after startup). All 6 directive priorities addressed.
+**Needs on-device check:** the launch resume notification (start app with a pending
+active-task.json present) — touches the launch path, so verify it surfaces and doesn't
+disturb onboarding.
 
 ## What Aria is
 Execution-first intelligence + execution layer for macOS. Voice-first, keyboard-accessible.
