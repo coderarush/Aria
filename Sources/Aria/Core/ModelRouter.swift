@@ -5,7 +5,12 @@ import Foundation
 enum ModelRouter {
     private static let complexHints = ["analyze", "write a", "plan", "research", "compare",
                                        "debug", "refactor", "summary report", "step by step", "multi"]
-    private static let screenHints = ["screen", "this", "here", "what's on", "selected", "highlighted", "see"]
+    // Only EXPLICIT requests to look at the whole screen eager-capture a screenshot.
+    // Ambiguous deixis ("this", "here", "see") and text selection ("selected",
+    // "highlighted") are covered by ambient AX context (focused window + selected
+    // text fed each turn); when the model genuinely needs to *see*, it calls the
+    // `look_at_screen` tool. Keeps the common path fast — no redundant vision round.
+    private static let screenHints = ["screen", "what's on", "what is on"]
 
     /// Fast `flash-lite` for chat (low latency + higher free RPM); `pro` for complex.
     static func model(for command: String) -> String {

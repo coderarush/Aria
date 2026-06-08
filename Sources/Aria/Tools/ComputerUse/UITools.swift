@@ -106,3 +106,31 @@ struct UIKeyTool: AriaTool {
         return ok ? .ok("Pressed \(combo).") : .fail("Didn't recognize the key combo “\(combo)”.")
     }
 }
+
+/// Look at the screen and answer a question about it — for visual content the
+/// accessibility text can't convey (diagrams, images, video frames, custom-drawn
+/// UIs). The on-demand counterpart to ambient AX context: the model calls this
+/// when it actually needs to *see*, so ordinary turns don't pay for a screenshot.
+/// Capture stays in memory (never written to disk); secure fields are hidden by macOS.
+struct ScreenVisionTool: AriaTool {
+    static let name = "look_at_screen"
+    static let description = "Look at what's currently on the screen and answer a question about it — diagrams, images, video frames, or anything visual the on-screen text can't describe. Use when you need to SEE the screen, not just read its controls. Input: {question?}."
+    static let paramHints: [String: String] = ["question": "What to look for or answer about the screen"]
+
+    var gemini: GeminiClient = GeminiClient()
+    var screen: ScreenCaptureEngine = ScreenCaptureEngine()
+
+    func run(input: [String: String]) async throws -> ToolResult {
+        guard let jpeg = try? await screen.capturePrimaryJPEG() else {
+            return .fail("I couldn't capture the screen — Screen Recording permission may be off (System Settings → Privacy & Security → Screen Recording).")
+        }
+        let question = (input["question"] ?? input["prompt"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let ask = question.isEmpty ? "Describe what's on the screen." : question
+        let prompt = "Look at this screenshot and answer concisely: \(ask)"
+        let answer = ((try? await gemini.generateTextWithImage(prompt: prompt, jpeg: jpeg)) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return answer.isEmpty
+            ? .fail("I captured the screen but couldn't make out an answer just now.")
+            : .ok(answer)
+    }
+}

@@ -53,7 +53,8 @@ actor ToolRegistry {
             UIClickTool(),
             UITypeTool(),
             UIKeyTool(),
-            UIScrollTool()
+            UIScrollTool(),
+            ScreenVisionTool()
         ]
     }
 }
