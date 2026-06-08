@@ -43,6 +43,22 @@ final class AriaController {
         configureConfirmation()
         configureLearning()
         startListening()
+        offerResumeIfPending()
+    }
+
+    /// If a multi-step task was interrupted (crash/quit), proactively surface it once
+    /// startup has settled — a single system notification, nothing intrusive. The user
+    /// continues by voice ("Hey Aria, resume"); we never auto-run a task on launch.
+    private func offerResumeIfPending() {
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)   // let launch settle first
+            guard let self, let pending = await self.orchestrator.pendingTask() else { return }
+            let remaining = pending.unfinishedCount
+            let msg = "Unfinished task: “\(pending.goal)” — \(remaining) step\(remaining == 1 ? "" : "s") left. Say “Hey Aria, resume” to continue."
+                .replacingOccurrences(of: "\"", with: "'")
+            _ = await AppleScriptTool.execute("display notification \"\(msg)\" with title \"Aria\"")
+            Log.trace("resume: offered pending task '\(pending.goal)'")
+        }
     }
 
     private var previewWindow: NSWindow?
