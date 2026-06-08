@@ -7,7 +7,11 @@ model-outage surfacing, unified destructive gate, durable activity log + UI, und
 system). **P2 Execution speed** — major levers done: fast-model planning/recovery
 (flash-lite), parallel turn setup (async let), bounded 30s request timeouts, and
 on-demand `look_at_screen` vision tool replacing redundant eager screenshots
-(needsScreen tightened to explicit whole-screen requests). Next candidate: P3 Context.
+(needsScreen tightened to explicit whole-screen requests). **P3 Context awareness** —
+added clipboard (relevance-gated ambient via ContextRelevance), `finder_selection` and
+`browser_tabs` on-demand tools; retrieval is intentional + explainable (each tool call
+shows in the activity log). Remaining P3 gaps need bigger integrations: email context
+(Gmail, Tier 2), project context, open-document paths. Next candidate: P4 Cross-app.
 
 ## What Aria is
 Execution-first intelligence + execution layer for macOS. Voice-first, keyboard-accessible.
