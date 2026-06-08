@@ -10,8 +10,12 @@ on-demand `look_at_screen` vision tool replacing redundant eager screenshots
 (needsScreen tightened to explicit whole-screen requests). **P3 Context awareness** —
 added clipboard (relevance-gated ambient via ContextRelevance), `finder_selection` and
 `browser_tabs` on-demand tools; retrieval is intentional + explainable (each tool call
-shows in the activity log). Remaining P3 gaps need bigger integrations: email context
-(Gmail, Tier 2), project context, open-document paths. Next candidate: P4 Cross-app.
+shows in the activity log). **P3 email gap closed** + **P4 Cross-app workflows**: Apple Mail tools
+(email_recent/search/draft + send_mail, gated) — native-macOS, works with Gmail
+accounts, no OAuth; and autonomy now threads ALL prior step outputs (labeled digest,
+`AutonomyEngine.material`) to agent steps so workflows synthesize across the whole
+chain, not just the last result. Remaining: project context, open-doc paths, a
+first-party Gmail API (future). Next candidate: P5 Persistent Memory / P6 Long-running.
 
 ## What Aria is
 Execution-first intelligence + execution layer for macOS. Voice-first, keyboard-accessible.
