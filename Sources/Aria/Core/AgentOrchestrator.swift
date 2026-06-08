@@ -150,11 +150,18 @@ actor AgentOrchestrator {
             if tool.isDestructive || Safety.isDestructive(tool: action.tool, input: action.input) {
                 let approved = await (confirmationHandler?(
                     "Run \(action.tool) with \(action.input)?") ?? false)
-                guard approved else { return .cancelled() }
+                guard approved else {
+                    let declined = ToolResult.cancelled()
+                    await ActivityLog.shared.record(tool: action.tool, detail: describe(action), result: declined)
+                    return declined
+                }
             }
-            do { return try await tool.run(input: action.input) }
-            catch ToolError.missingInput(let key) { return .fail("Missing input '\(key)' for \(action.tool).") }
-            catch { return .fail("\(action.tool) failed: \(error.localizedDescription)") }
+            let result: ToolResult
+            do { result = try await tool.run(input: action.input) }
+            catch ToolError.missingInput(let key) { result = .fail("Missing input '\(key)' for \(action.tool).") }
+            catch { result = .fail("\(action.tool) failed: \(error.localizedDescription)") }
+            await ActivityLog.shared.record(tool: action.tool, detail: describe(action), result: result)
+            return result
         }
 
         // Otherwise fall back to dynamic code generation.
@@ -183,10 +190,15 @@ actor AgentOrchestrator {
                 ? "Aria wants to run this \(language.rawValue):\n\n\(tool.code)"
                 : "This may modify or send data. Run it?"
             let approved = await (confirmationHandler?(prompt) ?? false)
-            guard approved else { return .cancelled() }
+            guard approved else {
+                let declined = ToolResult.cancelled()
+                await ActivityLog.shared.record(tool: action.tool, detail: describe(action), result: declined)
+                return declined
+            }
         }
 
         let result = await factory.execute(tool, timeout: 60)
+        await ActivityLog.shared.record(tool: action.tool, detail: describe(action), result: result)
 
         // Offer to persist successful, non-trivial tools.
         if result.success, settings.askBeforeSaving,
