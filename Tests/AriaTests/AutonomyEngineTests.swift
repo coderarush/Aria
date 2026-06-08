@@ -47,6 +47,28 @@ final class AutonomyEngineTests: XCTestCase {
         XCTAssertFalse(other.lowercased().contains("couldn't work out"))
     }
 
+    // P4: agent steps receive a labeled digest of EVERY earlier output, not just the
+    // last — so a step can synthesize across the whole workflow.
+    func testMaterialLabelsAndKeepsAllCompletedSteps() {
+        let completed = [(summary: "Research A", output: "facts about A"),
+                         (summary: "Research B", output: "facts about B")]
+        let m = AutonomyEngine.material(from: completed)
+        XCTAssertTrue(m.contains("[Research A]"))
+        XCTAssertTrue(m.contains("facts about A"))
+        XCTAssertTrue(m.contains("[Research B]"))   // earlier step NOT lost
+        XCTAssertTrue(m.contains("facts about B"))
+        XCTAssertEqual(AutonomyEngine.material(from: []), "")
+    }
+
+    func testMaterialIsCappedKeepingMostRecent() {
+        let completed = [(summary: "old", output: String(repeating: "A", count: 100)),
+                         (summary: "new", output: String(repeating: "Z", count: 100))]
+        let m = AutonomyEngine.material(from: completed, cap: 80)
+        XCTAssertLessThanOrEqual(m.count, 82)        // cap + the leading ellipsis
+        XCTAssertTrue(m.hasPrefix("…"))
+        XCTAssertTrue(m.contains("Z"))               // most recent kept
+    }
+
     // #5: a blind retry is skipped for declines and missing-input (won't change);
     // other failures stay retryable.
     func testNonRetryableFailureClassification() {

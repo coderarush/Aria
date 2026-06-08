@@ -64,7 +64,8 @@ actor AutonomyEngine {
         emit(.narrate("On it — " + plan.steps.map { $0.summary }.prefix(3).joined(separator: ", ") + "."))
         Log.trace("autonomy: plan has \(plan.steps.count) step(s) for '\(goal)'")
 
-        var prior = ""   // accumulated output of completed steps, threaded forward
+        var lastOutput = ""                                       // immediate previous output (tool chaining / save fill)
+        var completed: [(summary: String, output: String)] = []   // ALL successful steps — agent material
         for i in plan.steps.indices {
             if Task.isCancelled { return }   // Stop pressed — halt before the next step
             emit(.stepStarted(i))
@@ -88,24 +89,31 @@ actor AutonomyEngine {
                 }
             }
 
-            var result = await execute(step, prior: prior)
+            // Agent steps see EVERY earlier step's output (labeled), so a step can
+            // synthesize across the whole workflow ("research A, research B, combine"),
+            // not just the immediately-previous result.
+            let material = Self.material(from: completed)
+            var result = await execute(step, lastOutput: lastOutput, material: material)
             // Retry once, but only for failures a blind retry might fix — not a user
             // decline and not a missing-input error (those won't change). A short
             // backoff gives a transient (network/AX) hiccup time to clear.
             if !result.success, !result.isNonRetryableFailure {
                 try? await Task.sleep(nanoseconds: 400_000_000)   // 0.4s backoff
-                result = await execute(step, prior: prior)
+                result = await execute(step, lastOutput: lastOutput, material: material)
             }
             // Recover (alternative action) for anything still failing except a decline —
             // a missing-input CAN be fixed by a different action, a decline must not be.
             if !result.success, !result.wasDeclined {
-                result = await recover(step: step, prior: prior, goal: goal)   // never dead-end
+                result = await recover(step: step, lastOutput: lastOutput, material: material, goal: goal)
             }
 
             plan.steps[i].status = result.success ? .done : .failed
             plan.steps[i].result = result.output
             emit(.stepFinished(i, ok: result.success, result: result.output))
-            if result.success, !result.output.isEmpty { prior = result.output }
+            if result.success, !result.output.isEmpty {
+                lastOutput = result.output
+                completed.append((summary: step.summary, output: result.output))
+            }
             // Note: we do NOT abort the whole task on a single failed step — we carry
             // on with the last good output so partial progress still reaches the user.
         }
@@ -207,11 +215,13 @@ actor AutonomyEngine {
 
     // MARK: Execution
 
-    private func execute(_ step: TaskStep, prior: String) async -> ToolResult {
+    private func execute(_ step: TaskStep, lastOutput: String, material: String) async -> ToolResult {
         switch step.executor {
         case .tool(let name):
-            let input = enrich(input: step.input, forTool: name, prior: prior)
-            return await runAction(AgentAction(tool: name, input: input), prior)
+            // Tools chain off the immediate previous output (fill an empty save/write
+            // content, pass as prior to the action).
+            let input = enrich(input: step.input, forTool: name, prior: lastOutput)
+            return await runAction(AgentAction(tool: name, input: input), lastOutput)
 
         case .agent(let agentName):
             guard let agent = await subAgents.agent(named: agentName) else {
@@ -223,12 +233,23 @@ actor AutonomyEngine {
             var taskText = step.summary
             let extra = step.input.values.joined(separator: " ")
             if !extra.isEmpty { taskText += " " + extra }
-            if !prior.isEmpty {
-                taskText += "\n\nMaterial from earlier steps (use this):\n" + String(prior.prefix(6000))
+            if !material.isEmpty {
+                taskText += "\n\nMaterial from earlier steps (use this):\n" + material
             }
             let r = await agent.execute(task: taskText, context: ctx)
             return r.success ? .ok(r.output) : .fail(r.output)
         }
+    }
+
+    /// Labeled digest of every completed step's output, threaded to agent steps so
+    /// they can synthesize across the whole workflow. Capped (keeping the most recent)
+    /// so a long chain can't blow up the prompt.
+    static func material(from completed: [(summary: String, output: String)], cap: Int = 6000) -> String {
+        guard !completed.isEmpty else { return "" }
+        let joined = completed
+            .map { "[\($0.summary)]\n\($0.output)" }
+            .joined(separator: "\n\n")
+        return joined.count <= cap ? joined : "…" + String(joined.suffix(cap))
     }
 
     /// Fill a write/save tool's content field from the prior step's output when the
@@ -248,12 +269,12 @@ actor AutonomyEngine {
 
     // MARK: Recovery (never dead-end)
 
-    private func recover(step: TaskStep, prior: String, goal: String) async -> ToolResult {
+    private func recover(step: TaskStep, lastOutput: String, material: String, goal: String) async -> ToolResult {
         Log.trace("autonomy: recovering failed step '\(step.summary)'")
 
         // If this step is about recording/saving text, guarantee the user gets it.
         if Self.isSaveIntent(step.summary) || isWriteTool(step.executor) {
-            let content = prior.isEmpty ? step.summary : prior
+            let content = lastOutput.isEmpty ? step.summary : lastOutput
             let title = Self.titleFromGoal(goal)
             let r = await runAction(
                 AgentAction(tool: "save_note", input: ["title": title, "content": content]), "")
@@ -261,15 +282,15 @@ actor AutonomyEngine {
         }
 
         // Otherwise ask the model for one alternative action and try it.
-        if let alt = await alternativeAction(for: step, prior: prior) {
-            let r = await runAction(alt, prior)
+        if let alt = await alternativeAction(for: step, material: material) {
+            let r = await runAction(alt, lastOutput)
             if r.success { return r }
         }
 
         return .fail("Couldn't complete: \(step.summary)")
     }
 
-    private func alternativeAction(for step: TaskStep, prior: String) async -> AgentAction? {
+    private func alternativeAction(for step: TaskStep, material: String) async -> AgentAction? {
         let catalog = await registry.catalog()
         let prompt = """
         A step failed. Propose ONE alternative tool action that accomplishes it, as a \
@@ -279,7 +300,7 @@ actor AutonomyEngine {
 
         STEP: \(step.summary)
         MATERIAL (from earlier steps, may be what to act on):
-        \(String(prior.prefix(2000)))
+        \(String(material.prefix(2000)))
 
         TOOLS:
         \(catalog)
