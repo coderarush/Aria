@@ -15,7 +15,12 @@ shows in the activity log). **P3 email gap closed** + **P4 Cross-app workflows**
 accounts, no OAuth; and autonomy now threads ALL prior step outputs (labeled digest,
 `AutonomyEngine.material`) to agent steps so workflows synthesize across the whole
 chain, not just the last result. Remaining: project context, open-doc paths, a
-first-party Gmail API (future). Next candidate: P5 Persistent Memory / P6 Long-running.
+first-party Gmail API (future). **P5 Memory**: planner now recalls long-term facts
+(`AutonomyEngine.knownBlock`) so it applies preferences. **P6 Long-running**: resumable
+workflows (`Core/Autonomy/TaskStore.swift` journals each step; `AutonomyEngine.resume`;
+voice "resume" via `ResumeIntent`) + completion notification for multi-step tasks.
+Follow-up: proactive launch surfacing of a pending task (left out — avoid touching the
+launch/onboarding path). All 6 directive priorities now addressed.
 
 ## What Aria is
 Execution-first intelligence + execution layer for macOS. Voice-first, keyboard-accessible.
