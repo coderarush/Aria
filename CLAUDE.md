@@ -4,8 +4,10 @@
 **Branch:** `aria-v8`.
 **Current focus:** P1 Reliability — done (single confirm gate, retry discipline,
 model-outage surfacing, unified destructive gate, durable activity log + UI, undo
-system). Now on **P2 Execution speed** (fast-model planning/recovery, parallel turn
-setup).
+system). **P2 Execution speed** — major levers done: fast-model planning/recovery
+(flash-lite), parallel turn setup (async let), bounded 30s request timeouts, and
+on-demand `look_at_screen` vision tool replacing redundant eager screenshots
+(needsScreen tightened to explicit whole-screen requests). Next candidate: P3 Context.
 
 ## What Aria is
 Execution-first intelligence + execution layer for macOS. Voice-first, keyboard-accessible.
