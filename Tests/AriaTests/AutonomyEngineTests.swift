@@ -47,6 +47,17 @@ final class AutonomyEngineTests: XCTestCase {
         XCTAssertFalse(other.lowercased().contains("couldn't work out"))
     }
 
+    // P5: recalled facts become a "what you know" planner block; empty when none.
+    func testKnownBlockFormatsRecalledFacts() {
+        XCTAssertEqual(AutonomyEngine.knownBlock([]), "")
+        let facts = [MemoryFact(text: "reports go to the team channel", kind: "preference"),
+                     MemoryFact(text: "I prefer meetings in the afternoon", kind: "preference")]
+        let block = AutonomyEngine.knownBlock(facts)
+        XCTAssertTrue(block.contains("WHAT YOU KNOW ABOUT THE USER"))
+        XCTAssertTrue(block.contains("team channel"))
+        XCTAssertTrue(block.contains("afternoon"))
+    }
+
     // P4: agent steps receive a labeled digest of EVERY earlier output, not just the
     // last — so a step can synthesize across the whole workflow.
     func testMaterialLabelsAndKeepsAllCompletedSteps() {

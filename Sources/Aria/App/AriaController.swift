@@ -402,6 +402,13 @@ final class AriaController {
             streamVoice.stop(); session?.end(); return
         }
 
+        // Resume the interrupted task. resumeTask() reports "nothing to resume" itself
+        // if there isn't one, so no async pre-check is needed on the main actor here.
+        if ResumeIntent.matches(command) {
+            runAutonomousTask(command, resume: true)
+            return
+        }
+
         if IntentRouter.isTask(command) {
             runAutonomousTask(command)
             return
@@ -445,7 +452,7 @@ final class AriaController {
         }
     }
 
-    private func runAutonomousTask(_ goal: String) {
+    private func runAutonomousTask(_ goal: String, resume: Bool = false) {
         taskActive = true
         wakeEngine.isSuspended = true
         isSpeaking = true
@@ -471,7 +478,7 @@ final class AriaController {
 
         currentTurnTask = Task { [weak self] in
             guard let self else { return }
-            await self.orchestrator.runTask(goal: goal) { event in
+            let handler: @Sendable (TaskEvent) -> Void = { event in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
                     switch event {
@@ -506,6 +513,11 @@ final class AriaController {
                         }
                     }
                 }
+            }
+            if resume {
+                await self.orchestrator.resumeTask(emit: handler)
+            } else {
+                await self.orchestrator.runTask(goal: goal, emit: handler)
             }
         }
     }

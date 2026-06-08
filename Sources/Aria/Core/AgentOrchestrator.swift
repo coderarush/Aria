@@ -222,10 +222,10 @@ actor AgentOrchestrator {
     /// Run a multi-step autonomous task. Emits `TaskEvent` values as each planning
     /// and execution step completes. Hooks into the same `execute` + `confirmationHandler`
     /// plumbing used by the normal command path.
-    func runTask(goal: String, emit: @escaping @Sendable (TaskEvent) -> Void) async {
+    private func makeAutonomyEngine() async -> AutonomyEngine {
         // currentSystemContext() is @MainActor, so we hop to it explicitly.
         let context = await MainActor.run { Self.currentSystemContext() }
-        let engine = AutonomyEngine(
+        return AutonomyEngine(
             gemini: gemini,
             registry: registry,
             subAgents: subAgents,
@@ -236,7 +236,22 @@ actor AgentOrchestrator {
             confirm: { [weak self] prompt in
                 await self?.confirmationHandler?(prompt) ?? false
             })
-        await engine.run(goal: goal, emit: emit)
+    }
+
+    /// An interrupted task waiting to be resumed, if any (its goal, for offering it).
+    func pendingTask() async -> PersistedTask? { await TaskStore.shared.pending() }
+
+    /// Resume the interrupted task from its persisted snapshot.
+    func resumeTask(emit: @escaping @Sendable (TaskEvent) -> Void) async {
+        guard let persisted = await TaskStore.shared.pending() else {
+            emit(.finished(ok: false, summary: "There's no unfinished task to resume."))
+            return
+        }
+        await makeAutonomyEngine().resume(persisted, emit: emit)
+    }
+
+    func runTask(goal: String, emit: @escaping @Sendable (TaskEvent) -> Void) async {
+        await makeAutonomyEngine().run(goal: goal, emit: emit)
     }
 
     /// Streaming answer path (Phase 2: text + native function-calling loop).

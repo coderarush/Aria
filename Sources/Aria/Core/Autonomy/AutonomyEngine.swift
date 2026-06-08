@@ -63,11 +63,34 @@ actor AutonomyEngine {
         emit(.planReady(plan))
         emit(.narrate("On it — " + plan.steps.map { $0.summary }.prefix(3).joined(separator: ", ") + "."))
         Log.trace("autonomy: plan has \(plan.steps.count) step(s) for '\(goal)'")
+        await runLoop(&plan, goal: goal, completed: [], lastOutput: "", startIndex: 0, emit: emit)
+    }
 
-        var lastOutput = ""                                       // immediate previous output (tool chaining / save fill)
-        var completed: [(summary: String, output: String)] = []   // ALL successful steps — agent material
-        for i in plan.steps.indices {
-            if Task.isCancelled { return }   // Stop pressed — halt before the next step
+    /// Resume a task that was interrupted (crash/quit) from its persisted snapshot —
+    /// already-done steps are skipped and their outputs restored as material.
+    func resume(_ persisted: PersistedTask, emit: @escaping @Sendable (TaskEvent) -> Void) async {
+        var plan = TaskPlan(goal: persisted.goal, steps: persisted.restoredSteps())
+        emit(.planReady(plan))
+        let remaining = persisted.unfinishedCount
+        emit(.narrate("Picking up where I left off — \(remaining) step\(remaining == 1 ? "" : "s") to go."))
+        Log.trace("autonomy: resuming '\(persisted.goal)' at step \(persisted.resumeIndex + 1)/\(plan.total)")
+        await runLoop(&plan, goal: persisted.goal,
+                      completed: persisted.completedPairs(),
+                      lastOutput: persisted.lastOutput,
+                      startIndex: persisted.resumeIndex, emit: emit)
+    }
+
+    /// The step loop, shared by run() and resume(). Persists progress after every step
+    /// so an interrupted task can be resumed, and clears the journal when the run returns.
+    private func runLoop(_ plan: inout TaskPlan, goal: String,
+                         completed completedInput: [(summary: String, output: String)],
+                         lastOutput lastOutputInput: String, startIndex: Int,
+                         emit: @escaping @Sendable (TaskEvent) -> Void) async {
+        var lastOutput = lastOutputInput                          // immediate previous output (tool chaining / save fill)
+        var completed = completedInput                            // ALL successful steps — agent material
+        await TaskStore.shared.save(PersistedTask.snapshot(goal: goal, steps: plan.steps, lastOutput: lastOutput))
+        for i in plan.steps.indices where i >= startIndex {
+            if Task.isCancelled { await TaskStore.shared.clear(); return }   // Stop pressed — intentional, don't offer resume
             emit(.stepStarted(i))
             let step = plan.steps[i]
             Log.trace("autonomy: step \(i + 1)/\(plan.steps.count) — \(step.summary)")
@@ -114,9 +137,14 @@ actor AutonomyEngine {
                 lastOutput = result.output
                 completed.append((summary: step.summary, output: result.output))
             }
+            // Persist progress so a crash/quit can resume from the next step.
+            await TaskStore.shared.save(PersistedTask.snapshot(goal: goal, steps: plan.steps, lastOutput: lastOutput))
             // Note: we do NOT abort the whole task on a single failed step — we carry
             // on with the last good output so partial progress still reaches the user.
         }
+
+        // Run finished its pass — clear the journal (resume is only for interruptions).
+        await TaskStore.shared.clear()
 
         let done = plan.completedCount
         let summary: String
@@ -128,6 +156,12 @@ actor AutonomyEngine {
             summary = "I wasn't able to complete that one."
         }
         emit(.finished(ok: done > 0, summary: summary))
+
+        // Surface completion for longer tasks via a system notification — a long-running
+        // objective shouldn't need you to be watching the orb to know it finished.
+        if plan.total > 1, done > 0 {
+            _ = await runAction(AgentAction(tool: "notify", input: ["title": "Aria", "message": summary]), "")
+        }
     }
 
     // MARK: Planning
@@ -179,11 +213,23 @@ actor AutonomyEngine {
         return "I'm having trouble reaching the model — check your API key and connection, then try again."
     }
 
+    /// A "what you know about the user" block from recalled facts — so the planner
+    /// uses preferences ("reports go to the team channel", "meetings in the afternoon")
+    /// instead of asking again. Empty when nothing relevant is remembered.
+    static func knownBlock(_ facts: [MemoryFact]) -> String {
+        guard !facts.isEmpty else { return "" }
+        return "\n\nWHAT YOU KNOW ABOUT THE USER (apply when relevant):\n"
+            + facts.map { "- \($0.text)" }.joined(separator: "\n")
+    }
+
     private func planPrompt(goal: String) async -> String {
         let catalog = await registry.catalog()
         let crew = await subAgents.crew()
             .map { "- \($0.name): \($0.description)" }
             .joined(separator: "\n")
+        // Long-term memory improves execution: recall relevant preferences/facts and
+        // give them to the planner (keyword-gated, so irrelevant turns stay tight).
+        let known = Self.knownBlock(await LongTermMemory.shared.recall(for: goal, limit: 5))
         return """
         You are Aria, an autonomous agent that fully controls this Mac. Through these \
         tools — especially `shell` and `applescript` — you can operate ANY app, file, or \
@@ -207,7 +253,7 @@ actor AutonomyEngine {
         \(crew)
 
         TOOLS:
-        \(catalog)
+        \(catalog)\(known)
 
         GOAL: \(goal)
         """
