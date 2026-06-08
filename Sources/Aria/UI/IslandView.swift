@@ -1,27 +1,26 @@
 import SwiftUI
 
-/// Aria's Siri-style presence: a smooth, continuous multi-color glow that hugs the
-/// screen edges (one blurred ring, not separate blobs, so it reads as a single
-/// combined band of light). The center is transparent and click-through. A bottom
-/// caption shows her reply.
+/// Aria's presence: a single organic, morphing blob anchored bottom-center — a little
+/// living creature, not a UI chrome element. It squirms gently while idle/listening,
+/// swells with your voice, swirls faster while thinking, and breathes while she speaks.
+/// A caption below shows her reply. The rest of the screen stays transparent + click-through.
 struct IslandView: View {
     @ObservedObject var viewModel: IslandViewModel
-    @State private var rotate = 0.0
-    @State private var breathe = false
+    @State private var pulse = false   // springy "pop" on every state change
 
     private var active: Bool { viewModel.isVisible && viewModel.state != .idle }
 
-    /// Palette for the ring. Looping the first color to the end makes the angular
-    /// gradient seamless (no hard seam where it wraps).
+    /// Blob fill colors (first two of the chosen palette, or the accent).
     private var palette: [Color] {
         let c = viewModel.glowColors.isEmpty ? [viewModel.accent, viewModel.accent] : viewModel.glowColors
-        return c + [c.first ?? viewModel.accent]
+        return c
     }
 
-    /// Brightness breathes gently and swells with the voice while listening.
-    private var intensity: CGFloat {
-        let level = viewModel.state == .listening ? CGFloat(min(max(viewModel.audioLevel, 0), 1)) : 0
-        return 0.80 + level * 0.40 + (breathe ? 0.12 : 0)
+    /// A synthetic, irregular "speech" envelope (~0…1) that makes the blob breathe like
+    /// she's talking while she responds. Detuned sines → an organic, non-repeating cadence.
+    static func speechEnv(_ t: Double) -> Double {
+        let e = 0.55 + 0.45 * (0.55 * sin(t * 8.0) + 0.30 * sin(t * 12.7) + 0.15 * sin(t * 5.3))
+        return max(0, min(1, e))
     }
 
     private var captionText: String {
@@ -37,41 +36,58 @@ struct IslandView: View {
     var body: some View {
         ZStack {
             Color.clear
-            glow
+            blob
                 .opacity(active ? 1 : 0)
-                .animation(.easeInOut(duration: 0.55), value: active)
+                .scaleEffect((active ? 1 : 0.4) * (pulse ? 1.06 : 1.0))
+                .padding(.bottom, showCaption ? 134 : 64)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .animation(.spring(response: 0.55, dampingFraction: 0.62), value: active)
+                .animation(.spring(response: 0.5, dampingFraction: 0.72), value: showCaption)
+                .animation(.spring(response: 0.35, dampingFraction: 0.5), value: pulse)
                 .allowsHitTesting(false)
         }
         .overlay(alignment: .bottom) { caption }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear {
-            withAnimation(.linear(duration: 18).repeatForever(autoreverses: false)) { rotate = 360 }
-            withAnimation(.easeInOut(duration: 2.6).repeatForever(autoreverses: true)) { breathe = true }
+        .onChange(of: viewModel.state) { _, _ in
+            // A lively springy pop whenever she changes state (wake, think, answer).
+            pulse = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.34) { pulse = false }
         }
     }
 
-    /// Three concentric blurred strokes of the SAME rotating multi-color gradient,
-    /// heavily blurred so they fuse into one smooth, continuous band of light around
-    /// the screen edge. The slow rotation makes the colors drift; no discrete blobs.
-    private var glow: some View {
-        let gradient = AngularGradient(gradient: Gradient(colors: palette),
-                                       center: .center, angle: .degrees(rotate))
-        return ZStack {
-            RoundedRectangle(cornerRadius: 44, style: .continuous)
-                .strokeBorder(gradient, lineWidth: 96)
-                .blur(radius: 90)
-                .opacity(0.45 * intensity)
-            RoundedRectangle(cornerRadius: 40, style: .continuous)
-                .strokeBorder(gradient, lineWidth: 48)
-                .blur(radius: 44)
-                .opacity(0.7 * intensity)
-            RoundedRectangle(cornerRadius: 38, style: .continuous)
-                .strokeBorder(gradient, lineWidth: 18)
-                .blur(radius: 16)
-                .opacity(0.9 * intensity)
+    /// The morphing blob. A continuous Canvas-like TimelineView feeds fresh vertex radii
+    /// each frame so the outline squirms organically; reaction comes from how much it
+    /// wobbles (amp) and how fast (speed).
+    private var blob: some View {
+        TimelineView(.animation) { tl in
+            let t = tl.date.timeIntervalSinceReferenceDate
+            let level = viewModel.state == .listening ? Double(min(max(viewModel.audioLevel, 0), 1)) : 0
+            let speaking = viewModel.state == .responding ? Self.speechEnv(t) : 0
+            let thinking = viewModel.state == .thinking
+            // Calm + nearly round when idle (top-left look); amoeba-wobbly when busy.
+            let amp = 0.07 + level * 0.16 + speaking * 0.12 + (thinking ? 0.07 : 0)
+            let speed = thinking ? 1.8 : 1.0
+            let envScale = 1 + level * 0.12 + speaking * 0.10
+            let radii = BlobMath.radii(t: t, n: 11, amp: amp, speed: speed)
+            let c0 = palette.first ?? viewModel.accent
+            let c1 = palette.count > 1 ? palette[1] : c0
+
+            BlobShape(radii: radii)
+                .fill(LinearGradient(colors: [c0, c1], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .overlay(
+                    // Soft inner highlight so it reads as a rounded, gel-like body.
+                    BlobShape(radii: radii)
+                        .fill(RadialGradient(colors: [.white.opacity(0.55), .white.opacity(0)],
+                                             center: .init(x: 0.38, y: 0.30), startRadius: 1, endRadius: 62))
+                )
+                .frame(width: 150, height: 150)
+                .scaleEffect(envScale)
+                // Solid, gel-like body — just a soft depth shadow + a faint color halo,
+                // not the big glow from before.
+                .shadow(color: .black.opacity(0.22), radius: 10, y: 7)
+                .shadow(color: c0.opacity(0.28), radius: 16)
         }
-        .ignoresSafeArea()
-        .animation(.easeInOut(duration: 0.3), value: intensity)
+        .frame(width: 184, height: 184)
     }
 
     private var caption: some View {
@@ -91,7 +107,7 @@ struct IslandView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .animation(.spring(response: 0.45, dampingFraction: 0.85), value: showCaption)
-        .animation(.spring(response: 0.45, dampingFraction: 0.85), value: viewModel.responseText)
+        .animation(.spring(response: 0.5, dampingFraction: 0.62), value: showCaption)
+        .animation(.spring(response: 0.5, dampingFraction: 0.7), value: viewModel.responseText)
     }
 }

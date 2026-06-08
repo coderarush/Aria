@@ -17,6 +17,31 @@ actor GeminiClient {
         var currentApp: String
         var time: Date
         var username: String
+        // Ambient screen awareness (empty unless granted + non-private). Lets the model
+        // resolve "this / here / her / the selection" without asking.
+        var windowTitle: String = ""
+        var selection: String = ""
+        var focusedField: String = ""
+        /// Clipboard text — attached only when the command refers to it (see
+        /// ContextRelevance), so private clipboard data never rides along by default.
+        var clipboard: String = ""
+
+        /// Extra ambient lines for the SYSTEM CONTEXT block — only what's known, so the
+        /// prompt stays tight when nothing is focused.
+        var ambientLines: String {
+            var out = ""
+            if !windowTitle.isEmpty { out += "\n- Active window: “\(windowTitle)”" }
+            if !focusedField.isEmpty { out += "\n- Focused field: \(focusedField)" }
+            if !selection.isEmpty {
+                let s = selection.count > 600 ? String(selection.prefix(600)) + "…" : selection
+                out += "\n- Selected text: “\(s)”"
+            }
+            if !clipboard.isEmpty {
+                let s = clipboard.count > 600 ? String(clipboard.prefix(600)) + "…" : clipboard
+                out += "\n- Clipboard: “\(s)”"
+            }
+            return out
+        }
     }
 
     private let models: [String]
@@ -226,14 +251,15 @@ actor GeminiClient {
     /// Plain text/JSON generation — no code framing, no JSON-schema mandate. Used by
     /// the planner and by agents synthesizing prose. Spreads across model buckets via
     /// performWithFallback (free-tier safe). Returns the model's text, fences stripped.
-    func generateText(prompt: String, temperature: Double = 0.3) async throws -> String {
+    func generateText(prompt: String, temperature: Double = 0.3,
+                      preferredModel: String? = nil) async throws -> String {
         let payload: [String: Any] = [
             "contents": [["role": "user", "parts": [["text": prompt]]]],
             "generationConfig": ["temperature": temperature]
         ]
         let body = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
         do {
-            let data = try await performWithFallback(body: body)
+            let data = try await performWithFallback(body: body, preferredModel: preferredModel)
             return Self.stripCodeFences(Self.extractText(from: data))
         } catch {
             // Gemini exhausted/unavailable — continue on a free fallback provider.
@@ -307,6 +333,10 @@ actor GeminiClient {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = body
+        // Fail fast instead of hanging on the 60s default: a stalled non-streaming
+        // call should bounce to the next model/provider quickly, not freeze the turn.
+        // (flash/-lite JSON replies land in a few seconds; 30s is generous headroom.)
+        request.timeoutInterval = 30
         let (data, response) = try await session.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard status == 200 else { throw GeminiError.http(status) }
@@ -319,7 +349,7 @@ actor GeminiClient {
     /// bucket and retries instead of grinding slow per-model backoff (which used to
     /// hang multi-call autonomous tasks for minutes). Only genuinely-broken models
     /// exhaust the attempt budget.
-    private func performWithFallback(body: Data) async throws -> Data {
+    private func performWithFallback(body: Data, preferredModel: String? = nil) async throws -> Data {
         keyRotator.update(keys: currentKeys())
         guard !keyRotator.isEmpty else { throw GeminiError.missingAPIKey }
         var lastError: Error = GeminiError.emptyResponse
@@ -331,7 +361,10 @@ actor GeminiClient {
             guard let apiKey = await reserveKey(paceIfBlocked: true) else {
                 quotaWaits += 1; continue   // all keys cooling — bounded, then fail fast
             }
-            let model = await reserveModel()
+            // Honor a caller's preferred (faster) model on the first try only; after
+            // any failure, fall back to normal rotation so we still route around it.
+            let firstTry = (attempt == 0 && quotaWaits == 0)
+            let model = await reserveModel(preferred: firstTry ? preferredModel : nil)
             let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent?key=\(apiKey)")!
             do {
                 let data = try await performOnce(url: url, body: body)
@@ -385,7 +418,7 @@ actor GeminiClient {
         SYSTEM CONTEXT:
         - Current app: \(context.currentApp)
         - Time: \(ISO8601DateFormatter().string(from: context.time))
-        - User: \(context.username)
+        - User: \(context.username)\(context.ambientLines)
         \(toolsBlock)
 
         RECENT CONVERSATION:
@@ -474,5 +507,12 @@ actor GeminiClient {
     work in multiple steps: call a tool, see the result, then continue or give your \
     final spoken answer. If you genuinely need more information, ask one brief \
     clarifying question instead of guessing.
+
+    SYSTEM CONTEXT tells you what the user is looking at right now — the active app, \
+    window, focused field, and any selected text. Use it to resolve words like \
+    "this", "that", "here", "her", or "the selection" without asking what they mean. \
+    If they say "summarize this" and there's selected text, summarize that text; if \
+    not, read the screen. When they reference the thing in front of them, act on the \
+    SYSTEM CONTEXT — don't make them describe it.
     """
 }

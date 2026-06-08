@@ -32,6 +32,7 @@ actor OpenAICompatibleClient {
         guard let url = URL(string: baseURL + path) else { return nil }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
+        req.timeoutInterval = 30   // fail fast to the next fallback provider, don't hang
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if requiresKey, let key = keyProvider(), !key.isEmpty {
             req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")

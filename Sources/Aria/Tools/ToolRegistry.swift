@@ -39,8 +39,15 @@ actor ToolRegistry {
             AppleScriptTool(),
             FileWriteTool(),
             FileReadTool(),
+            FinderSelectionTool(),
+            BrowserTabsTool(),
             ClipboardTool(),
             SaveNoteTool(),
+            UndoTool(),
+            EmailRecentTool(),
+            EmailSearchTool(),
+            EmailDraftTool(),
+            SendMailTool(),
             CalendarTool(),
             RemindersTool(),
             NotificationTool(),
@@ -52,7 +59,8 @@ actor ToolRegistry {
             UIClickTool(),
             UITypeTool(),
             UIKeyTool(),
-            UIScrollTool()
+            UIScrollTool(),
+            ScreenVisionTool()
         ]
     }
 }

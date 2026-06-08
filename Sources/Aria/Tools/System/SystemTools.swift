@@ -43,6 +43,85 @@ struct AppleScriptTool: AriaTool {
     }
 }
 
+/// The files/folders the user currently has selected in Finder — strong context for
+/// "rename these", "move this", "organize the selected files". On-demand (the model
+/// calls it when relevant) so it stays off the per-turn hot path; degrades gracefully
+/// if Automation access for Finder isn't granted.
+struct FinderSelectionTool: AriaTool {
+    static let name = "finder_selection"
+    static let description = "Get the files/folders the user has selected in Finder, as full paths. Use for 'these files', 'the selected files', 'rename/move/organize this'. Input: {}."
+    static let paramHints: [String: String] = [:]
+
+    func run(input: [String: String]) async throws -> ToolResult {
+        let script = """
+        tell application "Finder"
+            set sel to selection
+            if (count of sel) is 0 then return ""
+            set out to ""
+            repeat with f in sel
+                set out to out & POSIX path of (f as alias) & linefeed
+            end repeat
+            return out
+        end tell
+        """
+        let r = await AppleScriptTool.execute(script)
+        guard r.success else {
+            return .fail("I couldn't read the Finder selection — Aria may need Automation access for Finder (System Settings → Privacy & Security → Automation).")
+        }
+        let paths = r.output.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
+        return paths.isEmpty
+            ? .ok("No files are selected in Finder.")
+            : .ok("Selected in Finder (\(paths.count)):\n" + paths.joined(separator: "\n"))
+    }
+}
+
+/// The open tabs (title + URL) of the active web browser — context for "this page",
+/// "summarize this article", "what tabs do I have open". Only queries a browser that's
+/// frontmost, so it never launches one; on-demand, off the per-turn hot path.
+struct BrowserTabsTool: AriaTool {
+    static let name = "browser_tabs"
+    static let description = "List the open tabs (titles + URLs) of the active browser — for 'this page', 'summarize this article', 'what tabs are open'. Works when Safari or Chrome is frontmost. Input: {}."
+    static let paramHints: [String: String] = [:]
+
+    func run(input: [String: String]) async throws -> ToolResult {
+        let front = await MainActor.run { NSWorkspace.shared.frontmostApplication?.localizedName ?? "" }
+        let script: String
+        switch front {
+        case "Safari":
+            script = """
+            tell application "Safari"
+                set out to ""
+                repeat with t in tabs of front window
+                    set out to out & (name of t) & " — " & (URL of t) & linefeed
+                end repeat
+                return out
+            end tell
+            """
+        case "Google Chrome", "Chromium", "Brave Browser", "Microsoft Edge", "Arc":
+            // Chromium-family browsers share Chrome's scripting dictionary.
+            script = """
+            tell application "\(front)"
+                set out to ""
+                repeat with t in tabs of front window
+                    set out to out & (title of t) & " — " & (URL of t) & linefeed
+                end repeat
+                return out
+            end tell
+            """
+        default:
+            return .ok("No web browser is frontmost (active app: \(front.isEmpty ? "unknown" : front)). Switch to Safari or Chrome and ask again.")
+        }
+        let r = await AppleScriptTool.execute(script)
+        guard r.success else {
+            return .fail("I couldn't read \(front)'s tabs — Aria may need Automation access for \(front) (System Settings → Privacy & Security → Automation).")
+        }
+        let tabs = r.output.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
+        return tabs.isEmpty
+            ? .ok("No open tabs found in \(front).")
+            : .ok("\(front) tabs (\(tabs.count)):\n" + tabs.joined(separator: "\n"))
+    }
+}
+
 /// Create or overwrite a file. Destructive (overwrite).
 struct FileWriteTool: AriaTool {
     static let name = "file_write"
@@ -57,10 +136,15 @@ struct FileWriteTool: AriaTool {
         guard let path = input["path"], !path.isEmpty else { throw ToolError.missingInput("path") }
         let content = input["content"] ?? ""
         let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+        // Capture prior state for undo: whether the file existed and its old bytes.
+        let existedBefore = FileManager.default.fileExists(atPath: url.path)
+        let previous = existedBefore ? (try? String(contentsOf: url, encoding: .utf8)) : nil
         do {
             try FileManager.default.createDirectory(
                 at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try content.write(to: url, atomically: true, encoding: .utf8)
+            await UndoStack.shared.record(
+                .fileWrite(path: url.path, previousContent: existedBefore ? (previous ?? "") : nil))
             return .ok("Wrote \(content.utf8.count) bytes to \(url.path)")
         } catch {
             return .fail("Write failed: \(error.localizedDescription)")
@@ -100,9 +184,11 @@ struct ClipboardTool: AriaTool {
         return await MainActor.run {
             let pb = NSPasteboard.general
             if action == "write" {
+                let previous = pb.string(forType: .string)   // capture for undo
                 let text = input["text"] ?? ""
                 pb.clearContents()
                 pb.setString(text, forType: .string)
+                Task { await UndoStack.shared.record(.clipboardWrite(previous: previous)) }
                 return .ok("Copied to clipboard.")
             } else {
                 return .ok(pb.string(forType: .string) ?? "(clipboard empty)")

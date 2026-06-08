@@ -41,7 +41,10 @@ run: build
 # Assemble a proper .app bundle and codesign ad-hoc so permission
 # dialogs (mic / screen recording) attribute to "Aria".
 release:
-	swift build -c release
+	# -no-whole-module-optimization is REQUIRED: WMO miscompiles SwiftUI actor
+	# isolation on Swift 6.3 / macOS 26.3 and a release build crashes on the first
+	# control tap. Per-file -O is kept. See README "release builds".
+	swift build -c release -Xswiftc -no-whole-module-optimization
 	rm -rf $(APP_BUNDLE)
 	mkdir -p $(APP_BUNDLE)/Contents/MacOS
 	mkdir -p $(APP_BUNDLE)/Contents/Resources

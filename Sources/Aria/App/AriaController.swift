@@ -43,6 +43,22 @@ final class AriaController {
         configureConfirmation()
         configureLearning()
         startListening()
+        offerResumeIfPending()
+    }
+
+    /// If a multi-step task was interrupted (crash/quit), proactively surface it once
+    /// startup has settled — a single system notification, nothing intrusive. The user
+    /// continues by voice ("Hey Aria, resume"); we never auto-run a task on launch.
+    private func offerResumeIfPending() {
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)   // let launch settle first
+            guard let self, let pending = await self.orchestrator.pendingTask() else { return }
+            let remaining = pending.unfinishedCount
+            let msg = "Unfinished task: “\(pending.goal)” — \(remaining) step\(remaining == 1 ? "" : "s") left. Say “Hey Aria, resume” to continue."
+                .replacingOccurrences(of: "\"", with: "'")
+            _ = await AppleScriptTool.execute("display notification \"\(msg)\" with title \"Aria\"")
+            Log.trace("resume: offered pending task '\(pending.goal)'")
+        }
     }
 
     private var previewWindow: NSWindow?
@@ -402,6 +418,13 @@ final class AriaController {
             streamVoice.stop(); session?.end(); return
         }
 
+        // Resume the interrupted task. resumeTask() reports "nothing to resume" itself
+        // if there isn't one, so no async pre-check is needed on the main actor here.
+        if ResumeIntent.matches(command) {
+            runAutonomousTask(command, resume: true)
+            return
+        }
+
         if IntentRouter.isTask(command) {
             runAutonomousTask(command)
             return
@@ -445,7 +468,7 @@ final class AriaController {
         }
     }
 
-    private func runAutonomousTask(_ goal: String) {
+    private func runAutonomousTask(_ goal: String, resume: Bool = false) {
         taskActive = true
         wakeEngine.isSuspended = true
         isSpeaking = true
@@ -471,7 +494,7 @@ final class AriaController {
 
         currentTurnTask = Task { [weak self] in
             guard let self else { return }
-            await self.orchestrator.runTask(goal: goal) { event in
+            let handler: @Sendable (TaskEvent) -> Void = { event in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
                     switch event {
@@ -479,6 +502,14 @@ final class AriaController {
                         self.taskViewModel.show(plan)
                     case .stepStarted(let i):
                         self.taskViewModel.markRunning(i)
+                        // Spoken play-by-play: a short "Searching the web…" as each step
+                        // begins. The plan-start narrate already gave the overview, so skip
+                        // the first step to avoid repeating it.
+                        if i > 0, AppSettings.shared.spokenStepNarration,
+                           let steps = self.taskViewModel.plan?.steps, steps.indices.contains(i) {
+                            let line = TaskNarration.spoken(for: steps[i].summary)
+                            if !line.isEmpty { self.streamVoice.enqueue(line) }
+                        }
                     case .stepFinished(let i, let ok, let result):
                         self.taskViewModel.markFinished(i, ok: ok, result: result)
                     case .narrate(let line):
@@ -498,6 +529,11 @@ final class AriaController {
                         }
                     }
                 }
+            }
+            if resume {
+                await self.orchestrator.resumeTask(emit: handler)
+            } else {
+                await self.orchestrator.runTask(goal: goal, emit: handler)
             }
         }
     }

@@ -48,7 +48,7 @@ actor AgentOrchestrator {
 
         let screenshot: Data? = privacyMode ? nil : try? await screen.capturePrimaryJPEG()
         var history = await memory.recentContext()
-        let context = await Self.currentSystemContext()
+        let context = await systemContext(privacyMode: privacyMode)
         let maxSteps = 4
 
         do {
@@ -150,11 +150,18 @@ actor AgentOrchestrator {
             if tool.isDestructive || Safety.isDestructive(tool: action.tool, input: action.input) {
                 let approved = await (confirmationHandler?(
                     "Run \(action.tool) with \(action.input)?") ?? false)
-                guard approved else { return .fail("Cancelled — not approved.") }
+                guard approved else {
+                    let declined = ToolResult.cancelled()
+                    await ActivityLog.shared.record(tool: action.tool, detail: describe(action), result: declined)
+                    return declined
+                }
             }
-            do { return try await tool.run(input: action.input) }
-            catch ToolError.missingInput(let key) { return .fail("Missing input '\(key)' for \(action.tool).") }
-            catch { return .fail("\(action.tool) failed: \(error.localizedDescription)") }
+            let result: ToolResult
+            do { result = try await tool.run(input: action.input) }
+            catch ToolError.missingInput(let key) { result = .fail("Missing input '\(key)' for \(action.tool).") }
+            catch { result = .fail("\(action.tool) failed: \(error.localizedDescription)") }
+            await ActivityLog.shared.record(tool: action.tool, detail: describe(action), result: result)
+            return result
         }
 
         // Otherwise fall back to dynamic code generation.
@@ -178,15 +185,20 @@ actor AgentOrchestrator {
         }
 
         // Confirmation gate: destructive intent or "show code before run".
-        if isDestructive(task) || settings.showCodeBeforeRun {
+        if Safety.isDestructive(summary: task) || settings.showCodeBeforeRun {
             let prompt = settings.showCodeBeforeRun
                 ? "Aria wants to run this \(language.rawValue):\n\n\(tool.code)"
                 : "This may modify or send data. Run it?"
             let approved = await (confirmationHandler?(prompt) ?? false)
-            guard approved else { return .fail("Cancelled — not approved.") }
+            guard approved else {
+                let declined = ToolResult.cancelled()
+                await ActivityLog.shared.record(tool: action.tool, detail: describe(action), result: declined)
+                return declined
+            }
         }
 
         let result = await factory.execute(tool, timeout: 60)
+        await ActivityLog.shared.record(tool: action.tool, detail: describe(action), result: result)
 
         // Offer to persist successful, non-trivial tools.
         if result.success, settings.askBeforeSaving,
@@ -207,19 +219,13 @@ actor AgentOrchestrator {
         return inputs.isEmpty ? action.tool : "\(action.tool): \(inputs)"
     }
 
-    private func isDestructive(_ task: String) -> Bool {
-        let t = task.lowercased()
-        return ["delete", "remove", "rm ", "send", "post", "email", "submit",
-                "overwrite", "drop ", "kill"].contains { t.contains($0) }
-    }
-
     /// Run a multi-step autonomous task. Emits `TaskEvent` values as each planning
     /// and execution step completes. Hooks into the same `execute` + `confirmationHandler`
     /// plumbing used by the normal command path.
-    func runTask(goal: String, emit: @escaping @Sendable (TaskEvent) -> Void) async {
+    private func makeAutonomyEngine() async -> AutonomyEngine {
         // currentSystemContext() is @MainActor, so we hop to it explicitly.
         let context = await MainActor.run { Self.currentSystemContext() }
-        let engine = AutonomyEngine(
+        return AutonomyEngine(
             gemini: gemini,
             registry: registry,
             subAgents: subAgents,
@@ -230,7 +236,22 @@ actor AgentOrchestrator {
             confirm: { [weak self] prompt in
                 await self?.confirmationHandler?(prompt) ?? false
             })
-        await engine.run(goal: goal, emit: emit)
+    }
+
+    /// An interrupted task waiting to be resumed, if any (its goal, for offering it).
+    func pendingTask() async -> PersistedTask? { await TaskStore.shared.pending() }
+
+    /// Resume the interrupted task from its persisted snapshot.
+    func resumeTask(emit: @escaping @Sendable (TaskEvent) -> Void) async {
+        guard let persisted = await TaskStore.shared.pending() else {
+            emit(.finished(ok: false, summary: "There's no unfinished task to resume."))
+            return
+        }
+        await makeAutonomyEngine().resume(persisted, emit: emit)
+    }
+
+    func runTask(goal: String, emit: @escaping @Sendable (TaskEvent) -> Void) async {
+        await makeAutonomyEngine().run(goal: goal, emit: emit)
     }
 
     /// Streaming answer path (Phase 2: text + native function-calling loop).
@@ -246,14 +267,20 @@ actor AgentOrchestrator {
             return
         }
 
+        // These five turn-setup reads are independent — run them concurrently so the
+        // first model call waits on the slowest, not the sum (lower time-to-first-token).
         let wantsScreen = !privacyMode && ModelRouter.needsScreen(for: command)
-        let screenshot: Data? = wantsScreen ? (try? await screen.capturePrimaryJPEG()) : nil
-        var history = await memory.recentContext()
-        history = Array(history.suffix(8))
-        let context = await Self.currentSystemContext()
-        let specs = await registry.specs()
-        // Recall relevant long-term facts and prime the turn with them.
-        let recalled = await longTerm.recall(for: command, limit: 4)
+        async let screenshotLoad: Data? = wantsScreen ? (try? await screen.capturePrimaryJPEG()) : nil
+        async let historyLoad = memory.recentContext()
+        async let contextLoad = systemContext(privacyMode: privacyMode, command: command)
+        async let specsLoad = registry.specs()
+        async let recalledLoad = longTerm.recall(for: command, limit: 4)   // relevant long-term facts
+
+        let screenshot = await screenshotLoad
+        var history = Array(await historyLoad.suffix(8))
+        let context = await contextLoad
+        let specs = await specsLoad
+        let recalled = await recalledLoad
         var transcript = command
         if !recalled.isEmpty {
             let known = recalled.map { "- \($0.text)" }.joined(separator: "\n")
@@ -323,12 +350,29 @@ actor AgentOrchestrator {
 
     // MARK: System context
 
-    @MainActor
-    static func currentSystemContext() -> GeminiClient.SystemContext {
+    @MainActor static func currentSystemContext() -> GeminiClient.SystemContext {
         let app = NSWorkspace.shared.frontmostApplication?.localizedName ?? "Unknown"
-        return GeminiClient.SystemContext(
-            currentApp: app,
-            time: Date(),
-            username: NSUserName())
+        return GeminiClient.SystemContext(currentApp: app, time: Date(), username: NSUserName())
+    }
+
+    /// Base system context plus ambient screen context. The AX read runs HERE, on the agent
+    /// actor's executor (off the main thread) and time-bounded — so a slow Accessibility call
+    /// can never freeze the main thread (which previously broke the whole turn: no reply, no
+    /// voice, no re-arm, and a crash when Settings was opened afterward).
+    func systemContext(privacyMode: Bool, command: String? = nil) async -> GeminiClient.SystemContext {
+        var ctx = await MainActor.run { Self.currentSystemContext() }
+        if !privacyMode, let pid = await MainActor.run(body: { AXReader.frontmostTarget()?.processIdentifier }) {
+            let s = ScreenContext.snapshot(pid: pid)   // off-main, bounded
+            ctx.windowTitle = s.windowTitle
+            ctx.selection = s.selectedText
+            ctx.focusedField = s.focusedRole
+        }
+        // Clipboard is attached only when the command refers to it — intentional, and
+        // it keeps private clipboard data out of every other turn.
+        if !privacyMode, let command, ContextRelevance.wantsClipboard(command) {
+            let clip = await MainActor.run { NSPasteboard.general.string(forType: .string) ?? "" }
+            ctx.clipboard = ScreenContext.cap(clip, 1000)
+        }
+        return ctx
     }
 }

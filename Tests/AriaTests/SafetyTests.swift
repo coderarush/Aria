@@ -18,6 +18,13 @@ final class SafetyTests: XCTestCase {
         XCTAssertTrue(Safety.isDestructive(tool: "ui_click", input: ["label": "Delete project"]))
     }
 
+    func testEmailToolDestructiveness() {
+        XCTAssertTrue(SendMailTool().isDestructive)                              // send → gated
+        XCTAssertFalse(EmailDraftTool().isDestructive)                          // draft → prep only
+        XCTAssertFalse(Safety.isDestructive(tool: "email_recent", input: [:]))  // read → safe
+        XCTAssertFalse(Safety.isDestructive(tool: "email_search", input: ["query": "invoice"]))
+    }
+
     func testFlagsDestructiveAgentSummaries() {
         XCTAssertTrue(Safety.isDestructive(summary: "send the email to John"))
         XCTAssertTrue(Safety.isDestructive(summary: "delete the old backups"))

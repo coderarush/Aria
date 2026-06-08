@@ -67,6 +67,8 @@ final class AppSettings: ObservableObject {
     /// Use a local Ollama model as a last-resort fallback (offline / all-quota-exhausted).
     @Published var localModelEnabled: Bool { didSet { defaults.set(localModelEnabled, forKey: K.localModelEnabled) } }
     @Published var localModelName: String { didSet { defaults.set(localModelName, forKey: K.localModelName) } }
+    /// Speak a short play-by-play line as each autonomous step starts (alive + transparent).
+    @Published var spokenStepNarration: Bool { didSet { defaults.set(spokenStepNarration, forKey: K.spokenStepNarration) } }
 
     var accentChoice: AccentChoice {
         get { Theme.decodeChoice(accentChoiceRaw) }
@@ -98,6 +100,7 @@ final class AppSettings: ObservableObject {
         speakerVerificationEnabled = defaults.bool(forKey: K.speakerVerificationEnabled)
         localModelEnabled = defaults.bool(forKey: K.localModelEnabled)
         localModelName = defaults.string(forKey: K.localModelName) ?? "gemma2:2b"
+        spokenStepNarration = defaults.object(forKey: K.spokenStepNarration) as? Bool ?? true
     }
 
     /// Register/unregister the app as a login item (SMAppService, macOS 13+).
@@ -132,5 +135,6 @@ final class AppSettings: ObservableObject {
         static let speakerVerificationEnabled = "app.speakerVerificationEnabled"
         static let localModelEnabled = "app.localModelEnabled"
         static let localModelName = "app.localModelName"
+        static let spokenStepNarration = "app.spokenStepNarration"
     }
 }

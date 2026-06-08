@@ -44,7 +44,17 @@ actor AutonomyEngine {
     }
 
     func run(goal: String, emit: @escaping @Sendable (TaskEvent) -> Void) async {
-        let steps = await makePlan(goal: goal)
+        let steps: [TaskStep]
+        switch await makePlan(goal: goal) {
+        case .transportFailure(let message):
+            // Model unreachable (network/API/key). Surface it plainly instead of
+            // pretending we couldn't figure the task out — and skip the doomed
+            // Atlas fallback, which needs the same connection.
+            emit(.finished(ok: false, summary: message))
+            return
+        case .steps(let planned):
+            steps = planned
+        }
         guard !steps.isEmpty else {
             emit(.finished(ok: false, summary: "I couldn't work out how to do that one."))
             return
@@ -53,23 +63,46 @@ actor AutonomyEngine {
         emit(.planReady(plan))
         emit(.narrate("On it — " + plan.steps.map { $0.summary }.prefix(3).joined(separator: ", ") + "."))
         Log.trace("autonomy: plan has \(plan.steps.count) step(s) for '\(goal)'")
+        await runLoop(&plan, goal: goal, completed: [], lastOutput: "", startIndex: 0, emit: emit)
+    }
 
-        var prior = ""   // accumulated output of completed steps, threaded forward
-        for i in plan.steps.indices {
-            if Task.isCancelled { return }   // Stop pressed — halt before the next step
+    /// Resume a task that was interrupted (crash/quit) from its persisted snapshot —
+    /// already-done steps are skipped and their outputs restored as material.
+    func resume(_ persisted: PersistedTask, emit: @escaping @Sendable (TaskEvent) -> Void) async {
+        var plan = TaskPlan(goal: persisted.goal, steps: persisted.restoredSteps())
+        emit(.planReady(plan))
+        let remaining = persisted.unfinishedCount
+        emit(.narrate("Picking up where I left off — \(remaining) step\(remaining == 1 ? "" : "s") to go."))
+        Log.trace("autonomy: resuming '\(persisted.goal)' at step \(persisted.resumeIndex + 1)/\(plan.total)")
+        await runLoop(&plan, goal: persisted.goal,
+                      completed: persisted.completedPairs(),
+                      lastOutput: persisted.lastOutput,
+                      startIndex: persisted.resumeIndex, emit: emit)
+    }
+
+    /// The step loop, shared by run() and resume(). Persists progress after every step
+    /// so an interrupted task can be resumed, and clears the journal when the run returns.
+    private func runLoop(_ plan: inout TaskPlan, goal: String,
+                         completed completedInput: [(summary: String, output: String)],
+                         lastOutput lastOutputInput: String, startIndex: Int,
+                         emit: @escaping @Sendable (TaskEvent) -> Void) async {
+        var lastOutput = lastOutputInput                          // immediate previous output (tool chaining / save fill)
+        var completed = completedInput                            // ALL successful steps — agent material
+        await TaskStore.shared.save(PersistedTask.snapshot(goal: goal, steps: plan.steps, lastOutput: lastOutput))
+        for i in plan.steps.indices where i >= startIndex {
+            if Task.isCancelled { await TaskStore.shared.clear(); return }   // Stop pressed — intentional, don't offer resume
             emit(.stepStarted(i))
             let step = plan.steps[i]
             Log.trace("autonomy: step \(i + 1)/\(plan.steps.count) — \(step.summary)")
 
-            // Safety gate — destructive tool OR agent steps (verb is in the summary
-            // for agents, in the tool/input for tools).
-            let needsConfirm: Bool
-            switch step.executor {
-            case .tool(let t):  needsConfirm = Safety.isDestructive(tool: t, input: step.input)
-            case .agent(let a): needsConfirm = Safety.isDestructive(tool: a, input: step.input)
-                                    || Safety.isDestructive(summary: step.summary)
-            }
-            if needsConfirm {
+            // Safety gate. Tool steps are gated at the execution chokepoint
+            // (AgentOrchestrator.execute), which confirms EVERY destructive tool for
+            // every caller — so we don't ALSO prompt here (that was a double-prompt).
+            // Agent steps get an upfront gate: their danger verb lives in the summary
+            // ("send the email to John"), and a long agent run deserves a heads-up
+            // before it starts rather than only at the leaf action.
+            if case .agent(let a) = step.executor,
+               Safety.isDestructive(tool: a, input: step.input) || Safety.isDestructive(summary: step.summary) {
                 let okToRun = await confirm("Aria wants to \(step.summary). Allow?")
                 if !okToRun {
                     plan.steps[i].status = .failed
@@ -79,19 +112,39 @@ actor AutonomyEngine {
                 }
             }
 
-            var result = await execute(step, prior: prior)
-            if !result.success { result = await execute(step, prior: prior) }   // verify: retry once
-            if !result.success {
-                result = await recover(step: step, prior: prior, goal: goal)   // never dead-end
+            // Agent steps see EVERY earlier step's output (labeled), so a step can
+            // synthesize across the whole workflow ("research A, research B, combine"),
+            // not just the immediately-previous result.
+            let material = Self.material(from: completed)
+            var result = await execute(step, lastOutput: lastOutput, material: material)
+            // Retry once, but only for failures a blind retry might fix — not a user
+            // decline and not a missing-input error (those won't change). A short
+            // backoff gives a transient (network/AX) hiccup time to clear.
+            if !result.success, !result.isNonRetryableFailure {
+                try? await Task.sleep(nanoseconds: 400_000_000)   // 0.4s backoff
+                result = await execute(step, lastOutput: lastOutput, material: material)
+            }
+            // Recover (alternative action) for anything still failing except a decline —
+            // a missing-input CAN be fixed by a different action, a decline must not be.
+            if !result.success, !result.wasDeclined {
+                result = await recover(step: step, lastOutput: lastOutput, material: material, goal: goal)
             }
 
             plan.steps[i].status = result.success ? .done : .failed
             plan.steps[i].result = result.output
             emit(.stepFinished(i, ok: result.success, result: result.output))
-            if result.success, !result.output.isEmpty { prior = result.output }
+            if result.success, !result.output.isEmpty {
+                lastOutput = result.output
+                completed.append((summary: step.summary, output: result.output))
+            }
+            // Persist progress so a crash/quit can resume from the next step.
+            await TaskStore.shared.save(PersistedTask.snapshot(goal: goal, steps: plan.steps, lastOutput: lastOutput))
             // Note: we do NOT abort the whole task on a single failed step — we carry
             // on with the last good output so partial progress still reaches the user.
         }
+
+        // Run finished its pass — clear the journal (resume is only for interruptions).
+        await TaskStore.shared.clear()
 
         let done = plan.completedCount
         let summary: String
@@ -103,24 +156,70 @@ actor AutonomyEngine {
             summary = "I wasn't able to complete that one."
         }
         emit(.finished(ok: done > 0, summary: summary))
+
+        // Surface completion for longer tasks via a system notification — a long-running
+        // objective shouldn't need you to be watching the orb to know it finished.
+        if plan.total > 1, done > 0 {
+            _ = await runAction(AgentAction(tool: "notify", input: ["title": "Aria", "message": summary]), "")
+        }
     }
 
     // MARK: Planning
 
-    private func makePlan(goal: String) async -> [TaskStep] {
+    /// Outcome of planning: either steps to run, or the model was unreachable.
+    enum PlanOutcome { case steps([TaskStep]); case transportFailure(String) }
+
+    private func makePlan(goal: String) async -> PlanOutcome {
         let prompt = await planPrompt(goal: goal)
+        var gotResponse = false        // model replied at least once (vs. never reachable)
+        var lastError: Error?
         for attempt in 0..<2 {
             let p = attempt == 0 ? prompt
                 : prompt + "\n\nReminder: output ONLY the raw JSON array — no prose, no code fences."
-            let raw = (try? await gemini.generateText(prompt: p, temperature: 0.2)) ?? ""
-            let steps = PlanParser.steps(fromJSON: raw)
-            if !steps.isEmpty { return steps }
-            Log.trace("autonomy: empty plan (attempt \(attempt + 1)); retrying")
+            do {
+                let raw = try await gemini.generateText(prompt: p, temperature: 0.2,
+                                                        preferredModel: ModelRouter.fastStructured)
+                gotResponse = true
+                let steps = PlanParser.steps(fromJSON: raw)
+                if !steps.isEmpty { return .steps(steps) }
+                Log.trace("autonomy: empty plan (attempt \(attempt + 1)); retrying")
+            } catch {
+                lastError = error
+                Log.trace("autonomy: plan call failed (attempt \(attempt + 1)): \(error.localizedDescription)")
+            }
         }
-        // Last resort: never dead-end on planning — hand the whole goal to Atlas, who
-        // breaks it down and operates the Mac directly.
+        // Every attempt threw and the model never responded → it's unreachable.
+        // Don't fall into a doomed Atlas step that needs the same connection.
+        if !gotResponse, let lastError {
+            return .transportFailure(Self.transportMessage(for: lastError))
+        }
+        // Model responded but never produced a usable plan — hand the whole goal to
+        // Atlas, who breaks it down and operates the Mac directly. (never dead-end)
         Log.trace("autonomy: falling back to a single Atlas step")
-        return [TaskStep(summary: goal, executor: .agent("Atlas"))]
+        return .steps([TaskStep(summary: goal, executor: .agent("Atlas"))])
+    }
+
+    /// User-facing, explainable message for a model-unreachable failure.
+    static func transportMessage(for error: Error) -> String {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost,
+                 .cannotConnectToHost, .cannotFindHost, .timedOut, .dnsLookupFailed:
+                return "I can't reach the model right now — check your internet connection and try again."
+            default:
+                break
+            }
+        }
+        return "I'm having trouble reaching the model — check your API key and connection, then try again."
+    }
+
+    /// A "what you know about the user" block from recalled facts — so the planner
+    /// uses preferences ("reports go to the team channel", "meetings in the afternoon")
+    /// instead of asking again. Empty when nothing relevant is remembered.
+    static func knownBlock(_ facts: [MemoryFact]) -> String {
+        guard !facts.isEmpty else { return "" }
+        return "\n\nWHAT YOU KNOW ABOUT THE USER (apply when relevant):\n"
+            + facts.map { "- \($0.text)" }.joined(separator: "\n")
     }
 
     private func planPrompt(goal: String) async -> String {
@@ -128,6 +227,9 @@ actor AutonomyEngine {
         let crew = await subAgents.crew()
             .map { "- \($0.name): \($0.description)" }
             .joined(separator: "\n")
+        // Long-term memory improves execution: recall relevant preferences/facts and
+        // give them to the planner (keyword-gated, so irrelevant turns stay tight).
+        let known = Self.knownBlock(await LongTermMemory.shared.recall(for: goal, limit: 5))
         return """
         You are Aria, an autonomous agent that fully controls this Mac. Through these \
         tools — especially `shell` and `applescript` — you can operate ANY app, file, or \
@@ -151,7 +253,7 @@ actor AutonomyEngine {
         \(crew)
 
         TOOLS:
-        \(catalog)
+        \(catalog)\(known)
 
         GOAL: \(goal)
         """
@@ -159,11 +261,13 @@ actor AutonomyEngine {
 
     // MARK: Execution
 
-    private func execute(_ step: TaskStep, prior: String) async -> ToolResult {
+    private func execute(_ step: TaskStep, lastOutput: String, material: String) async -> ToolResult {
         switch step.executor {
         case .tool(let name):
-            let input = enrich(input: step.input, forTool: name, prior: prior)
-            return await runAction(AgentAction(tool: name, input: input), prior)
+            // Tools chain off the immediate previous output (fill an empty save/write
+            // content, pass as prior to the action).
+            let input = enrich(input: step.input, forTool: name, prior: lastOutput)
+            return await runAction(AgentAction(tool: name, input: input), lastOutput)
 
         case .agent(let agentName):
             guard let agent = await subAgents.agent(named: agentName) else {
@@ -175,12 +279,23 @@ actor AutonomyEngine {
             var taskText = step.summary
             let extra = step.input.values.joined(separator: " ")
             if !extra.isEmpty { taskText += " " + extra }
-            if !prior.isEmpty {
-                taskText += "\n\nMaterial from earlier steps (use this):\n" + String(prior.prefix(6000))
+            if !material.isEmpty {
+                taskText += "\n\nMaterial from earlier steps (use this):\n" + material
             }
             let r = await agent.execute(task: taskText, context: ctx)
             return r.success ? .ok(r.output) : .fail(r.output)
         }
+    }
+
+    /// Labeled digest of every completed step's output, threaded to agent steps so
+    /// they can synthesize across the whole workflow. Capped (keeping the most recent)
+    /// so a long chain can't blow up the prompt.
+    static func material(from completed: [(summary: String, output: String)], cap: Int = 6000) -> String {
+        guard !completed.isEmpty else { return "" }
+        let joined = completed
+            .map { "[\($0.summary)]\n\($0.output)" }
+            .joined(separator: "\n\n")
+        return joined.count <= cap ? joined : "…" + String(joined.suffix(cap))
     }
 
     /// Fill a write/save tool's content field from the prior step's output when the
@@ -200,12 +315,12 @@ actor AutonomyEngine {
 
     // MARK: Recovery (never dead-end)
 
-    private func recover(step: TaskStep, prior: String, goal: String) async -> ToolResult {
+    private func recover(step: TaskStep, lastOutput: String, material: String, goal: String) async -> ToolResult {
         Log.trace("autonomy: recovering failed step '\(step.summary)'")
 
         // If this step is about recording/saving text, guarantee the user gets it.
         if Self.isSaveIntent(step.summary) || isWriteTool(step.executor) {
-            let content = prior.isEmpty ? step.summary : prior
+            let content = lastOutput.isEmpty ? step.summary : lastOutput
             let title = Self.titleFromGoal(goal)
             let r = await runAction(
                 AgentAction(tool: "save_note", input: ["title": title, "content": content]), "")
@@ -213,15 +328,15 @@ actor AutonomyEngine {
         }
 
         // Otherwise ask the model for one alternative action and try it.
-        if let alt = await alternativeAction(for: step, prior: prior) {
-            let r = await runAction(alt, prior)
+        if let alt = await alternativeAction(for: step, material: material) {
+            let r = await runAction(alt, lastOutput)
             if r.success { return r }
         }
 
         return .fail("Couldn't complete: \(step.summary)")
     }
 
-    private func alternativeAction(for step: TaskStep, prior: String) async -> AgentAction? {
+    private func alternativeAction(for step: TaskStep, material: String) async -> AgentAction? {
         let catalog = await registry.catalog()
         let prompt = """
         A step failed. Propose ONE alternative tool action that accomplishes it, as a \
@@ -231,12 +346,13 @@ actor AutonomyEngine {
 
         STEP: \(step.summary)
         MATERIAL (from earlier steps, may be what to act on):
-        \(String(prior.prefix(2000)))
+        \(String(material.prefix(2000)))
 
         TOOLS:
         \(catalog)
         """
-        let raw = (try? await gemini.generateText(prompt: prompt, temperature: 0.2)) ?? ""
+        let raw = (try? await gemini.generateText(prompt: prompt, temperature: 0.2,
+                                                  preferredModel: ModelRouter.fastStructured)) ?? ""
         let cleaned = GeminiClient.stripCodeFences(raw)
         guard let start = cleaned.firstIndex(of: "{"),
               let end = cleaned.lastIndex(of: "}"),

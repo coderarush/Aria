@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private let controller = AriaController()
     private var onboardingWindow: NSWindow?
+    private var didStart = false   // controller.start() must run exactly once
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Log.app.info("Aria launching")
@@ -27,8 +28,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         migrateAPIKeyIfNeeded()
         setupStatusItem()
-        controller.start()
+        // ALWAYS start listening immediately — never leave Aria dead waiting on the
+        // onboarding window (which, as an accessory app, may not even surface). On a
+        // fresh install the mic prompt fires now; onboarding then explains it. A working
+        // assistant beats perfect prompt ordering.
+        startControllerOnce()
         showOnboardingIfNeeded()
+    }
+
+    /// Start listening exactly once, regardless of path (normal launch, onboarding
+    /// finished, or onboarding window dismissed).
+    private func startControllerOnce() {
+        guard !didStart else { return }
+        didStart = true
+        controller.start()
     }
 
     // MARK: Onboarding
@@ -45,10 +58,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             AppSettings.shared.onboardingComplete = true
             self?.onboardingWindow?.close()
             self?.onboardingWindow = nil
+            // Permissions are granted now — start listening for "Hey Aria".
+            self?.startControllerOnce()
         })
+        window.delegate = self   // catch a manual close (red X) so Aria still boots
         onboardingWindow = window
+        NSApp.setActivationPolicy(.regular)   // accessory apps won't surface a window otherwise
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
     }
 
     // MARK: Menu bar
@@ -108,5 +126,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             Log.app.error("API key migration failed: \(error.localizedDescription)")
         }
+    }
+}
+
+extension AppDelegate: NSWindowDelegate {
+    /// If the user dismisses the welcome window with the red X instead of finishing
+    /// onboarding, still start listening so Aria isn't left running dead. Onboarding
+    /// stays incomplete, so it will reappear on the next launch to collect permissions.
+    func windowWillClose(_ notification: Notification) {
+        guard notification.object as AnyObject === onboardingWindow else { return }
+        startControllerOnce()
     }
 }
