@@ -55,6 +55,16 @@ Gate: side-by-side eval harness; a task class only routes local when it matches 
 - Licensing decision (trial on/off for pre-release), `make dmg` re-verify, notarization
   when the Apple Developer account exists.
 
+### Phase D decisions (2026-06-10)
+
+- **Licensing: enforcement stays OFF for the pre-release.** The site positions Aria
+  as free + open source and the funnel is waitlist-first; a trial lock would
+  contradict the message and add support burden before there's a paid tier or a
+  final product name. `LicenseManager` is wired and ready — flip at the paid launch.
+- **Waitlist: built but dormant** until `WAITLIST_ENDPOINT` is set (site/README.md).
+- **Demo recordings: blocked on live use** — record with `ARIA_DEMO_MODE=1` once the
+  Phase A/C live-validation pass is done.
+
 ## Highest-leverage order
 
 Provider abstraction (B) → Knowledge Engine (C1) → Background agents (C2) →
