@@ -35,9 +35,24 @@ function trace(ctx, cx, cy, base, rad) {
   ctx.closePath();
 }
 
-export default function Blob({ size = 440 }) {
+// Blob states from the website constitution: motion is meaning, never decoration.
+// idle = subtle breathing · listening = slight expansion + ripple · thinking =
+// organic morphing, faster · executing = energy radiating outward · calm =
+// settled, near-still · confident = fully alive, easy breathing.
+const MOODS = {
+  idle:      { amp: 0.10, speed: 0.70, breathe: 0.012 },
+  listening: { amp: 0.16, speed: 0.95, breathe: 0.020 },
+  thinking:  { amp: 0.13, speed: 1.60, breathe: 0.010 },
+  executing: { amp: 0.20, speed: 1.25, breathe: 0.016 },
+  calm:      { amp: 0.055, speed: 0.45, breathe: 0.008 },
+  confident: { amp: 0.12, speed: 0.80, breathe: 0.030 },
+};
+
+export default function Blob({ size = 440, mood = "idle" }) {
   const ref = useRef(null);
   const mouse = useRef({ x: 0.42, y: 0.34 });
+  const moodRef = useRef(mood);
+  moodRef.current = mood;
 
   useEffect(() => {
     const canvas = ref.current;
@@ -57,14 +72,24 @@ export default function Blob({ size = 440 }) {
     let raf;
     const start = performance.now();
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // Live parameters ease toward the active mood — transitions read as the
+    // blob changing its mind, not as a cut.
+    const live = { ...MOODS[moodRef.current] || MOODS.idle };
 
     const draw = () => {
       const t = reduce ? 0.6 : (performance.now() - start) / 1000;
+      const target = MOODS[moodRef.current] || MOODS.idle;
+      const k = 0.04; // lerp factor — slow, organic settle
+      live.amp += (target.amp - live.amp) * k;
+      live.speed += (target.speed - live.speed) * k;
+      live.breathe += (target.breathe - live.breathe) * k;
+
       ctx.clearRect(0, 0, size, size);
       const cx = size / 2;
       const cy = size / 2;
-      const base = (size / 2) * 0.6;
-      const rad = radii(t, 11, 0.1, 0.7);
+      const breathe = 1 + live.breathe * Math.sin(t * 1.1);
+      const base = (size / 2) * 0.6 * breathe;
+      const rad = radii(t, 11, live.amp, live.speed);
 
       // Body — warm near-black, like the reference blobs.
       trace(ctx, cx, cy, base, rad);

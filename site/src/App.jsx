@@ -1,8 +1,12 @@
-import { motion } from "framer-motion";
+import { useRef, useState } from "react";
+import { motion, useScroll, useTransform, useReducedMotion } from "framer-motion";
 import Blob from "./Blob.jsx";
 
 const DOWNLOAD = "https://github.com/coderarush/Aria/releases/latest";
 const GITHUB = "https://github.com/coderarush/Aria";
+// Waitlist backend (e.g. a Formspree/Buttondown endpoint). Leave empty to hide
+// the form and keep Download as the only CTA. See site/README.md.
+const WAITLIST_ENDPOINT = "";
 
 const rise = {
   hidden: { opacity: 0, y: 22 },
@@ -61,6 +65,54 @@ const steps = [
   ["Act", "She calls real tools to do the task across your apps, checks her own work, and tells you when it's done. Anything destructive — Send, Pay, Delete — asks first."],
 ];
 
+const demoFlows = [
+  ["“Prepare me for tomorrow's meeting.”",
+   ["Checks your calendar", "Finds last week's notes", "Writes a one-page briefing", "Saves it to your notes"]],
+  ["“Organize my Downloads folder.”",
+   ["Reads the new files", "Creates sensible folders", "Sorts everything by type", "Deletes nothing"]],
+  ["“What did the investor say about pricing?”",
+   ["Searches your notes and PDFs", "Finds the call summary", "Answers with the source"]],
+];
+
+const founderFlows = ["Meeting prep", "Investor updates", "Research briefings", "Daily founder briefing"];
+const devFlows = ["Repository-aware answers", "Terminal & git workflows", "Code search across projects", "Indexed docs & specs"];
+
+function Waitlist() {
+  const [email, setEmail] = useState("");
+  const [state, setState] = useState("idle"); // idle | sending | done | error
+  if (!WAITLIST_ENDPOINT) return null;
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!email.includes("@")) return;
+    setState("sending");
+    try {
+      const res = await fetch(WAITLIST_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      setState(res.ok ? "done" : "error");
+    } catch {
+      setState("error");
+    }
+  };
+
+  if (state === "done") return <p className="waitlistDone">You're on the list — we'll email you at launch.</p>;
+  return (
+    <form className="waitlist" onSubmit={submit} aria-label="Join the waitlist">
+      <input
+        type="email" required value={email} placeholder="you@example.com"
+        aria-label="Email address" onChange={(e) => setEmail(e.target.value)}
+      />
+      <button className="btn" type="submit" disabled={state === "sending"}>
+        {state === "sending" ? "Joining…" : "Join the waitlist"}
+      </button>
+      {state === "error" && <span className="waitlistErr">Something hiccuped — try again.</span>}
+    </form>
+  );
+}
+
 const faqs = [
   ["Is it really free?",
    "Yes. Aria runs on Google's Gemini free tier with your own key, and rotates across several keys plus free fallback providers (Groq, Cerebras, OpenRouter). No subscription, no metered usage, no card."],
@@ -75,6 +127,13 @@ const faqs = [
 ];
 
 export default function App() {
+  const heroRef = useRef(null);
+  const reduce = useReducedMotion();
+  const { scrollYProgress } = useScroll({ target: heroRef, offset: ["start start", "end start"] });
+  // The blob recedes as the story begins — motion originates from her.
+  const heroScale = useTransform(scrollYProgress, [0, 1], [1, reduce ? 1 : 0.82]);
+  const heroY = useTransform(scrollYProgress, [0, 1], [0, reduce ? 0 : 90]);
+
   return (
     <>
       <div className="wrap">
@@ -82,13 +141,14 @@ export default function App() {
           <div className="brand"><span className="dot" /> Aria</div>
           <div className="links">
             <a href="#what">What she does</a>
-            <a href="#say">Try saying</a>
+            <a href="#knows">Knowledge</a>
+            <a href="#agents">Agents</a>
             <a href={GITHUB} target="_blank" rel="noreferrer">Source</a>
             <a className="btn" href={DOWNLOAD} target="_blank" rel="noreferrer">Download</a>
           </div>
         </nav>
 
-        <header className="hero">
+        <header className="hero" ref={heroRef}>
           <div>
             <motion.span className="mono eyebrow" variants={rise} custom={0} initial="hidden" animate="show">
               A voice agent for macOS
@@ -111,8 +171,9 @@ export default function App() {
             initial={{ opacity: 0, scale: 0.7 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 1.1, ease: [0.22, 1, 0.36, 1], delay: 0.15 }}
+            style={{ scale: heroScale, y: heroY }}
           >
-            <Blob size={440} />
+            <Blob size={440} mood="idle" />
           </motion.div>
         </header>
       </div>
@@ -153,6 +214,102 @@ export default function App() {
               </Reveal>
             ))}
           </div>
+        </div>
+      </section>
+
+      <section id="knows" className="knows">
+        <div className="wrap">
+          <div className="sectionBlob"><Blob size={170} mood="executing" /></div>
+          <Reveal><span className="mono eyebrow">Knowledge engine</span></Reveal>
+          <Reveal i={1}><h2 className="display">Aria knows your work.</h2></Reveal>
+          <Reveal i={2}>
+            <p className="sub">Point her at folders of notes, PDFs, documents and code. She indexes them
+            on-device and answers from <em>your</em> knowledge — with the source.</p>
+          </Reveal>
+          <div className="demoCards">
+            {demoFlows.map(([ask, steps], i) => (
+              <Reveal key={ask} i={i} className="demoCard">
+                <h4>{ask}</h4>
+                <motion.ul
+                  initial="hidden"
+                  whileInView="visible"
+                  viewport={{ once: true, amount: 0.6 }}
+                  variants={{ visible: { transition: { staggerChildren: 0.18, delayChildren: 0.2 } } }}
+                >
+                  {steps.map((s) => (
+                    <motion.li
+                      key={s}
+                      variants={{
+                        hidden: { opacity: 0, x: -10 },
+                        visible: { opacity: 1, x: 0, transition: { duration: 0.45, ease: "easeOut" } },
+                      }}
+                    >
+                      <span className="tick">✓</span> {s}
+                    </motion.li>
+                  ))}
+                </motion.ul>
+              </Reveal>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="local">
+        <div className="wrap splitGrid">
+          <Reveal>
+            <div className="sectionBlob"><Blob size={170} mood="calm" /></div>
+            <h2 className="display">Your data stays<br />on your Mac.</h2>
+          </Reveal>
+          <Reveal i={1}>
+            <p>
+              Aria is local-first. Everyday work — planning, files, calendar, notes, and
+              everything the knowledge engine reads — can run on a local model
+              (Ollama, Qwen&nbsp;3) that never sends a byte off your machine. The wake word is
+              on-device, your knowledge index is on-device, and the cloud is an
+              <em> option</em>, not a requirement.
+            </p>
+            <p>
+              When you do want cloud-grade reasoning — deep research, heavy synthesis —
+              she uses your own free key and tells you which model answered and why.
+              Open Settings → Transparency and there are no black boxes.
+            </p>
+          </Reveal>
+        </div>
+      </section>
+
+      <section id="agents" className="agents">
+        <div className="wrap">
+          <div className="sectionBlob"><Blob size={170} mood="thinking" /></div>
+          <Reveal><span className="mono eyebrow">Background agents</span></Reveal>
+          <Reveal i={1}><h2 className="display">Set it once.<br />Let Aria handle it.</h2></Reveal>
+          <div className="agentRow">
+            {[
+              ["Daily briefing", "Every morning: your calendar, your reminders, a one-page note — ready before you sit down."],
+              ["Folder watch", "New files land in Downloads, Aria sorts them into place. Nothing deleted, everything logged."],
+              ["Any recurring goal", "Anything you'd say to her, on a schedule — same tools, same safety gates, every run visible."],
+            ].map(([title, body], i) => (
+              <Reveal key={title} i={i} className="agentCard">
+                <h4>{title}</h4>
+                <p>{body}</p>
+              </Reveal>
+            ))}
+          </div>
+          <Reveal i={3}>
+            <p className="sub">Background agents never feel hidden: every run notifies you and lands in a visible history.</p>
+          </Reveal>
+        </div>
+      </section>
+
+      <section className="who">
+        <div className="wrap whoGrid">
+          <Reveal>
+            <h3 className="display">For founders</h3>
+            <ul className="plainList">{founderFlows.map((f) => <li key={f}>{f}</li>)}</ul>
+          </Reveal>
+          <Reveal i={1}>
+            <h3 className="display">For developers</h3>
+            <ul className="plainList">{devFlows.map((f) => <li key={f}>{f}</li>)}</ul>
+          </Reveal>
         </div>
       </section>
 
@@ -211,11 +368,13 @@ export default function App() {
       <section className="close">
         <div className="wrap">
           <Reveal>
+            <div className="closeBlob"><Blob size={220} mood="confident" /></div>
             <h2 className="display">Say “Hey Aria.”</h2>
             <div className="cta">
               <a className="btn" href={DOWNLOAD} target="_blank" rel="noreferrer">Download for Mac</a>
               <a className="btn ghost" href={GITHUB} target="_blank" rel="noreferrer">It's open source</a>
             </div>
+            <Waitlist />
           </Reveal>
         </div>
       </section>

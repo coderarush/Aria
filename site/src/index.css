@@ -142,3 +142,56 @@ footer a:hover { color: var(--ink); }
   .qaList { grid-template-columns: 1fr; gap: 28px; }
   .nav .links a:not(.btn) { display: none; }
 }
+
+/* ---- v9 sections: knowledge / local / agents / who / waitlist ---- */
+
+.knows, .agents { padding: 90px 0; border-top: 1px solid var(--line); }
+.knows h2, .agents h2 { font-size: clamp(2rem, 4.5vw, 3rem); margin-bottom: 8px; }
+.knows .sub, .agents .sub { color: var(--ink-soft); margin-bottom: 44px; max-width: 60ch; }
+
+.sectionBlob { float: right; margin: -10px 0 10px 30px; opacity: 0.92; }
+@media (max-width: 760px) { .sectionBlob { display: none; } }
+
+.demoCards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+.demoCard {
+  background: var(--paper); border: 1px solid var(--line); border-radius: 16px;
+  padding: 24px 22px;
+}
+.demoCard h4 { font-family: "Bricolage Grotesque"; font-weight: 700; font-size: 1.12rem; margin-bottom: 16px; }
+.demoCard ul { list-style: none; display: grid; gap: 10px; }
+.demoCard li { color: var(--ink-soft); font-size: 0.98rem; }
+.demoCard .tick { color: var(--accent); font-weight: 700; margin-right: 6px; }
+
+.local { padding: 90px 0; border-top: 1px solid var(--line); background: var(--bg-2); }
+.local h2 { font-size: clamp(2rem, 4vw, 3.2rem); }
+.local p { color: var(--ink-soft); margin-bottom: 18px; }
+
+.agentRow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-bottom: 30px; }
+.agentCard {
+  border: 1px solid var(--line); border-radius: 16px; padding: 24px 22px; background: var(--paper);
+}
+.agentCard h4 { font-family: "Bricolage Grotesque"; font-weight: 700; font-size: 1.2rem; margin-bottom: 10px; }
+.agentCard p { color: var(--ink-soft); font-size: 0.98rem; }
+
+.who { padding: 80px 0; border-top: 1px solid var(--line); }
+.whoGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 50px; }
+.whoGrid h3 { font-size: 1.7rem; margin-bottom: 16px; }
+.plainList { list-style: none; display: grid; gap: 10px; }
+.plainList li { color: var(--ink-soft); padding-left: 18px; position: relative; }
+.plainList li::before { content: "—"; position: absolute; left: 0; color: var(--accent-deep); }
+
+.closeBlob { display: flex; justify-content: center; margin-bottom: 10px; }
+
+.waitlist { margin-top: 30px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.waitlist input {
+  font: inherit; padding: 12px 18px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--paper); color: var(--ink); min-width: 280px;
+}
+.waitlist input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.waitlistDone { margin-top: 30px; color: var(--accent-deep); font-weight: 600; }
+.waitlistErr { color: var(--accent-deep); font-size: 0.9rem; align-self: center; }
+
+@media (max-width: 900px) {
+  .demoCards, .agentRow { grid-template-columns: 1fr; }
+  .whoGrid { grid-template-columns: 1fr; gap: 30px; }
+}
