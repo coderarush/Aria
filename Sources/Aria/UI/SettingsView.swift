@@ -54,6 +54,7 @@ struct SettingsView: View {
     enum Section: String, CaseIterable, Identifiable {
         case general = "General", voice = "Voice", conversation = "Conversation",
              proactive = "Proactive", knowledge = "Knowledge", agents = "Agents",
+             transparency = "Transparency",
              apiKey = "API Key", memory = "Memory", activity = "Activity", tools = "Tools", dynamic = "Dynamic", brain = "Brain", mirror = "Mirror", crew = "Crew", license = "License"
         var id: String { rawValue }
         var icon: String {
@@ -64,6 +65,7 @@ struct SettingsView: View {
             case .proactive:    return "bell.badge"
             case .knowledge:    return "books.vertical"
             case .agents:       return "clock.arrow.2.circlepath"
+            case .transparency: return "eye"
             case .apiKey:       return "key"
             case .memory:       return "brain.head.profile"
             case .activity:     return "list.bullet.rectangle"
@@ -125,6 +127,7 @@ struct SettingsView: View {
         case .proactive:    ProactiveSettingsTab()
         case .knowledge:    KnowledgeSettingsTab()
         case .agents:       AgentsSettingsTab()
+        case .transparency: TransparencyTab()
         case .apiKey:       APIKeyTab()
         case .memory:       MemorySettingsTab()
         case .activity:     ActivityTab()
@@ -583,6 +586,97 @@ struct AgentsSettingsTab: View {
     private func reload() async {
         agents = await AgentStore.shared.all()
         runs = await AgentStore.shared.recentRuns(20)
+    }
+}
+
+// MARK: Transparency (v9)
+
+struct TransparencyTab: View {
+    @State private var context: GeminiClient.SystemContext?
+    @State private var decisions: [RoutingLogEntry] = []
+    @State private var runs: [AgentRun] = []
+    private let localFirstOn = AppSettings.shared.localFirstEnabled
+
+    var body: some View {
+        TabHead(title: "Transparency", subtitle: "No black boxes — what Aria sees, which model answers, and what ran.")
+        SForm {
+            SSection("Context — what Aria sees right now") {
+                if let c = context {
+                    row("Active app", c.currentApp)
+                    row("Window", c.windowTitle.isEmpty ? "—" : c.windowTitle)
+                    row("Selection", c.selection.isEmpty ? "none" : "\(c.selection.count) chars")
+                    row("Focused field", c.focusedField.isEmpty ? "—" : c.focusedField)
+                    Text("Clipboard, Finder selection and browser tabs are pulled only when a command refers to them. Screenshots only when she genuinely needs to see.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text("Reading…").foregroundStyle(.secondary)
+                }
+                Button("Refresh") { refreshContext() }
+            }
+
+            SSection("Model router — recent decisions") {
+                row("Local-first", localFirstOn ? "On" : "Off")
+                if decisions.isEmpty {
+                    Text("No routed calls yet. Decisions appear once tasks run.")
+                        .font(.callout).foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array(decisions.prefix(10).enumerated()), id: \.offset) { _, e in
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: e.decision.tier == .local ? "desktopcomputer" : "cloud")
+                                .foregroundStyle(e.decision.tier == .local ? Color.green : .blue)
+                                .frame(width: 16)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("\(e.decision.taskClass.rawValue) → \(e.decision.tier.rawValue)")
+                                    .font(.system(size: 12, weight: .semibold))
+                                Text(e.decision.reason).font(.caption2).foregroundStyle(.secondary)
+                                Text(e.date.formatted(date: .omitted, time: .shortened))
+                                    .font(.caption2).foregroundStyle(.tertiary)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                    }
+                }
+            }
+
+            SSection("Workflow runs") {
+                if runs.isEmpty {
+                    Text("Background-agent runs appear here. Every individual tool action is in the Activity tab.")
+                        .font(.callout).foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array(runs.prefix(10).enumerated()), id: \.offset) { _, run in
+                        HStack(alignment: .top, spacing: 8) {
+                            Circle().fill(run.ok ? Color.green : .orange).frame(width: 7, height: 7).padding(.top, 5)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(run.agentName).font(.system(size: 12, weight: .semibold))
+                                Text(run.summary).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                                Text(run.date.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.caption2).foregroundStyle(.tertiary)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                    }
+                    Text("Per-action detail lives in the Activity tab.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .task {
+            refreshContext()
+            decisions = await RoutingLog.shared.recent(10)
+            runs = await AgentStore.shared.recentRuns(10)
+        }
+    }
+
+    private func refreshContext() {
+        context = AgentOrchestrator.currentSystemContext()
+    }
+
+    private func row(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Text(value).foregroundStyle(.secondary).lineLimit(1)
+        }
     }
 }
 
