@@ -178,7 +178,8 @@ actor AutonomyEngine {
                 : prompt + "\n\nReminder: output ONLY the raw JSON array — no prose, no code fences."
             do {
                 let raw = try await gemini.generateText(prompt: p, temperature: 0.2,
-                                                        preferredModel: ModelRouter.fastStructured)
+                                                        preferredModel: ModelRouter.fastStructured,
+                                                        taskClass: .planning)
                 gotResponse = true
                 let steps = PlanParser.steps(fromJSON: raw)
                 if !steps.isEmpty { return .steps(steps) }

@@ -438,8 +438,14 @@ struct APIKeyTab: View {
 
             SSection("Local model") {
                 Toggle("Use a local model when everything else is out (Ollama)", isOn: $settings.localModelEnabled)
-                if settings.localModelEnabled {
+                Toggle("Local-first: prefer the local model for everyday tasks", isOn: $settings.localFirstEnabled)
+                if settings.localModelEnabled || settings.localFirstEnabled {
                     TextField("Ollama model", text: $settings.localModelName)
+                }
+                if settings.localFirstEnabled {
+                    Text("Planning, files, calendar, notes and similar tasks run on your Mac first — private, fast, no quota. Research, complex reasoning and conversation stay on the cloud model, and anything the local model can't handle falls back automatically. Requires Ollama (ollama.com) with the model pulled — Qwen 3 8B recommended.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else if settings.localModelEnabled {
                     Text("Last resort — works offline. Requires Ollama running (ollama.com) with the model pulled. Slower, but never hits a limit.")
                         .font(.caption).foregroundStyle(.secondary)
                 }

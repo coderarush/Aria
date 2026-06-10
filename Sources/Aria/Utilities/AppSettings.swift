@@ -67,6 +67,9 @@ final class AppSettings: ObservableObject {
     /// Use a local Ollama model as a last-resort fallback (offline / all-quota-exhausted).
     @Published var localModelEnabled: Bool { didSet { defaults.set(localModelEnabled, forKey: K.localModelEnabled) } }
     @Published var localModelName: String { didSet { defaults.set(localModelName, forKey: K.localModelName) } }
+    /// V9 local-first: prefer the local model for local-eligible task classes
+    /// (planning, files, productivity…). Cloud always remains the fallback.
+    @Published var localFirstEnabled: Bool { didSet { defaults.set(localFirstEnabled, forKey: K.localFirstEnabled) } }
     /// Speak a short play-by-play line as each autonomous step starts (alive + transparent).
     @Published var spokenStepNarration: Bool { didSet { defaults.set(spokenStepNarration, forKey: K.spokenStepNarration) } }
 
@@ -99,7 +102,8 @@ final class AppSettings: ObservableObject {
         conversationSilenceTimeout = defaults.object(forKey: K.conversationSilenceTimeout) as? Double ?? 9
         speakerVerificationEnabled = defaults.bool(forKey: K.speakerVerificationEnabled)
         localModelEnabled = defaults.bool(forKey: K.localModelEnabled)
-        localModelName = defaults.string(forKey: K.localModelName) ?? "gemma2:2b"
+        localModelName = defaults.string(forKey: K.localModelName) ?? "qwen3:8b"
+        localFirstEnabled = defaults.bool(forKey: K.localFirstEnabled)
         spokenStepNarration = defaults.object(forKey: K.spokenStepNarration) as? Bool ?? true
     }
 
@@ -135,6 +139,7 @@ final class AppSettings: ObservableObject {
         static let speakerVerificationEnabled = "app.speakerVerificationEnabled"
         static let localModelEnabled = "app.localModelEnabled"
         static let localModelName = "app.localModelName"
+        static let localFirstEnabled = "app.localFirst"
         static let spokenStepNarration = "app.spokenStepNarration"
     }
 }

@@ -40,7 +40,12 @@ multi-step autonomy (plan→execute→verify→recover, resumable, journaled), c
 long-term memory, on-device behavioral learning, undo + activity log, safety gates,
 multi-key Gemini rotation + Groq/Cerebras/OpenRouter/Ollama fallback,
 **Proactive Presence phase 1** (Core/Proactive/: ambient suggestions, silent orb glow,
-speak-on-glance — needs live mic validation).
+speak-on-glance — needs live mic validation), **Provider abstraction + local-first
+phase B** (Core/Providers/: ModelProvider protocol, OllamaProvider (Qwen default),
+GeminiProvider, DeterministicProvider (demo-mode engine), TaskClassifier +
+RoutingPolicy + RoutingLog (dashboard data), LocalFirstRouter wired into
+GeminiClient.generateText — opt-in via Settings "Local-first", default OFF, cloud
+byte-identical until enabled; planner (.planning) is the first routed class).
 
 ## Safety & reliability
 - Approval gates: send/pay/delete/external comms. Activity log: every action visible.

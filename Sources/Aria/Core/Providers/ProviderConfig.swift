@@ -27,7 +27,7 @@ enum ProviderConfig {
             list.append(OpenAICompatibleClient(
                 label: "Local",
                 baseURL: "http://localhost:11434/v1",   // Ollama's OpenAI-compatible endpoint
-                models: [localModel.isEmpty ? "gemma2:2b" : localModel],
+                models: [localModel.isEmpty ? OllamaProvider.defaultModel : localModel],
                 keyProvider: { nil },
                 requiresKey: false))
         }

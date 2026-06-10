@@ -272,7 +272,23 @@ actor GeminiClient {
     /// the planner and by agents synthesizing prose. Spreads across model buckets via
     /// performWithFallback (free-tier safe). Returns the model's text, fences stripped.
     func generateText(prompt: String, temperature: Double = 0.3,
-                      preferredModel: String? = nil) async throws -> String {
+                      preferredModel: String? = nil,
+                      taskClass: TaskClass? = nil) async throws -> String {
+        // Local-first pre-step (V9): when the caller declares a task class, route
+        // it. Master toggle defaults OFF and any local failure falls through, so
+        // the cloud path below is byte-identical until the user opts in.
+        if let taskClass {
+            let router = LocalFirstRouter()
+            let decision = await router.decide(taskClass: taskClass)
+            await RoutingLog.shared.record(decision)
+            if decision.tier == .local {
+                if let text = await router.tryLocal(prompt: prompt, temperature: temperature) {
+                    Log.trace("local-first: \(taskClass.rawValue) answered locally")
+                    return Self.stripCodeFences(text)
+                }
+                Log.trace("local-first: \(taskClass.rawValue) local attempt failed — cloud fallback")
+            }
+        }
         let payload: [String: Any] = [
             "contents": [["role": "user", "parts": [["text": prompt]]]],
             "generationConfig": ["temperature": temperature]
