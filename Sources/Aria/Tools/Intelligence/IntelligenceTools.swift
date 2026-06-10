@@ -14,9 +14,7 @@ struct WebSearchTool: AriaTool {
 
     func run(input: [String: String]) async throws -> ToolResult {
         guard let query = input["query"], !query.isEmpty else { throw ToolError.missingInput("query") }
-        guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let url = URL(string: "https://html.duckduckgo.com/html/?q=\(encoded)")
-        else { return .fail("Bad query.") }
+        guard let url = Self.searchURL(query: query) else { return .fail("Bad query.") }
 
         var req = URLRequest(url: url)
         req.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
@@ -34,6 +32,16 @@ struct WebSearchTool: AriaTool {
         } catch {
             return .fail("Search failed: \(error.localizedDescription)")
         }
+    }
+
+    /// Build a DuckDuckGo HTML search URL with proper query encoding.
+    static func searchURL(query: String) -> URL? {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "html.duckduckgo.com"
+        components.path = "/html/"
+        components.queryItems = [URLQueryItem(name: "q", value: query)]
+        return components.url
     }
 
     /// Pull (title, url, snippet) triples out of DuckDuckGo's HTML results page.

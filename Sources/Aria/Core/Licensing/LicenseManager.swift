@@ -77,18 +77,28 @@ final class LicenseManager: ObservableObject {
             req.httpMethod = "POST"
             req.setValue("application/json", forHTTPHeaderField: "Accept")
             req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-            req.httpBody = "license_key=\(key)".data(using: .utf8)
+            req.httpBody = Self.formBody(fields: ["license_key": key])
             let (data, _) = try await URLSession.shared.data(for: req)
             return Self.parseLemonSqueezy(data)
         case .gumroad:
             var req = URLRequest(url: URL(string: "https://api.gumroad.com/v2/licenses/verify")!)
             req.httpMethod = "POST"
             req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-            let body = "product_id=\(productID)&license_key=\(key)"
-            req.httpBody = body.data(using: .utf8)
+            req.httpBody = Self.formBody(fields: [
+                "product_id": productID,
+                "license_key": key
+            ])
             let (data, _) = try await URLSession.shared.data(for: req)
             return Self.parseGumroad(data)
         }
+    }
+
+    /// Build application/x-www-form-urlencoded bodies with proper encoding.
+    /// This keeps user-entered keys/product IDs from breaking verification requests.
+    nonisolated static func formBody(fields: [String: String]) -> Data {
+        var components = URLComponents()
+        components.queryItems = fields.map { URLQueryItem(name: $0.key, value: $0.value) }
+        return Data((components.percentEncodedQuery ?? "").utf8)
     }
 
     private func firstRunDate() -> Date {

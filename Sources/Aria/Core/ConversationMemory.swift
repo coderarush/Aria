@@ -16,10 +16,7 @@ actor ConversationMemory {
     }
 
     static func defaultFileURL() -> URL {
-        let base = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Aria", isDirectory: true)
-        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        let base = PersistencePaths.applicationSupportBaseDirectory()
         return base.appendingPathComponent("conversation.json")
     }
 

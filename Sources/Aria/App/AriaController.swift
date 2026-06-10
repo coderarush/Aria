@@ -55,8 +55,8 @@ final class AriaController {
             guard let self, let pending = await self.orchestrator.pendingTask() else { return }
             let remaining = pending.unfinishedCount
             let msg = "Unfinished task: “\(pending.goal)” — \(remaining) step\(remaining == 1 ? "" : "s") left. Say “Hey Aria, resume” to continue."
-                .replacingOccurrences(of: "\"", with: "'")
-            _ = await AppleScriptTool.execute("display notification \"\(msg)\" with title \"Aria\"")
+            let escaped = AppleScriptTool.quotedLiteral(msg)
+            _ = AppleScriptTool.execute("display notification \"\(escaped)\" with title \"Aria\"")
             Log.trace("resume: offered pending task '\(pending.goal)'")
         }
     }

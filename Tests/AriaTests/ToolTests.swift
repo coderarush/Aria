@@ -81,6 +81,36 @@ final class ToolTests: XCTestCase {
         XCTAssertEqual(WebSearchTool.realURL(from: "https://direct.com/page"), "https://direct.com/page")
     }
 
+    func testWebSearchURLEncodesReservedCharacters() {
+        let url = WebSearchTool.searchURL(query: "cats & dogs? now")
+        XCTAssertEqual(url?.scheme, "https")
+        XCTAssertEqual(url?.absoluteString, "https://html.duckduckgo.com/html/?q=cats%20%26%20dogs?%20now")
+    }
+
+    func testAppleScriptQuotedLiteralEscapesUnsafeCharacters() {
+        let raw = #"""
+        line 1
+        "quoted" \ path
+        """#
+        let escaped = AppleScriptTool.quotedLiteral(raw)
+        XCTAssertFalse(escaped.contains("\n"))
+        XCTAssertFalse(escaped.contains("\r"))
+        XCTAssertTrue(escaped.contains(#"\\"#))
+        XCTAssertTrue(escaped.contains(#"\"quoted\""#))
+    }
+
+    func testMailAsLiteralEscapesUnsafeCharacters() {
+        let raw = "line 1\n\"quoted\" \\ path\r\t"
+        let escaped = asLiteral(raw)
+        XCTAssertEqual(escaped, "line 1\\n\\\"quoted\\\" \\\\ path\\r\\t")
+    }
+
+    func testBrowserToolNormalizesCommonURLInputs() {
+        XCTAssertEqual(BrowserTool.normalizedURL("example.com")?.absoluteString, "https://example.com")
+        XCTAssertEqual(BrowserTool.normalizedURL("https://example.com/path with spaces")?.absoluteString, "https://example.com/path%20with%20spaces")
+        XCTAssertNil(BrowserTool.normalizedURL("   "))
+    }
+
     func testClipboardRoundTrip() async throws {
         let marker = "aria-clip-\(UUID().uuidString)"
         let write = try await ClipboardTool().run(input: ["action": "write", "text": marker])

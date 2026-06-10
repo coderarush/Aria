@@ -52,8 +52,8 @@ struct ScreenContext: Equatable {
     private static func element(_ el: AXUIElement, _ attr: String) -> AXUIElement? {
         var v: CFTypeRef?
         guard AXUIElementCopyAttributeValue(el, attr as CFString, &v) == .success,
-              let v, CFGetTypeID(v) == AXUIElementGetTypeID() else { return nil }
-        return (v as! AXUIElement)
+              let v else { return nil }
+        return AXGeometry.element(from: v)
     }
 
     private static func string(_ el: AXUIElement, _ attr: String) -> String {

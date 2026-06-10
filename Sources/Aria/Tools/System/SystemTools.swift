@@ -41,6 +41,16 @@ struct AppleScriptTool: AriaTool {
         }
         return .ok(result?.stringValue ?? "(done)")
     }
+
+    /// Escape a string for insertion inside a double-quoted AppleScript literal.
+    /// Collapses line breaks so notification/message strings stay one line.
+    static func quotedLiteral(_ s: String) -> String {
+        s.replacingOccurrences(of: "\\", with: "\\\\")
+         .replacingOccurrences(of: "\"", with: "\\\"")
+         .replacingOccurrences(of: "\r\n", with: " ")
+         .replacingOccurrences(of: "\n", with: " ")
+         .replacingOccurrences(of: "\r", with: " ")
+    }
 }
 
 /// The files/folders the user currently has selected in Finder — strong context for
@@ -292,8 +302,8 @@ struct NotificationTool: AriaTool {
     ]
 
     func run(input: [String: String]) async throws -> ToolResult {
-        let title = (input["title"] ?? "Aria").replacingOccurrences(of: "\"", with: "'")
-        let message = (input["message"] ?? "").replacingOccurrences(of: "\"", with: "'")
+        let title = AppleScriptTool.quotedLiteral(input["title"] ?? "Aria")
+        let message = AppleScriptTool.quotedLiteral(input["message"] ?? "")
         let script = "display notification \"\(message)\" with title \"\(title)\""
         return await AppleScriptTool.execute(script)
     }

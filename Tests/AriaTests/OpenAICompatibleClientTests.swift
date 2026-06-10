@@ -44,4 +44,17 @@ final class OpenAICompatibleClientTests: XCTestCase {
         acc.consume([["index": 0, "function": ["arguments": "{}"]]])
         XCTAssertTrue(acc.finalized().isEmpty)
     }
+
+    func testRequestURLBuildsFromBaseAndPath() {
+        let url = OpenAICompatibleClient.requestURL(
+            baseURL: "https://api.groq.com/openai/v1",
+            path: "/chat/completions")
+        XCTAssertEqual(url?.absoluteString, "https://api.groq.com/openai/v1/chat/completions")
+    }
+
+    func testRequestURLRejectsMalformedBaseURL() {
+        XCTAssertNil(OpenAICompatibleClient.requestURL(
+            baseURL: "not a url",
+            path: "/chat/completions"))
+    }
 }

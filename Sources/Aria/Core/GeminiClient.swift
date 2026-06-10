@@ -102,6 +102,22 @@ actor GeminiClient {
         }
     }
 
+    /// Build a Gemini request URL with proper percent-encoding for the model and key.
+    static func geminiURL(model: String, apiKey: String, streaming: Bool = false) -> URL? {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "generativelanguage.googleapis.com"
+        components.path = "/v1beta/models/\(model)\(streaming ? ":streamGenerateContent" : ":generateContent")"
+        components.queryItems = [
+            URLQueryItem(name: "alt", value: streaming ? "sse" : nil),
+            URLQueryItem(name: "key", value: apiKey)
+        ].compactMap { item in
+            if item.name == "alt", item.value == nil { return nil }
+            return item
+        }
+        return components.url
+    }
+
     /// Send a turn to Gemini and decode the structured AriaResponse.
     func send(transcript: String,
               screenshotJPEG: Data?,
@@ -167,7 +183,11 @@ actor GeminiClient {
                         }
                         let model = await reserveModel(preferred: first ? preferredModel : nil)
                         first = false
-                        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):streamGenerateContent?alt=sse&key=\(apiKey)")!
+                        guard let url = Self.geminiURL(model: model, apiKey: apiKey, streaming: true) else {
+                            lastError = GeminiError.decodeFailed("invalid Gemini request URL")
+                            attempt += 1
+                            continue
+                        }
                         var req = URLRequest(url: url)
                         req.httpMethod = "POST"
                         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -365,7 +385,11 @@ actor GeminiClient {
             // any failure, fall back to normal rotation so we still route around it.
             let firstTry = (attempt == 0 && quotaWaits == 0)
             let model = await reserveModel(preferred: firstTry ? preferredModel : nil)
-            let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent?key=\(apiKey)")!
+            guard let url = Self.geminiURL(model: model, apiKey: apiKey) else {
+                lastError = GeminiError.decodeFailed("invalid Gemini request URL")
+                attempt += 1
+                continue
+            }
             do {
                 let data = try await performOnce(url: url, body: body)
                 Log.trace("gemini: \(model) ok")
