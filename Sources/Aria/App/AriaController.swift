@@ -54,6 +54,20 @@ final class AriaController {
         configureLearning()
         startListening()
         offerResumeIfPending()
+        reindexKnowledgeIfEnabled()
+    }
+
+    /// Refresh the local knowledge index shortly after launch (incremental —
+    /// unchanged files are skipped, so steady-state cost is a folder walk).
+    /// Strictly opt-in via Settings → Knowledge.
+    private func reindexKnowledgeIfEnabled() {
+        Task.detached(priority: .utility) {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)   // let launch settle
+            let settings = KnowledgeSettings.load()
+            guard settings.enabled, !settings.folders.isEmpty else { return }
+            let stats = await KnowledgeIndex.shared.reindex(folders: settings.folders)
+            Log.trace("knowledge: reindexed \(stats.indexed), skipped \(stats.skipped), removed \(stats.removed)")
+        }
     }
 
     /// If a multi-step task was interrupted (crash/quit), proactively surface it once

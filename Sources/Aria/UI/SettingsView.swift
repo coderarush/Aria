@@ -53,7 +53,7 @@ private struct TabHead: View {
 struct SettingsView: View {
     enum Section: String, CaseIterable, Identifiable {
         case general = "General", voice = "Voice", conversation = "Conversation",
-             proactive = "Proactive",
+             proactive = "Proactive", knowledge = "Knowledge",
              apiKey = "API Key", memory = "Memory", activity = "Activity", tools = "Tools", dynamic = "Dynamic", brain = "Brain", mirror = "Mirror", crew = "Crew", license = "License"
         var id: String { rawValue }
         var icon: String {
@@ -62,6 +62,7 @@ struct SettingsView: View {
             case .voice:        return "speaker.wave.2"
             case .conversation: return "bubble.left.and.bubble.right"
             case .proactive:    return "bell.badge"
+            case .knowledge:    return "books.vertical"
             case .apiKey:       return "key"
             case .memory:       return "brain.head.profile"
             case .activity:     return "list.bullet.rectangle"
@@ -121,6 +122,7 @@ struct SettingsView: View {
         case .voice:        VoiceSettingsTab()
         case .conversation: ConversationSettingsTab()
         case .proactive:    ProactiveSettingsTab()
+        case .knowledge:    KnowledgeSettingsTab()
         case .apiKey:       APIKeyTab()
         case .memory:       MemorySettingsTab()
         case .activity:     ActivityTab()
@@ -383,6 +385,93 @@ struct ProactiveSettingsTab: View {
                 set: { s.sourceEnabled[source] = $0; s.save() }))
             Text(help).font(.caption2).foregroundStyle(.tertiary)
         }
+    }
+}
+
+// MARK: Knowledge (v9)
+
+struct KnowledgeSettingsTab: View {
+    @State private var s = KnowledgeSettings.load()
+    @State private var docCount = 0
+    @State private var indexing = false
+    @State private var status = ""
+
+    var body: some View {
+        TabHead(title: "Knowledge", subtitle: "Aria knows your work. Index folders of notes, PDFs, documents and code — all on-device.")
+        SForm {
+            SSection {
+                Toggle("Let Aria search my files", isOn: $s.enabled)
+                Text("Strictly local. Files are read and indexed on this Mac only — content never leaves the machine. Ask things like “what did the investor say about pricing?”")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            if s.enabled {
+                SSection("Indexed folders (\(s.folders.count))") {
+                    ForEach(s.folders, id: \.self) { folder in
+                        HStack {
+                            Image(systemName: "folder").foregroundStyle(.secondary)
+                            Text(folder).font(.system(size: 12, design: .monospaced)).lineLimit(1)
+                            Spacer()
+                            Button(role: .destructive) {
+                                s.folders.removeAll { $0 == folder }
+                                persistAndReindex()
+                            } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
+                        }
+                    }
+                    Button("Add folder…") { addFolder() }
+                }
+
+                SSection("Index") {
+                    HStack {
+                        Text("Documents indexed")
+                        Spacer()
+                        Text("\(docCount)").foregroundStyle(.secondary).monospacedDigit()
+                    }
+                    HStack {
+                        Button(indexing ? "Indexing…" : "Reindex now") { persistAndReindex() }
+                            .disabled(indexing || s.folders.isEmpty)
+                        Button("Forget everything", role: .destructive) {
+                            Task { await KnowledgeIndex.shared.clear(); await refreshCount() }
+                        }
+                    }
+                    if !status.isEmpty { Text(status).font(.caption).foregroundStyle(.secondary) }
+                }
+            }
+        }
+        .onChange(of: s.enabled) { _, _ in s.save() }
+        .task { await refreshCount() }
+    }
+
+    private func addFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = true
+        panel.prompt = "Index"
+        guard panel.runModal() == .OK else { return }
+        for url in panel.urls where !s.folders.contains(url.path) {
+            s.folders.append(url.path)
+        }
+        persistAndReindex()
+    }
+
+    private func persistAndReindex() {
+        s.save()
+        indexing = true
+        status = ""
+        let folders = s.folders
+        Task {
+            let stats = await KnowledgeIndex.shared.reindex(folders: folders)
+            await refreshCount()
+            indexing = false
+            status = "Indexed \(stats.indexed) new/changed, \(stats.skipped) unchanged" +
+                (stats.removed > 0 ? ", \(stats.removed) removed" : "") +
+                (stats.failed > 0 ? ", \(stats.failed) unreadable" : "") + "."
+        }
+    }
+
+    private func refreshCount() async {
+        docCount = await KnowledgeIndex.shared.documentCount
     }
 }
 

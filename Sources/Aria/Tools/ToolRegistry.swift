@@ -55,6 +55,7 @@ actor ToolRegistry {
             BrowserTool(),
             WebSearchTool(),
             WebFetchTool(),
+            KnowledgeSearchTool(),
             UIReadTool(),
             UIClickTool(),
             UITypeTool(),
