@@ -7,7 +7,8 @@
 
 APP_NAME    := Aria
 BUILD_DIR   := .build
-RELEASE_BIN := $(BUILD_DIR)/release/$(APP_NAME)
+# Debug-config binary on purpose — see the `release` target comment.
+RELEASE_BIN := $(BUILD_DIR)/debug/$(APP_NAME)
 APP_BUNDLE  := $(BUILD_DIR)/$(APP_NAME).app
 INFO_PLIST  := Resources/Info.plist
 
@@ -41,12 +42,16 @@ run: build
 # Assemble a proper .app bundle and codesign ad-hoc so permission
 # dialogs (mic / screen recording) attribute to "Aria".
 release: verify-release
-	# -Onone + -no-whole-module-optimization are REQUIRED: the Swift optimizer
-	# miscompiles SwiftUI actor isolation on macOS 26.3.x — release builds crash
-	# on the first control tap (v8: WMO/EXC_BAD_ACCESS; 26.3.1: even per-file -O,
-	# EXC_BREAKPOINT in MainActor.assumeIsolated). Debug-level codegen never
-	# crashes. Pinned until the optimizer bug is bisected. See README.
-	swift build -c release -Xswiftc -Onone -Xswiftc -no-whole-module-optimization
+	# SHIPS THE DEBUG-CONFIGURATION BINARY — deliberately. On macOS 26.3.1 every
+	# release-config build (with WMO off, even with -Onone) crashes on the first
+	# SwiftUI control tap: garbage executor ref in
+	# swift_task_isCurrentExecutorWithFlags under _ButtonGesture
+	# (EXC_BAD_ACCESS; crash reports 2026-06-10). The debug configuration has
+	# never crashed across v2..v9. The delta is release build CONFIG, not the
+	# optimizer level — unbisected toolchain/OS bug. Revisit on the next
+	# Xcode/macOS update. Perf is fine: the app is network/disk-bound and the
+	# real-time AEC path is C.
+	swift build
 	rm -rf $(APP_BUNDLE)
 	mkdir -p $(APP_BUNDLE)/Contents/MacOS
 	mkdir -p $(APP_BUNDLE)/Contents/Resources
@@ -64,15 +69,11 @@ release: verify-release
 # builds will crash on the first tap of any SwiftUI control (Swift 6.3 / macOS 26
 # actor-isolation miscompile). This is a build-config regression, not a code bug.
 verify-release:
-	@grep -q -- '-no-whole-module-optimization' Makefile || \
-		{ echo "FAIL: Makefile release target lost -no-whole-module-optimization"; exit 1; }
+	@grep -q 'debug/$$(APP_NAME)' Makefile || \
+		{ echo "FAIL: release must bundle the DEBUG binary — release-config builds crash on first tap on macOS 26.3.1 (see release target comment)"; exit 1; }
 	@grep -q -- '-no-whole-module-optimization' Package.swift || \
-		{ echo "FAIL: Package.swift release swiftSettings lost -no-whole-module-optimization"; exit 1; }
-	@grep -q -- '-Onone' Makefile || \
-		{ echo "FAIL: Makefile release target lost -Onone (26.3.1 SwiftUI tap-crash mitigation)"; exit 1; }
-	@grep -q -- '"-Onone"' Package.swift || \
-		{ echo "FAIL: Package.swift release swiftSettings lost -Onone (26.3.1 SwiftUI tap-crash mitigation)"; exit 1; }
-	@echo "verify-release OK: optimizer mitigations present (Onone + no-WMO)"
+		{ echo "FAIL: Package.swift lost -no-whole-module-optimization (defense if someone ships release-config again)"; exit 1; }
+	@echo "verify-release OK: shipping debug-config binary (26.3.1 tap-crash mitigation)"
 
 # Package the signed app into a distributable .dmg (drag-to-Applications layout).
 # Works with any identity, but only a notarized build (see `notarize`) opens without

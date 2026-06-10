@@ -89,6 +89,19 @@ final class AriaController {
         wakeEngine.summon()
     }
 
+    /// Soft interaction chime, AEC-cancelled (played as far-end reference so
+    /// the mic never hears it). Subtle by design; toggleable in Settings.
+    private func playChime(_ kind: UISounds.Kind) {
+        guard AppSettings.shared.uiSoundsEnabled else { return }
+        let samples = UISounds.pcm(for: kind)
+        var pcm = Data(capacity: samples.count * 2)
+        for s in samples {
+            var le = s.littleEndian
+            withUnsafeBytes(of: &le) { pcm.append(contentsOf: $0) }
+        }
+        audioBus.playReference(pcm: pcm, pcmRate: UISounds.sampleRate) {}
+    }
+
     func showTypePanel() {
         typePanel?.present()
     }
@@ -546,6 +559,7 @@ final class AriaController {
                 onTurn: { [weak self] in self?.handleCommand($0) })
             self.session?.start()
             self.islandViewModel.beginListening()
+            self.playChime(.wake)   // soft "I'm listening" cue
             // If a suggestion is glowing, lead with it and await the user's yes/no.
             self.revealPendingSuggestionIfAny()
         }
@@ -755,8 +769,9 @@ final class AriaController {
                     case .narrate(let line):
                         self.islandViewModel.appendResponse(line + " ")
                         self.streamVoice.enqueue(line)
-                    case .finished(_, let summary):
+                    case .finished(let ok, let summary):
                         self.taskActive = false   // now the next queue-drain re-arms wake
+                        if ok { self.playChime(.done) }
                         self.streamVoice.enqueue(summary)
                         if !self.streamVoice.isSpeaking { self.streamVoice.onAllFinished?() }
                         let finishedGoal = goal

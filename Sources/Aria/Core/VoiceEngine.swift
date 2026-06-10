@@ -136,7 +136,7 @@ final class VoiceEngine: NSObject {
     }
 
     /// Wrap raw little-endian 16-bit mono PCM in a minimal WAV container.
-    static func wavData(fromPCM pcm: Data, sampleRate: Int = 24000, channels: Int = 1, bits: Int = 16) -> Data {
+    nonisolated static func wavData(fromPCM pcm: Data, sampleRate: Int = 24000, channels: Int = 1, bits: Int = 16) -> Data {
         let byteRate = sampleRate * channels * bits / 8
         let blockAlign = channels * bits / 8
         var h = Data()

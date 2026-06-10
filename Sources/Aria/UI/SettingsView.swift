@@ -1020,6 +1020,7 @@ struct VoiceSettingsTab: View {
         SForm {
             SSection("Voice") {
                 Toggle("Speak responses aloud", isOn: $settings.voiceEnabled)
+                Toggle("Interaction sounds (wake & done chimes)", isOn: $settings.uiSoundsEnabled)
                 Picker("Voice", selection: $settings.geminiVoiceName) {
                     ForEach(geminiVoices, id: \.self) { Text($0).tag($0) }
                 }

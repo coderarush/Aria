@@ -72,6 +72,8 @@ final class AppSettings: ObservableObject {
     @Published var localFirstEnabled: Bool { didSet { defaults.set(localFirstEnabled, forKey: K.localFirstEnabled) } }
     /// Speak a short play-by-play line as each autonomous step starts (alive + transparent).
     @Published var spokenStepNarration: Bool { didSet { defaults.set(spokenStepNarration, forKey: K.spokenStepNarration) } }
+    /// Soft interaction chimes (wake, task done). Synthesized, AEC-cancelled.
+    @Published var uiSoundsEnabled: Bool { didSet { defaults.set(uiSoundsEnabled, forKey: K.uiSoundsEnabled) } }
 
     var accentChoice: AccentChoice {
         get { Theme.decodeChoice(accentChoiceRaw) }
@@ -105,6 +107,7 @@ final class AppSettings: ObservableObject {
         localModelName = defaults.string(forKey: K.localModelName) ?? "qwen3:8b"
         localFirstEnabled = defaults.bool(forKey: K.localFirstEnabled)
         spokenStepNarration = defaults.object(forKey: K.spokenStepNarration) as? Bool ?? true
+        uiSoundsEnabled = defaults.object(forKey: K.uiSoundsEnabled) as? Bool ?? true
     }
 
     /// Register/unregister the app as a login item (SMAppService, macOS 13+).
@@ -141,5 +144,6 @@ final class AppSettings: ObservableObject {
         static let localModelName = "app.localModelName"
         static let localFirstEnabled = "app.localFirst"
         static let spokenStepNarration = "app.spokenStepNarration"
+        static let uiSoundsEnabled = "app.uiSounds"
     }
 }

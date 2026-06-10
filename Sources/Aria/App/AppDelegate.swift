@@ -73,7 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.title = "⬡"
+        item.button?.image = Self.blobStatusImage()
         item.button?.toolTip = "Aria"
 
         let menu = NSMenu()
@@ -89,6 +89,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.items.forEach { $0.target = self }
         item.menu = menu
         statusItem = item
+    }
+
+    /// Aria's blob as the menu bar icon — same layered-sine outline as the orb
+    /// and the website. A template image, so macOS renders it ink-black on a
+    /// light menu bar and white on a dark one.
+    private static func blobStatusImage() -> NSImage {
+        let size: CGFloat = 18
+        let img = NSImage(size: NSSize(width: size, height: size), flipped: false) { _ in
+            let n = 11
+            var pts: [CGPoint] = []
+            for i in 0..<n {
+                let a = CGFloat(i)
+                let w = 0.6 * sin(0.6 + a * 0.9) + 0.3 * sin(1.02 + a * 1.7) + 0.1 * sin(0.3 + a * 2.3)
+                let r = size * 0.42 * (1 + 0.10 * w)
+                let ang = 2 * .pi * a / CGFloat(n) - .pi / 2
+                pts.append(CGPoint(x: size / 2 + cos(ang) * r, y: size / 2 + sin(ang) * r))
+            }
+            let path = NSBezierPath()
+            func pt(_ i: Int) -> CGPoint { pts[((i % n) + n) % n] }
+            path.move(to: pt(0))
+            for i in 0..<n {
+                let p0 = pt(i - 1), p1 = pt(i), p2 = pt(i + 1), p3 = pt(i + 2)
+                let c1 = CGPoint(x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6)
+                let c2 = CGPoint(x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6)
+                path.curve(to: p2, controlPoint1: c1, controlPoint2: c2)
+            }
+            path.close()
+            NSColor.black.setFill()
+            path.fill()
+            return true
+        }
+        img.isTemplate = true
+        return img
     }
 
     @objc private func summon() { controller.summonAria() }
