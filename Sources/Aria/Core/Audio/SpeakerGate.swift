@@ -30,11 +30,8 @@ final class SpeakerGate {
     }
 
     static func defaultFileURL() -> URL {
-        let base = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Aria", isDirectory: true)
-        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        return base.appendingPathComponent("voiceprint.json")
+        PersistencePaths.applicationSupportBaseDirectory()
+            .appendingPathComponent("voiceprint.json")
     }
 
     /// Start capturing the next `needed` wake utterances as the owner's profile.

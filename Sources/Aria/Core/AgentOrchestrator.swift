@@ -128,11 +128,19 @@ actor AgentOrchestrator {
         let agentName = action.tool == "agent" ? (action.input["name"] ?? "") : action.tool
         if let agent = await subAgents.agent(named: agentName) {
             let task = action.input["task"] ?? priorOutput
+            let allowed = agent.allowedTools
             let ctx = AgentContext(
                 gemini: gemini, registry: registry, factory: factory,
                 system: context,
                 runAction: { [weak self] act, prior in
-                    await self?.execute(act, priorOutput: prior, context: context)
+                    // Hard scope: an agent may only run its declared tools.
+                    guard SubAgentPolicy.permits(allowedTools: allowed, tool: act.tool) else {
+                        let denied = ToolResult.fail("\(act.tool) isn't permitted for \(agentName).")
+                        await ActivityLog.shared.record(
+                            tool: act.tool, detail: "blocked: outside \(agentName) scope", result: denied)
+                        return denied
+                    }
+                    return await self?.execute(act, priorOutput: prior, context: context)
                         ?? .fail("orchestrator gone")
                 })
             let result = await agent.execute(task: task, context: ctx)

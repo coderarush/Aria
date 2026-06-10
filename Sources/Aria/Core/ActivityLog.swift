@@ -89,10 +89,8 @@ actor ActivityLog {
     }
 
     static func defaultURL() -> URL {
-        let base = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSTemporaryDirectory())
-        return base.appendingPathComponent("Aria/activity.json")
+        PersistencePaths.applicationSupportBaseDirectory()
+            .appendingPathComponent("activity.json")
     }
 
     // MARK: - Persistence

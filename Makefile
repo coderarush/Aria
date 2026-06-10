@@ -23,7 +23,7 @@ ifeq ($(strip $(SIGN_ID)),)
 SIGN_ID := -
 endif
 
-.PHONY: build test run release dmg notarize clean xcode cert
+.PHONY: build test run release verify-release dmg notarize clean xcode cert
 
 DMG   := $(BUILD_DIR)/$(APP_NAME).dmg
 STAGE := $(BUILD_DIR)/dmg-stage
@@ -40,7 +40,7 @@ run: build
 
 # Assemble a proper .app bundle and codesign ad-hoc so permission
 # dialogs (mic / screen recording) attribute to "Aria".
-release:
+release: verify-release
 	# -no-whole-module-optimization is REQUIRED: WMO miscompiles SwiftUI actor
 	# isolation on Swift 6.3 / macOS 26.3 and a release build crashes on the first
 	# control tap. Per-file -O is kept. See README "release builds".
@@ -56,6 +56,17 @@ release:
 		$(APP_BUNDLE) || codesign --force --deep --sign "$(SIGN_ID)" $(APP_BUNDLE)
 	@echo "Built $(APP_BUNDLE) (signed: $(SIGN_ID)) — open with: open $(APP_BUNDLE)"
 	@if [ "$(SIGN_ID)" = "-" ]; then echo "NOTE: ad-hoc signed — macOS will re-ask for permissions after each rebuild. Run 'make cert' once to make them stick."; fi
+
+# Guard: the WMO flag must be present in BOTH places that build release binaries.
+# If either check fails, someone dropped `-no-whole-module-optimization` and release
+# builds will crash on the first tap of any SwiftUI control (Swift 6.3 / macOS 26
+# actor-isolation miscompile). This is a build-config regression, not a code bug.
+verify-release:
+	@grep -q -- '-no-whole-module-optimization' Makefile || \
+		{ echo "FAIL: Makefile release target lost -no-whole-module-optimization"; exit 1; }
+	@grep -q -- '-no-whole-module-optimization' Package.swift || \
+		{ echo "FAIL: Package.swift release swiftSettings lost -no-whole-module-optimization"; exit 1; }
+	@echo "verify-release OK: WMO disabled in Makefile + Package.swift"
 
 # Package the signed app into a distributable .dmg (drag-to-Applications layout).
 # Works with any identity, but only a notarized build (see `notarize`) opens without
