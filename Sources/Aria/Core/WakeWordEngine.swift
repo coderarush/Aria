@@ -100,8 +100,24 @@ final class WakeWordEngine {
         let rms = WakeWordEngine.rms(samples)
         // Only fingerprint voiced frames while the speaker gate is active (off by default).
         let voiceprint: [Float]? = (gateActive && rms > 0.05) ? VoiceFeatures.extract(samples) : nil
+        // Throttle the main-actor hop: a Task per audio frame churns task/metadata
+        // machinery from the realtime thread (contributed to a debug-build
+        // metadata-cache deadlock). Hop only when the level moved visibly or a
+        // voiceprint needs recording; the watchdog tolerates sparse updates.
+        let now = Date.timeIntervalSinceReferenceDate
+        feedLock.lock()
+        let movedEnough = abs(rms - lastSentLevel) > 0.015
+        let heartbeat = now - lastSentAt > 2.0     // keep the never-deaf watchdog fed
+        let send = movedEnough || heartbeat || voiceprint != nil
+        if send { lastSentLevel = rms; lastSentAt = now }
+        feedLock.unlock()
+        guard send else { return }
         Task { @MainActor in self.noteAudio(level: rms, voiceprint: voiceprint) }
     }
+
+    /// Last forwarded level/time; guarded by feedLock (audio thread).
+    nonisolated(unsafe) private var lastSentLevel: Float = -1
+    nonisolated(unsafe) private var lastSentAt: TimeInterval = 0
 
     @MainActor private func noteAudio(level: Float, voiceprint: [Float]? = nil) {
         lifecycle.sawAudio(at: Date.timeIntervalSinceReferenceDate)
@@ -199,7 +215,10 @@ final class WakeWordEngine {
                 : (committedCommand + " " + sessionText).trimmingCharacters(in: .whitespacesAndNewlines)
             let grew = combined.count > commandBuffer.count
             commandBuffer = combined
-            if grew { resetSilenceTimer(commandSilence) }
+            if grew {
+                resetSilenceTimer(commandSilence)
+                Log.trace("capture: buffer now \(combined.count) chars")
+            }
         }
     }
 
@@ -220,7 +239,9 @@ final class WakeWordEngine {
         committedCommand = ""
         commandBuffer = stripWakePhrase(from: initialTranscript, original: initialTranscript)
         onWake?()
-        resetSilenceTimer(commandBuffer.isEmpty ? commandLeadGrace : commandSilence)
+        let grace = commandBuffer.isEmpty ? commandLeadGrace : commandSilence
+        resetSilenceTimer(grace)
+        Log.trace("command mode armed (buffer='\(commandBuffer)', grace=\(grace)s)")
     }
 
     private func resetSilenceTimer(_ timeout: TimeInterval) {

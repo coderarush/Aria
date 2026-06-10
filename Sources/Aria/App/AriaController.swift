@@ -35,8 +35,7 @@ final class AriaController {
     /// silently through the same autonomy engine + safety gates.
     private var agentCoordinator: AgentCoordinator?
     /// Push-to-talk (⌥Space) and type-to-Aria (⌥⇧Space) global hotkeys.
-    private var talkHotkey: HotkeyManager?
-    private var typeHotkey: HotkeyManager?
+    private var hotkeyTap: HotkeyTap?
     private var typePanel: CommandInputPanel?
     private var settingsCancellable: AnyCancellable?
     /// True while Aria is speaking; keeps wake suspended even if the pill
@@ -56,28 +55,37 @@ final class AriaController {
     private var speechStartedAt = Date.distantPast
 
     func start() {
-        setupPanel()
-        wireEngine()
+        Log.trace("start: begin")
+        // Pre-warm Combine's Published generic metadata ON THE MAIN THREAD before
+        // the audio pipeline starts. In debug builds (no metadata
+        // prespecialization) the first instantiation under concurrency — audio
+        // thread feeding levels vs main thread — deadlocked the main thread in
+        // MetadataCacheEntryBase::awaitSatisfyingState (sampled live).
+        islandViewModel.updateAudioLevel(0)
+        islandViewModel.updateAudioLevel(0.01)
+        setupPanel();              Log.trace("start: panel")
+        wireEngine();              Log.trace("start: engine wired")
         configureConfirmation()
-        configureLearning()
+        configureLearning();       Log.trace("start: learning")
         startListening()
         offerResumeIfPending()
         reindexKnowledgeIfEnabled()
-        configureBackgroundAgents()
-        configureHotkeys()
+        // Bisect kill-switches: `defaults write com.aria.agent app.disableX -bool true`
+        let d = UserDefaults.standard
+        if !d.bool(forKey: "app.disableAgents") { configureBackgroundAgents(); Log.trace("start: agents") }
+        if !d.bool(forKey: "app.disableHotkeys") { configureHotkeys() }
+        configureDebugHooks()
+        Log.trace("start: done")
     }
 
     /// Global hotkeys: ⌥Space = push-to-talk summon (coexists with the wake
-    /// phrase), ⌥⇧Space = type to Aria. Carbon-based — no extra permissions.
+    /// phrase), ⌥⇧Space = type to Aria. CGEvent tap (consumes the keystroke;
+    /// rides the Accessibility trust Aria already has for computer use).
     private func configureHotkeys() {
-        talkHotkey = HotkeyManager { [weak self] in self?.summonAria() }
-        if talkHotkey?.start(id: 1) != true {
-            Log.trace("hotkey: ⌥Space unavailable (taken by another app)")
-        }
-        typeHotkey = HotkeyManager { [weak self] in self?.showTypePanel() }
-        if typeHotkey?.start(modifiers: UInt32(optionKey | shiftKey), id: 2) != true {
-            Log.trace("hotkey: ⌥⇧Space unavailable (taken by another app)")
-        }
+        hotkeyTap = HotkeyTap(
+            onTalk: { [weak self] in self?.summonAria() },
+            onType: { [weak self] in self?.showTypePanel() })
+        hotkeyTap?.start()
         typePanel = CommandInputPanel { [weak self] text in
             self?.handleTypedCommand(text)
         }
@@ -90,16 +98,48 @@ final class AriaController {
     }
 
     /// Soft interaction chime, AEC-cancelled (played as far-end reference so
-    /// the mic never hears it). Subtle by design; toggleable in Settings.
+    /// the mic never hears it). Deferred off the caller's stack so it can never
+    /// block the wake path; subtle by design; toggleable in Settings.
     private func playChime(_ kind: UISounds.Kind) {
         guard AppSettings.shared.uiSoundsEnabled else { return }
-        let samples = UISounds.pcm(for: kind)
-        var pcm = Data(capacity: samples.count * 2)
-        for s in samples {
-            var le = s.littleEndian
-            withUnsafeBytes(of: &le) { pcm.append(contentsOf: $0) }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            Log.trace("chime: \(kind) start")
+            let samples = UISounds.pcm(for: kind)
+            var pcm = Data(capacity: samples.count * 2)
+            for s in samples {
+                var le = s.littleEndian
+                withUnsafeBytes(of: &le) { pcm.append(contentsOf: $0) }
+            }
+            self.audioBus.playReference(pcm: pcm, pcmRate: UISounds.sampleRate) {
+                Log.trace("chime: \(kind) done")
+            }
         }
-        audioBus.playReference(pcm: pcm, pcmRate: UISounds.sampleRate) {}
+    }
+
+    /// Local debug hooks for headless driving (summon + typed commands) so the
+    /// capture pipeline can be exercised and traced without a microphone.
+    /// Off unless `defaults write com.aria.agent app.debugHooks -bool true`.
+    private func configureDebugHooks() {
+        guard UserDefaults.standard.bool(forKey: "app.debugHooks") else { return }
+        Log.trace("debug hooks ON")
+        // Selector API with .deliverImmediately — the block API holds
+        // notifications for background (LSUIElement) apps until activation.
+        let dnc = DistributedNotificationCenter.default()
+        dnc.addObserver(self, selector: #selector(debugSummon),
+                        name: Notification.Name("aria.debug.summon"), object: nil,
+                        suspensionBehavior: .deliverImmediately)
+        dnc.addObserver(self, selector: #selector(debugSay(_:)),
+                        name: Notification.Name("aria.debug.say"), object: nil,
+                        suspensionBehavior: .deliverImmediately)
+    }
+
+    @objc private func debugSummon() { summonAria() }
+
+    @objc private func debugSay(_ note: Notification) {
+        let text = note.object as? String ?? ""
+        Log.trace("debug.say: '\(text)'")
+        handleTypedCommand(text)
     }
 
     func showTypePanel() {
@@ -283,6 +323,7 @@ final class AriaController {
     /// Build the engine, providers (calendar + learned routines), and presenter,
     /// then poll gently for something worth offering.
     private func configureProactive() {
+        guard !UserDefaults.standard.bool(forKey: "app.disableProactive") else { return }
         let pe = patternEngine
         let calendar = CalendarSignalProvider(leadWindow: 300) { now in
             await Self.upcomingCalendarEvents(now: now, window: 360)
@@ -795,6 +836,10 @@ final class AriaController {
 
     private func endConversation() {
         convSilenceTimer?.invalidate(); convSilenceTimer = nil
+        // Drop the ended session: ConversationSession.userSaid silently ignores
+        // input after end(), so keeping the dead object made the SECOND typed
+        // command vanish ("she only answers once") — found live.
+        session = nil
         // A revealed-but-unanswered offer expires (not counted as a rejection).
         if proactiveAwaitingReply {
             proactiveAwaitingReply = false

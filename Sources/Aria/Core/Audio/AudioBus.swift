@@ -63,12 +63,22 @@ final class AudioBus {
 
     /// Play Aria's TTS (16-bit mono PCM at `pcmRate`) AND register it as the AEC
     /// far-end so her voice is cancelled out of the mic.
+    ///
+    /// The buffer is CONVERTED to the player node's connected format before
+    /// scheduling. Scheduling a mismatched buffer raises an ObjC exception
+    /// inside AVAudioPlayerNode ("_outputFormat.channelCount ==
+    /// buffer.format.channelCount") that Swift cannot catch — on macOS 26.3.1
+    /// it killed the capture pipeline on every wake chime and corrupted
+    /// concurrency state badly enough to crash later SwiftUI taps.
     func playReference(pcm: Data, pcmRate: Double, onDone: @escaping () -> Void) {
         if let i16 = AudioBus.resampleInt16(pcm: pcm, fromRate: pcmRate, toFormat: aecFormat) {
             farLock.lock(); farRing.push(i16); farLock.unlock()
         }
-        guard let srcFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: pcmRate, channels: 1, interleaved: true),
-              let buf = AudioBus.pcmBuffer(from: pcm, format: srcFormat) else { onDone(); return }
+        let nodeFormat = player.outputFormat(forBus: 0)
+        guard let buf = AudioBus.playableBuffer(pcm: pcm, pcmRate: pcmRate, nodeFormat: nodeFormat) else {
+            Log.trace("audio: could not prepare playback buffer (\(pcm.count) bytes @ \(pcmRate)Hz)")
+            onDone(); return
+        }
         onPlayStateChange?(true)
         if !player.isPlaying { player.play() }
         player.scheduleBuffer(buf, at: nil) { [weak self] in
@@ -77,6 +87,32 @@ final class AudioBus {
                 onDone()
             }
         }
+    }
+
+    /// Mono Int16 PCM → a buffer in exactly `nodeFormat` (sample rate, channel
+    /// count, common format). Pass-through when the formats already match.
+    static func playableBuffer(pcm: Data, pcmRate: Double, nodeFormat: AVAudioFormat) -> AVAudioPCMBuffer? {
+        guard !pcm.isEmpty,
+              let srcFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: pcmRate,
+                                            channels: 1, interleaved: true),
+              let src = pcmBuffer(from: pcm, format: srcFormat) else { return nil }
+        if srcFormat.commonFormat == nodeFormat.commonFormat,
+           srcFormat.sampleRate == nodeFormat.sampleRate,
+           srcFormat.channelCount == nodeFormat.channelCount {
+            return src
+        }
+        guard let conv = AVAudioConverter(from: srcFormat, to: nodeFormat) else { return nil }
+        let ratio = nodeFormat.sampleRate / srcFormat.sampleRate
+        let cap = AVAudioFrameCount(Double(src.frameLength) * ratio + 32)
+        guard cap > 0, let out = AVAudioPCMBuffer(pcmFormat: nodeFormat, frameCapacity: cap) else { return nil }
+        var fed = false
+        var err: NSError?
+        conv.convert(to: out, error: &err) { _, status in
+            if fed { status.pointee = .noDataNow; return nil }
+            fed = true; status.pointee = .haveData; return src
+        }
+        guard err == nil, out.frameLength > 0 else { return nil }
+        return out
     }
 
     func stopPlayback() {

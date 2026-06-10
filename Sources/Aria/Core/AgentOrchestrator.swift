@@ -284,11 +284,12 @@ actor AgentOrchestrator {
         async let specsLoad = registry.specs()
         async let recalledLoad = longTerm.recall(for: command, limit: 4)   // relevant long-term facts
 
-        let screenshot = await screenshotLoad
-        var history = Array(await historyLoad.suffix(8))
-        let context = await contextLoad
-        let specs = await specsLoad
-        let recalled = await recalledLoad
+        Log.trace("turn: setup begin")
+        let screenshot = await screenshotLoad;  Log.trace("turn: screenshot ok")
+        var history = Array(await historyLoad.suffix(8)); Log.trace("turn: history ok")
+        let context = await contextLoad;        Log.trace("turn: context ok")
+        let specs = await specsLoad;            Log.trace("turn: specs ok")
+        let recalled = await recalledLoad;      Log.trace("turn: recall ok")
         var transcript = command
         if !recalled.isEmpty {
             let known = recalled.map { "- \($0.text)" }.joined(separator: "\n")
@@ -300,6 +301,7 @@ actor AgentOrchestrator {
         do {
             for _ in 0..<maxRounds {
                 var calls: [(name: String, args: [String: String])] = []
+                Log.trace("turn: streaming…")
                 let stream = await gemini.streamSend(transcript: transcript, screenshotJPEG: turnScreenshot,
                                                      history: history, context: context, toolCatalog: "", specs: specs,
                                                      preferredModel: ModelRouter.model(for: command))

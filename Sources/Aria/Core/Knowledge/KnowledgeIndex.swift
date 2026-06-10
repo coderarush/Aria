@@ -62,13 +62,11 @@ actor KnowledgeIndex {
             guard let walker = fm.enumerator(at: root,
                                              includingPropertiesForKeys: [.contentModificationDateKey, .isDirectoryKey],
                                              options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { continue }
-            for case let url as URL in walker {
-                let name = url.lastPathComponent
-                if name == "node_modules" || name == ".git" || name == ".build" {
-                    walker.skipDescendants(); continue
-                }
-                guard (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory != true,
-                      TextExtractor.isIndexable(url) else { continue }
+            // Drain synchronously: NSEnumerator iteration is unavailable in async
+            // contexts (Swift 6), and skipDescendants only works mid-walk.
+            let candidates = Self.walk(walker)
+            for url in candidates {
+                guard TextExtractor.isIndexable(url) else { continue }
                 let path = url.path
                 guard path != storeURL.path else { continue }   // never index our own store
                 seen.insert(path)
@@ -103,6 +101,24 @@ actor KnowledgeIndex {
         }
         save()
         return stats
+    }
+
+    /// Synchronous directory walk: skips vendored/build dirs mid-traversal and
+    /// returns only files. Separated out because NSEnumerator can't be iterated
+    /// from an async actor method in Swift 6.
+    private nonisolated static func walk(_ walker: FileManager.DirectoryEnumerator) -> [URL] {
+        var out: [URL] = []
+        while let any = walker.nextObject() {
+            guard let url = any as? URL else { continue }
+            let name = url.lastPathComponent
+            if name == "node_modules" || name == ".git" || name == ".build" {
+                walker.skipDescendants()
+                continue
+            }
+            if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true { continue }
+            out.append(url)
+        }
+        return out
     }
 
     /// realpath()-based canonical form; falls back to the input when the path

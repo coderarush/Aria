@@ -153,6 +153,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// One-time migration: if a key sits in ~/Aria/.apikey and the Keychain is
     /// empty, move it into the Keychain.
     private func migrateAPIKeyIfNeeded() {
+        // One-shot, and NEVER on the main thread at launch: the first Keychain
+        // access after a re-sign can block for minutes on the ACL check — this
+        // single call was the "Aria takes 1-2 minutes to come alive" hang.
+        let flag = "app.apikeyMigrationDone"
+        guard !UserDefaults.standard.bool(forKey: flag) else { return }
+        DispatchQueue.global(qos: .utility).async {
+            defer { UserDefaults.standard.set(true, forKey: flag) }
+            Self.migrateAPIKeyNow()
+        }
+    }
+
+    nonisolated private static func migrateAPIKeyNow() {
         guard KeychainManager.read(account: KeychainKey.geminiAPIKey) == nil else { return }
         let legacy = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Aria/.apikey")

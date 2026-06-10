@@ -33,8 +33,7 @@ final class SummonTests: XCTestCase {
 }
 
 final class HotkeyMapTests: XCTestCase {
-    func testDefaultIsOptionSpace() {
-        XCTAssertEqual(HotkeyManager.defaultKeyCode, 49)            // kVK_Space
-        XCTAssertEqual(HotkeyManager.defaultModifiers, UInt32(optionKey))
+    func testHotkeyIsSpaceKey() {
+        XCTAssertEqual(HotkeyTap.keySpace, 49)   // kVK_Space
     }
 }
