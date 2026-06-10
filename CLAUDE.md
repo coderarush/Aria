@@ -45,7 +45,14 @@ phase B** (Core/Providers/: ModelProvider protocol, OllamaProvider (Qwen default
 GeminiProvider, DeterministicProvider (demo-mode engine), TaskClassifier +
 RoutingPolicy + RoutingLog (dashboard data), LocalFirstRouter wired into
 GeminiClient.generateText — opt-in via Settings "Local-first", default OFF, cloud
-byte-identical until enabled; planner (.planning) is the first routed class).
+byte-identical until enabled; planner (.planning) is the first routed class),
+**Phase C**: Local Knowledge Engine (Core/Knowledge/: opt-in folder index,
+incremental by mtime, lexical search, `knowledge_search` tool, Settings →
+Knowledge), background agents (Core/Agents/: daily/interval/folderChanged
+triggers, silent runs through the autonomy engine + Safety gates, completion
+always notifies, Settings → Agents), push-to-talk ⌥Space + Type-to-Aria ⌥⇧Space
+(WakeWordEngine.summon, HotkeyManager Carbon, CommandInputPanel), Transparency
+tab (context inspector / router dashboard / workflow runs).
 
 ## Safety & reliability
 - Approval gates: send/pay/delete/external comms. Activity log: every action visible.
