@@ -15,6 +15,10 @@ final class IslandViewModel: ObservableObject {
     @Published var isVisible: Bool = false
     @Published var accent: Color = .accentColor
     @Published var glowColors: [Color] = []
+    /// Proactive Presence: a silent "I have a suggestion" glow, independent of
+    /// `state` so it can sit on top of any state without disturbing the wake/
+    /// listen/think flow. Speaks only when the user reveals it.
+    @Published private(set) var hasSuggestion: Bool = false
 
     /// Fired when the pill wants the hosting panel to show/hide.
     var onVisibilityChange: ((Bool) -> Void)?
@@ -60,6 +64,19 @@ final class IslandViewModel: ObservableObject {
     }
 
     func updateAudioLevel(_ level: Float) { audioLevel = level }
+
+    /// Surface the orb in a silent "I have a suggestion" glow. Makes the panel
+    /// visible without entering the listening/thinking flow.
+    func showSuggestionGlow() {
+        hasSuggestion = true
+        setVisible(true)
+    }
+
+    /// Clear the glow; hide the orb again if nothing else is showing.
+    func clearSuggestionGlow() {
+        hasSuggestion = false
+        if state == .idle { setVisible(false) }
+    }
 
     private func setState(_ new: State) { guard state != new else { return }; state = new }
 

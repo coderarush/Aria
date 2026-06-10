@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Combine
+import EventKit
 
 /// Top-level coordinator that owns the runtime engines and the Island panel, and
 /// wires wake → listen → think → respond. Lives for the app's lifetime.
@@ -20,6 +21,15 @@ final class AriaController {
     private let taskViewModel = TaskViewModel()
     private var taskPanel: TaskPanel?
     private var learningTimer: Timer?
+    // Proactive Presence (v9): ambient anticipation that surfaces a single
+    // suggestion silently on the orb and speaks it only when you wake/glance.
+    private var proactiveEngine: ProactiveEngine?
+    private var proactivePresenter: SuggestionPresenter?
+    private var proactiveTimer: Timer?
+    private var proactiveExpiryTimer: Timer?
+    /// True between revealing a suggestion and hearing the user's yes/no, so the
+    /// next command is interpreted as the answer.
+    private var proactiveAwaitingReply = false
     private var settingsCancellable: AnyCancellable?
     /// True while Aria is speaking; keeps wake suspended even if the pill
     /// auto-hides mid-utterance, so she can't hear herself and re-trigger.
@@ -108,12 +118,9 @@ final class AriaController {
 
     private func configureLearning() {
         observeAppEvents()
-        Task {
-            await patternEngine.setSuggestionHandler { [weak self] pattern in
-                Task { @MainActor in self?.presentSuggestion(pattern) }
-            }
-        }
-        // Hourly: re-detect, surface suggestions, fire approved automations.
+        configureProactive()
+        // Hourly: re-detect patterns + fire approved automations. Suggestions now
+        // surface ambiently through the Proactive engine, not a blocking modal.
         learningTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.runLearningCycle() }
         }
@@ -136,7 +143,6 @@ final class AriaController {
     private func runLearningCycle() async {
         let sensitivity = LearningSettings.load().sensitivity
         _ = await patternEngine.analyzePatterns(sensitivity: sensitivity)
-        _ = await patternEngine.patternsToSuggest()
         let firing = await patternEngine.automationsToFire()
         for pattern in firing {
             if case let .runSavedCommand(command) = pattern.action {
@@ -148,18 +154,124 @@ final class AriaController {
         }
     }
 
+    // MARK: Proactive Presence (v9)
+
+    /// Build the engine, providers (calendar + learned routines), and presenter,
+    /// then poll gently for something worth offering.
+    private func configureProactive() {
+        let pe = patternEngine
+        let calendar = CalendarSignalProvider(leadWindow: 300) { now in
+            await Self.upcomingCalendarEvents(now: now, window: 360)
+        }
+        let routine = RoutineSignalProvider { now in
+            await pe.patternsToSuggest(now: now)
+        }
+        let engine = ProactiveEngine(providers: [calendar, routine],
+                                     settings: { ProactiveSettings.load() })
+        proactiveEngine = engine
+
+        let surface = ProactiveSurfaceAdapter(controller: self)
+        proactivePresenter = SuggestionPresenter(surface: surface) { [weak self] outcome, suggestion in
+            Task { await self?.proactiveEngine?.record(outcome, for: suggestion, now: Date()) }
+        }
+
+        proactiveTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.proactiveTick() }
+        }
+        // A first look shortly after launch settles, so calendar offers don't wait a full minute.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+            Task { @MainActor in await self?.proactiveTick() }
+        }
+    }
+
+    /// Ask the engine for the single best suggestion and surface it — but only
+    /// while Aria is idle, never on top of speech, a task, or a live conversation.
     @MainActor
-    private func presentSuggestion(_ pattern: BehaviorPattern) {
-        islandViewModel.beginListening()
-        islandViewModel.showResponse(pattern.description + " — want me to handle that automatically?")
-        let approved = Self.confirm("\(pattern.description).\n\nWant Aria to do this automatically from now on?")
-        Task {
-            if approved {
-                await patternEngine.approve(pattern.id, mode: .previewFirst)
-            } else {
-                await patternEngine.deferSuggestion(pattern.id)
+    private func proactiveTick() async {
+        guard let engine = proactiveEngine, let presenter = proactivePresenter else { return }
+        guard idleForProactive, presenter.pending == nil else { return }
+        guard let suggestion = await engine.tick(now: Date()) else { return }
+        // An await elapsed — re-check we're still idle and nothing else surfaced.
+        guard idleForProactive, presenter.pending == nil else { return }
+        presenter.present(suggestion)
+        scheduleProactiveExpiry(at: suggestion.expiry)
+        Log.trace("proactive: surfaced \(suggestion.dedupeKey)")
+    }
+
+    /// Idle = not speaking, no running task, no active conversation, not mid-reveal.
+    private var idleForProactive: Bool {
+        !isSpeaking && !taskActive && !wakeEngine.conversationActive && !proactiveAwaitingReply
+    }
+
+    private func scheduleProactiveExpiry(at date: Date) {
+        proactiveExpiryTimer?.invalidate()
+        let delay = max(1, date.timeIntervalSinceNow)
+        proactiveExpiryTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let p = self.proactivePresenter,
+                      p.pending != nil, !self.proactiveAwaitingReply else { return }
+                p.expire(now: Date())
+                Log.trace("proactive: suggestion expired untouched")
             }
         }
+    }
+
+    /// Called when the user wakes Aria while a suggestion is glowing — speak it
+    /// and await their yes/no.
+    @MainActor
+    private func revealPendingSuggestionIfAny() {
+        guard let p = proactivePresenter, p.pending != nil, !proactiveAwaitingReply else { return }
+        proactiveAwaitingReply = true
+        proactiveExpiryTimer?.invalidate()
+        p.reveal()
+    }
+
+    /// Speak a line, then re-arm the mic for the user's reply (mirrors the chat
+    /// turn tail). Used to voice a revealed offer and accept confirmations.
+    @MainActor
+    func speakAndListen(_ line: String) {
+        wakeEngine.isSuspended = true
+        isSpeaking = true
+        speechStartedAt = Date()
+        applyVoiceSettings()
+        islandViewModel.appendResponse(line)
+        streamVoice.onAllFinished = { [weak self] in
+            guard let self else { return }
+            self.isSpeaking = false
+            self.wakeEngine.freshTurn()
+            self.wakeEngine.isSuspended = false
+            self.islandViewModel.beginListening()
+            self.convSilenceTimer?.invalidate()
+            self.convSilenceTimer = Timer.scheduledTimer(withTimeInterval: AppSettings.shared.conversationSilenceTimeout, repeats: false) { [weak self] _ in
+                Task { @MainActor in self?.session?.end() }
+            }
+        }
+        streamVoice.enqueue(line)
+        if !streamVoice.isSpeaking { streamVoice.onAllFinished?() }
+    }
+
+    /// Run an accepted suggestion's command through the normal voice pipeline.
+    @MainActor
+    func runProactiveCommand(_ command: String) { handleCommand(command) }
+
+    /// Approve an accepted learned routine and confirm out loud.
+    @MainActor
+    func approveProactivePattern(_ id: UUID) async {
+        await patternEngine.approve(id, mode: .previewFirst)
+        speakAndListen("Done — I'll take care of that automatically from now on.")
+    }
+
+    /// Pull calendar events starting within `window` seconds. Returns nothing
+    /// unless calendar access is already granted (never prompts from a timer).
+    nonisolated private static func upcomingCalendarEvents(now: Date, window: TimeInterval) async -> [UpcomingEvent] {
+        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return [] }
+        let store = EKEventStore()
+        let predicate = store.predicateForEvents(withStart: now, end: now.addingTimeInterval(window), calendars: nil)
+        return store.events(matching: predicate)
+            .filter { !$0.isAllDay && $0.startDate > now }
+            .map { UpcomingEvent(id: $0.eventIdentifier ?? ($0.title ?? UUID().uuidString),
+                                 title: $0.title ?? "an event",
+                                 start: $0.startDate) }
     }
 
     /// Route the orchestrator's confirmation requests (run destructive code,
@@ -323,6 +435,8 @@ final class AriaController {
                 onTurn: { [weak self] in self?.handleCommand($0) })
             self.session?.start()
             self.islandViewModel.beginListening()
+            // If a suggestion is glowing, lead with it and await the user's yes/no.
+            self.revealPendingSuggestionIfAny()
         }
         wakeEngine.onAudioLevel = { [weak self] level in
             self?.islandViewModel.updateAudioLevel(level)
@@ -414,6 +528,21 @@ final class AriaController {
 
     private func handleCommand(_ command: String) {
         let lower = command.lowercased()
+
+        // Answering a revealed proactive offer? Yes → run it; anything else →
+        // dismiss the offer and treat the words as a normal request.
+        if proactiveAwaitingReply {
+            proactiveAwaitingReply = false
+            let action = proactivePresenter?.pending?.action
+            if ProactiveReply.isAffirmative(command) {
+                Task { [weak self] in await self?.proactivePresenter?.accept(now: Date()) }
+                if case .acknowledge = action { streamVoice.stop(); session?.end() }
+                return   // acknowledge/runCommand/approve handle their own follow-up
+            }
+            proactivePresenter?.dismiss(now: Date())
+            // fall through — process `command` as an ordinary turn
+        }
+
         if lower.contains("dismiss") || lower.contains("thanks aria") || lower.contains("never mind") {
             streamVoice.stop(); session?.end(); return
         }
@@ -540,6 +669,11 @@ final class AriaController {
 
     private func endConversation() {
         convSilenceTimer?.invalidate(); convSilenceTimer = nil
+        // A revealed-but-unanswered offer expires (not counted as a rejection).
+        if proactiveAwaitingReply {
+            proactiveAwaitingReply = false
+            proactivePresenter?.expire(now: Date())
+        }
         wakeEngine.endConversation()
         islandViewModel.dismiss()
     }
@@ -551,4 +685,18 @@ final class AriaController {
             islandViewModel.beginListening()
         }
     }
+}
+
+/// Bridges the testable `SuggestionPresenter` to the live orb, voice, and
+/// orchestrator. Holds the controller weakly to avoid a retain cycle.
+@MainActor
+private final class ProactiveSurfaceAdapter: PresenterSurface {
+    weak var controller: AriaController?
+    init(controller: AriaController) { self.controller = controller }
+
+    func showGlow() { controller?.islandViewModel.showSuggestionGlow() }
+    func clearGlow() { controller?.islandViewModel.clearSuggestionGlow() }
+    func speak(_ line: String) { controller?.speakAndListen(line) }
+    func runCommand(_ command: String) async { controller?.runProactiveCommand(command) }
+    func approvePattern(_ id: UUID) async { await controller?.approveProactivePattern(id) }
 }

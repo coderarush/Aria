@@ -53,6 +53,7 @@ private struct TabHead: View {
 struct SettingsView: View {
     enum Section: String, CaseIterable, Identifiable {
         case general = "General", voice = "Voice", conversation = "Conversation",
+             proactive = "Proactive",
              apiKey = "API Key", memory = "Memory", activity = "Activity", tools = "Tools", dynamic = "Dynamic", brain = "Brain", mirror = "Mirror", crew = "Crew", license = "License"
         var id: String { rawValue }
         var icon: String {
@@ -60,6 +61,7 @@ struct SettingsView: View {
             case .general:      return "gearshape"
             case .voice:        return "speaker.wave.2"
             case .conversation: return "bubble.left.and.bubble.right"
+            case .proactive:    return "bell.badge"
             case .apiKey:       return "key"
             case .memory:       return "brain.head.profile"
             case .activity:     return "list.bullet.rectangle"
@@ -118,6 +120,7 @@ struct SettingsView: View {
         case .general:      GeneralSettingsTab()
         case .voice:        VoiceSettingsTab()
         case .conversation: ConversationSettingsTab()
+        case .proactive:    ProactiveSettingsTab()
         case .apiKey:       APIKeyTab()
         case .memory:       MemorySettingsTab()
         case .activity:     ActivityTab()
@@ -322,6 +325,64 @@ struct ConversationSettingsTab: View {
             }
         }
         .onAppear { axOK = AXReader.hasPermission }
+    }
+}
+
+// MARK: Proactive (v9)
+
+struct ProactiveSettingsTab: View {
+    @State private var s = ProactiveSettings.load()
+
+    var body: some View {
+        TabHead(title: "Proactive Presence", subtitle: "Aria anticipates and gently offers \u{2014} before you ask.")
+        SForm {
+            SSection("Anticipation") {
+                Toggle("Let Aria be proactive", isOn: $s.enabled)
+            }
+
+            if s.enabled {
+                SSection("What she watches") {
+                    sourceToggle("Calendar & time", .calendar,
+                                 "A quiet heads-up just before your meetings.")
+                    sourceToggle("Learned routines", .routine,
+                                 "Offer to automate habits she notices on-device.")
+                    Text("More signals (recurring commands, on-screen context) are coming.")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
+
+                SSection("Quiet hours") {
+                    Toggle("Stay silent during quiet hours", isOn: $s.quietHoursEnabled)
+                    if s.quietHoursEnabled {
+                        HStack(spacing: 16) {
+                            Stepper("From \(s.quietHours.startHour):00",
+                                    value: $s.quietHours.startHour, in: 0...23)
+                            Stepper("to \(s.quietHours.endHour):00",
+                                    value: $s.quietHours.endHour, in: 0...23)
+                        }
+                        Text("Only time-critical reminders (a meeting about to start) come through.")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    }
+                }
+            }
+
+            SSection("How it feels") {
+                Text("When Aria has something, the orb glows quietly \u{2014} she speaks it only when you wake her or glance over. Say \u{201C}yes\u{201D} to do it, or just ignore it and it fades.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .onChange(of: s.enabled) { _, _ in s.save() }
+        .onChange(of: s.quietHoursEnabled) { _, _ in s.save() }
+        .onChange(of: s.quietHours.startHour) { _, _ in s.save() }
+        .onChange(of: s.quietHours.endHour) { _, _ in s.save() }
+    }
+
+    private func sourceToggle(_ title: String, _ source: SuggestionSource, _ help: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Toggle(title, isOn: Binding(
+                get: { s.isSourceEnabled(source) },
+                set: { s.sourceEnabled[source] = $0; s.save() }))
+            Text(help).font(.caption2).foregroundStyle(.tertiary)
+        }
     }
 }
 

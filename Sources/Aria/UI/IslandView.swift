@@ -9,6 +9,9 @@ struct IslandView: View {
     @State private var pulse = false   // springy "pop" on every state change
 
     private var active: Bool { viewModel.isVisible && viewModel.state != .idle }
+    /// Show the orb either when actively engaged OR when a proactive suggestion
+    /// is waiting (a silent breathing glow).
+    private var showBlob: Bool { active || viewModel.hasSuggestion }
 
     /// Blob fill colors (first two of the chosen palette, or the accent).
     private var palette: [Color] {
@@ -37,11 +40,12 @@ struct IslandView: View {
         ZStack {
             Color.clear
             blob
-                .opacity(active ? 1 : 0)
-                .scaleEffect((active ? 1 : 0.4) * (pulse ? 1.06 : 1.0))
+                .opacity(showBlob ? 1 : 0)
+                .scaleEffect((active ? 1 : (viewModel.hasSuggestion ? 0.82 : 0.4)) * (pulse ? 1.06 : 1.0))
                 .padding(.bottom, showCaption ? 134 : 64)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 .animation(.spring(response: 0.55, dampingFraction: 0.62), value: active)
+                .animation(.spring(response: 0.6, dampingFraction: 0.7), value: viewModel.hasSuggestion)
                 .animation(.spring(response: 0.5, dampingFraction: 0.72), value: showCaption)
                 .animation(.spring(response: 0.35, dampingFraction: 0.5), value: pulse)
                 .allowsHitTesting(false)
@@ -64,10 +68,13 @@ struct IslandView: View {
             let level = viewModel.state == .listening ? Double(min(max(viewModel.audioLevel, 0), 1)) : 0
             let speaking = viewModel.state == .responding ? Self.speechEnv(t) : 0
             let thinking = viewModel.state == .thinking
+            // A waiting proactive suggestion: a slow, calm breathing while idle.
+            let suggesting = viewModel.hasSuggestion && viewModel.state == .idle
+            let breathe = suggesting ? (0.5 + 0.5 * sin(t * 1.8)) : 0
             // Calm + nearly round when idle (top-left look); amoeba-wobbly when busy.
-            let amp = 0.07 + level * 0.16 + speaking * 0.12 + (thinking ? 0.07 : 0)
+            let amp = 0.07 + level * 0.16 + speaking * 0.12 + (thinking ? 0.07 : 0) + breathe * 0.04
             let speed = thinking ? 1.8 : 1.0
-            let envScale = 1 + level * 0.12 + speaking * 0.10
+            let envScale = 1 + level * 0.12 + speaking * 0.10 + breathe * 0.06
             let radii = BlobMath.radii(t: t, n: 11, amp: amp, speed: speed)
             let c0 = palette.first ?? viewModel.accent
             let c1 = palette.count > 1 ? palette[1] : c0
@@ -85,7 +92,8 @@ struct IslandView: View {
                 // Solid, gel-like body — just a soft depth shadow + a faint color halo,
                 // not the big glow from before.
                 .shadow(color: .black.opacity(0.22), radius: 10, y: 7)
-                .shadow(color: c0.opacity(0.28), radius: 16)
+                .shadow(color: c0.opacity(0.28 + (suggesting ? 0.25 * breathe : 0)),
+                        radius: 16 + (suggesting ? 10 * breathe : 0))
         }
         .frame(width: 184, height: 184)
     }
