@@ -240,6 +240,21 @@ final class WakeWordEngine {
         beginRecognition()
     }
 
+    /// Programmatic wake (push-to-talk hotkey / menu summon): enter command
+    /// capture as if the wake phrase was just heard. Skips the speaker gate —
+    /// a physical keypress IS the user. No-op while suspended (Aria speaking)
+    /// or already capturing.
+    func summon() {
+        guard !isSuspended, mode == .wake else { return }
+        Log.trace("summon — push-to-talk wake")
+        mode = .command
+        committedCommand = ""
+        commandBuffer = ""
+        recentVoiceprints = []
+        onWake?()
+        resetSilenceTimer(commandLeadGrace)
+    }
+
     /// Leave conversation mode and go back to wake-word listening.
     func endConversation() {
         conversationActive = false

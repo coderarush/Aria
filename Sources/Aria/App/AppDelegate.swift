@@ -77,7 +77,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.toolTip = "Aria"
 
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "Summon Aria", action: #selector(summon), keyEquivalent: ""))
+        let summonItem = NSMenuItem(title: "Talk to Aria", action: #selector(summon), keyEquivalent: " ")
+        summonItem.keyEquivalentModifierMask = [.option]
+        menu.addItem(summonItem)
+        let typeItem = NSMenuItem(title: "Type to Aria…", action: #selector(typeToAria), keyEquivalent: " ")
+        typeItem.keyEquivalentModifierMask = [.option, .shift]
+        menu.addItem(typeItem)
         menu.addItem(NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Aria", action: #selector(quit), keyEquivalent: "q"))
@@ -86,7 +91,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = item
     }
 
-    @objc private func summon() { controller.toggleManually() }
+    @objc private func summon() { controller.summonAria() }
+    @objc private func typeToAria() { controller.showTypePanel() }
     @objc private func quit() { NSApp.terminate(nil) }
 
     private var settingsWindow: NSWindow?

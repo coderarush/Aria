@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import Combine
 import EventKit
+import Carbon.HIToolbox
 
 /// Top-level coordinator that owns the runtime engines and the Island panel, and
 /// wires wake → listen → think → respond. Lives for the app's lifetime.
@@ -33,6 +34,10 @@ final class AriaController {
     /// Background agents (v9): recurring workflows + folder watchers, run
     /// silently through the same autonomy engine + safety gates.
     private var agentCoordinator: AgentCoordinator?
+    /// Push-to-talk (⌥Space) and type-to-Aria (⌥⇧Space) global hotkeys.
+    private var talkHotkey: HotkeyManager?
+    private var typeHotkey: HotkeyManager?
+    private var typePanel: CommandInputPanel?
     private var settingsCancellable: AnyCancellable?
     /// True while Aria is speaking; keeps wake suspended even if the pill
     /// auto-hides mid-utterance, so she can't hear herself and re-trigger.
@@ -59,6 +64,47 @@ final class AriaController {
         offerResumeIfPending()
         reindexKnowledgeIfEnabled()
         configureBackgroundAgents()
+        configureHotkeys()
+    }
+
+    /// Global hotkeys: ⌥Space = push-to-talk summon (coexists with the wake
+    /// phrase), ⌥⇧Space = type to Aria. Carbon-based — no extra permissions.
+    private func configureHotkeys() {
+        talkHotkey = HotkeyManager { [weak self] in self?.summonAria() }
+        if talkHotkey?.start(id: 1) != true {
+            Log.trace("hotkey: ⌥Space unavailable (taken by another app)")
+        }
+        typeHotkey = HotkeyManager { [weak self] in self?.showTypePanel() }
+        if typeHotkey?.start(modifiers: UInt32(optionKey | shiftKey), id: 2) != true {
+            Log.trace("hotkey: ⌥⇧Space unavailable (taken by another app)")
+        }
+        typePanel = CommandInputPanel { [weak self] text in
+            self?.handleTypedCommand(text)
+        }
+    }
+
+    /// Push-to-talk: same flow as hearing "Hey Aria". The engine no-ops while
+    /// suspended (she's speaking) or already capturing.
+    func summonAria() {
+        wakeEngine.summon()
+    }
+
+    func showTypePanel() {
+        typePanel?.present()
+    }
+
+    /// A typed command enters the exact same conversation pipeline as speech.
+    func handleTypedCommand(_ text: String) {
+        if session == nil {
+            wakeEngine.conversationActive = true
+            session = ConversationSession(
+                onEnd: { [weak self] in self?.endConversation() },
+                onTurn: { [weak self] in self?.handleCommand($0) })
+            session?.start()
+        }
+        islandViewModel.beginListening()
+        convSilenceTimer?.invalidate()
+        session?.userSaid(text)
     }
 
     /// Background agents run due goals through the normal autonomy engine —
