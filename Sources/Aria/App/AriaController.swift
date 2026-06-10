@@ -30,6 +30,9 @@ final class AriaController {
     /// True between revealing a suggestion and hearing the user's yes/no, so the
     /// next command is interpreted as the answer.
     private var proactiveAwaitingReply = false
+    /// Background agents (v9): recurring workflows + folder watchers, run
+    /// silently through the same autonomy engine + safety gates.
+    private var agentCoordinator: AgentCoordinator?
     private var settingsCancellable: AnyCancellable?
     /// True while Aria is speaking; keeps wake suspended even if the pill
     /// auto-hides mid-utterance, so she can't hear herself and re-trigger.
@@ -55,6 +58,54 @@ final class AriaController {
         startListening()
         offerResumeIfPending()
         reindexKnowledgeIfEnabled()
+        configureBackgroundAgents()
+    }
+
+    /// Background agents run due goals through the normal autonomy engine —
+    /// same tools, same Safety gates — but silently: no voice, no orb takeover.
+    /// Completion always notifies (never hidden), and runs land in history.
+    private func configureBackgroundAgents() {
+        let coordinator = AgentCoordinator(
+            isBusy: { [weak self] in
+                guard let self else { return true }
+                return self.isSpeaking || self.taskActive || self.wakeEngine.conversationActive
+            },
+            runner: { [weak self] goal in
+                guard let self else { return (false, "unavailable") }
+                return await self.runSilentTask(goal: goal)
+            },
+            notify: { title, body in
+                let t = AppleScriptTool.quotedLiteral(title)
+                let b = AppleScriptTool.quotedLiteral(body)
+                _ = AppleScriptTool.execute("display notification \"\(b)\" with title \"\(t)\"")
+            })
+        agentCoordinator = coordinator
+        coordinator.start()
+        // Settings tab posts this after any agent add/remove/toggle.
+        NotificationCenter.default.addObserver(forName: .ariaAgentsChanged, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in await self?.agentCoordinator?.refreshWatchers() }
+        }
+    }
+
+    /// Run one autonomy goal without touching the voice/orb surfaces; returns
+    /// the engine's final summary.
+    private func runSilentTask(goal: String) async -> (Bool, String) {
+        actor ResultBox {
+            var value: (Bool, String)?
+            func set(_ v: (Bool, String)) { if value == nil { value = v } }
+        }
+        let box = ResultBox()
+        await orchestrator.runTask(goal: goal) { event in
+            if case .finished(let ok, let summary) = event {
+                Task { await box.set((ok, summary)) }
+            }
+        }
+        // The finished event may land via a detached Task — give it a moment.
+        for _ in 0..<20 {
+            if let v = await box.value { return v }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        return (false, "The task ended without reporting a result.")
     }
 
     /// Refresh the local knowledge index shortly after launch (incremental —

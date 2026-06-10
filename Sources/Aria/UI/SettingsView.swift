@@ -53,7 +53,7 @@ private struct TabHead: View {
 struct SettingsView: View {
     enum Section: String, CaseIterable, Identifiable {
         case general = "General", voice = "Voice", conversation = "Conversation",
-             proactive = "Proactive", knowledge = "Knowledge",
+             proactive = "Proactive", knowledge = "Knowledge", agents = "Agents",
              apiKey = "API Key", memory = "Memory", activity = "Activity", tools = "Tools", dynamic = "Dynamic", brain = "Brain", mirror = "Mirror", crew = "Crew", license = "License"
         var id: String { rawValue }
         var icon: String {
@@ -63,6 +63,7 @@ struct SettingsView: View {
             case .conversation: return "bubble.left.and.bubble.right"
             case .proactive:    return "bell.badge"
             case .knowledge:    return "books.vertical"
+            case .agents:       return "clock.arrow.2.circlepath"
             case .apiKey:       return "key"
             case .memory:       return "brain.head.profile"
             case .activity:     return "list.bullet.rectangle"
@@ -123,6 +124,7 @@ struct SettingsView: View {
         case .conversation: ConversationSettingsTab()
         case .proactive:    ProactiveSettingsTab()
         case .knowledge:    KnowledgeSettingsTab()
+        case .agents:       AgentsSettingsTab()
         case .apiKey:       APIKeyTab()
         case .memory:       MemorySettingsTab()
         case .activity:     ActivityTab()
@@ -472,6 +474,115 @@ struct KnowledgeSettingsTab: View {
 
     private func refreshCount() async {
         docCount = await KnowledgeIndex.shared.documentCount
+    }
+}
+
+// MARK: Background agents (v9)
+
+struct AgentsSettingsTab: View {
+    @State private var agents: [BackgroundAgent] = []
+    @State private var runs: [AgentRun] = []
+    @State private var briefingHour = 9
+
+    var body: some View {
+        TabHead(title: "Background Agents", subtitle: "Set it once. Let Aria handle it — silently, with every run visible here.")
+        SForm {
+            SSection("Quick add") {
+                HStack {
+                    Stepper("Daily briefing at \(briefingHour):00", value: $briefingHour, in: 5...12)
+                    Button("Add") {
+                        add(BackgroundAgent(
+                            name: "Daily briefing",
+                            goal: "Prepare my daily briefing: list today's calendar events and any reminders due today, then save a short briefing note titled with today's date.",
+                            trigger: .daily(hour: briefingHour, minute: 0)))
+                    }.disabled(agents.contains { $0.name == "Daily briefing" })
+                }
+                Button("Watch Downloads — offer to organize new files") {
+                    add(BackgroundAgent(
+                        name: "Downloads watcher",
+                        goal: "Look at the newest files in my Downloads folder and organize them into sensible subfolders by type. Don't delete anything.",
+                        trigger: .folderChanged(path: NSHomeDirectory() + "/Downloads")))
+                }.disabled(agents.contains { $0.name == "Downloads watcher" })
+            }
+
+            SSection("Your agents (\(agents.count))") {
+                if agents.isEmpty {
+                    Text("No background agents yet.").foregroundStyle(.secondary).font(.callout)
+                } else {
+                    ForEach(agents) { agent in
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack {
+                                Toggle(agent.name, isOn: Binding(
+                                    get: { agent.enabled },
+                                    set: { on in var a = agent; a.enabled = on; update(a) }))
+                                Spacer()
+                                Button(role: .destructive) {
+                                    Task {
+                                        await AgentStore.shared.remove(agent.id)
+                                        await reload()
+                                        NotificationCenter.default.post(name: .ariaAgentsChanged, object: nil)
+                                    }
+                                } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
+                            }
+                            Text(triggerLabel(agent.trigger)).font(.caption2).foregroundStyle(.tertiary)
+                            if let outcome = agent.lastOutcome {
+                                Text("Last: \(outcome)").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                        }
+                        Divider()
+                    }
+                }
+                Text("Agents use the same tools and safety gates as voice tasks. Anything destructive still asks first.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            if !runs.isEmpty {
+                SSection("Recent runs") {
+                    ForEach(Array(runs.prefix(8).enumerated()), id: \.offset) { _, run in
+                        HStack(alignment: .top, spacing: 8) {
+                            Circle().fill(run.ok ? Color.green : .orange).frame(width: 7, height: 7).padding(.top, 5)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(run.agentName).font(.system(size: 12, weight: .semibold))
+                                Text(run.summary).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                                Text(run.date.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.caption2).foregroundStyle(.tertiary)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                    }
+                }
+            }
+        }
+        .task { await reload() }
+    }
+
+    private func triggerLabel(_ t: AgentTrigger) -> String {
+        switch t {
+        case .daily(let h, let m): return String(format: "Daily at %d:%02d", h, m)
+        case .interval(let s): return "Every \(Int(s / 60)) min"
+        case .folderChanged(let p): return "When \((p as NSString).abbreviatingWithTildeInPath) changes"
+        }
+    }
+
+    private func add(_ agent: BackgroundAgent) {
+        Task {
+            await AgentStore.shared.upsert(agent)
+            await reload()
+            NotificationCenter.default.post(name: .ariaAgentsChanged, object: nil)
+        }
+    }
+
+    private func update(_ agent: BackgroundAgent) {
+        Task {
+            await AgentStore.shared.upsert(agent)
+            await reload()
+            NotificationCenter.default.post(name: .ariaAgentsChanged, object: nil)
+        }
+    }
+
+    private func reload() async {
+        agents = await AgentStore.shared.all()
+        runs = await AgentStore.shared.recentRuns(20)
     }
 }
 
