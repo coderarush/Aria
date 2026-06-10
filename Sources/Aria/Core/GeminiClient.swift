@@ -155,7 +155,19 @@ actor GeminiClient {
                     toolCatalog: String = "",
                     specs: [ToolSpec] = [],
                     preferredModel: String? = nil) -> AsyncThrowingStream<StreamEvent, Error> {
-        AsyncThrowingStream { continuation in
+        // ARIA_DEMO_MODE: scripted, deterministic replies for recordings —
+        // streamed in sentence chunks so the UI/voice pipeline behaves normally.
+        if DemoMode.isEnabled() {
+            return AsyncThrowingStream { continuation in
+                let reply = DemoMode.reply(for: transcript)
+                for sentence in reply.split(separator: ". ", omittingEmptySubsequences: true) {
+                    let chunk = sentence.hasSuffix(".") ? String(sentence) : sentence + ". "
+                    continuation.yield(.text(String(chunk)))
+                }
+                continuation.finish()
+            }
+        }
+        return AsyncThrowingStream { continuation in
             let task = Task {
                 do {
                     let tools = specs.isEmpty ? nil : ToolDeclarations.declarations(for: specs)
@@ -274,6 +286,7 @@ actor GeminiClient {
     func generateText(prompt: String, temperature: Double = 0.3,
                       preferredModel: String? = nil,
                       taskClass: TaskClass? = nil) async throws -> String {
+        if DemoMode.isEnabled() { return DemoMode.reply(for: prompt) }
         // Local-first pre-step (V9): when the caller declares a task class, route
         // it. Master toggle defaults OFF and any local failure falls through, so
         // the cloud path below is byte-identical until the user opts in.
