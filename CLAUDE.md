@@ -70,11 +70,16 @@ make dmg             # distributable disk image
 ```
 Requirements: macOS 14+, Xcode 16+ (Swift 6).
 
-**Release builds MUST disable whole-module optimization** (`-no-whole-module-optimization`,
-wired into `make release` + `Package.swift`, guarded by `make verify-release`). On
-Swift 6.3 / macOS 26, WMO miscompiles SwiftUI actor-isolation → crash on first tap of any
-SwiftUI control (`swift_task_isCurrentExecutorWithFlags` → EXC_BAD_ACCESS). If that crash
-returns, the WMO flag was dropped — not a code regression.
+**Release builds MUST use `-Onone -no-whole-module-optimization`** (wired into
+`make release` + `Package.swift`, guarded by `make verify-release`). The Swift optimizer
+miscompiles SwiftUI actor-isolation on macOS 26.3.x: v8 hit it via WMO
+(EXC_BAD_ACCESS in `swift_task_isCurrentExecutorWithFlags` on first control tap); on
+**26.3.1 it returned even without WMO** (EXC_BREAKPOINT in `MainActor.assumeIsolated`
+under `_ButtonGesture`, crash report 2026-06-10). Debug-level codegen has never crashed —
+release is pinned to -Onone until the optimizer bug is bisected. If a first-tap crash
+returns, check these flags before suspecting code. **Also:** never reinstall the v5-era
+`com.aria.agent` LaunchAgent during development — KeepAlive respawns a second Aria that
+fights the mic (the "works once then deaf" symptom).
 
 **Audio-thread rule:** any closure stored in a non-actor class (AudioBus, BargeController)
 runs on the audio thread and must NOT touch @MainActor properties — capture the consumers

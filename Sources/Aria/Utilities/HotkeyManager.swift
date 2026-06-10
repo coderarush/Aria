@@ -11,10 +11,25 @@ final class HotkeyManager {
 
     private var hotKeyRef: EventHotKeyRef?
     private var handlerRef: EventHandlerRef?
+    /// Written once in start() before any event can arrive; read from the
+    /// Carbon callback (main thread, but outside actor isolation).
+    nonisolated(unsafe) private var registeredID: UInt32 = 0
     private let onPress: () -> Void
 
     init(onPress: @escaping () -> Void) {
         self.onPress = onPress
+    }
+
+    /// Carbon delivers EVERY hotkey-pressed event to EVERY installed handler —
+    /// each handler must check the event's EventHotKeyID and act only on its
+    /// own. Without this, ⌥Space fires the type panel too (live-found bug).
+    nonisolated static func eventMatches(_ event: EventRef?, id: UInt32) -> Bool {
+        guard let event else { return false }
+        var hkID = EventHotKeyID()
+        let err = GetEventParameter(event, EventParamName(kEventParamDirectObject),
+                                    EventParamType(typeEventHotKeyID), nil,
+                                    MemoryLayout<EventHotKeyID>.size, nil, &hkID)
+        return err == noErr && hkID.id == id
     }
 
     /// Register the global hotkey. False if registration failed (e.g. the
@@ -25,14 +40,17 @@ final class HotkeyManager {
                id: UInt32 = 1) -> Bool {
         stop()
 
+        registeredID = id
         var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard),
                                       eventKind: UInt32(kEventHotKeyPressed))
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
         let installed = InstallEventHandler(
             GetApplicationEventTarget(),
-            { _, _, userData in
+            { _, event, userData in
                 guard let userData else { return noErr }
                 let manager = Unmanaged<HotkeyManager>.fromOpaque(userData).takeUnretainedValue()
+                // Match synchronously — the EventRef dies with this callback.
+                guard HotkeyManager.eventMatches(event, id: manager.registeredID) else { return noErr }
                 Task { @MainActor in manager.onPress() }
                 return noErr
             },

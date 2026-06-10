@@ -27,13 +27,18 @@ let package = Package(
             dependencies: ["CSpeexDSP"],
             path: "Sources/Aria",
             swiftSettings: [
-                // Whole-module optimization miscompiles SwiftUI actor-isolation in this
-                // toolchain (Swift 6.3 / macOS 26.3): a release build crashes on the first
-                // SwiftUI Button tap, inside swift_task_isCurrentExecutorWithFlags
-                // (EXC_BAD_ACCESS, null executor identity). Per-file -O is fine — only the
-                // cross-module pass breaks it. `make release` passes the same flag; this
-                // keeps a bare `swift build -c release` safe too. No-op in debug.
-                .unsafeFlags(["-no-whole-module-optimization"], .when(configuration: .release))
+                // The Swift optimizer miscompiles SwiftUI actor-isolation in this
+                // toolchain. History: on macOS 26.3 / Swift 6.3, whole-module
+                // optimization made release builds crash on the first SwiftUI control
+                // tap (swift_task_isCurrentExecutorWithFlags, EXC_BAD_ACCESS), fixed
+                // by -no-whole-module-optimization. On macOS 26.3.1 the same family
+                // returned EVEN WITHOUT WMO (EXC_BREAKPOINT in
+                // MainActor.assumeIsolated under _ButtonGesture). Debug-level codegen
+                // has never crashed across all three recurrences, so release for the
+                // Aria target is pinned to -Onone until the optimizer bug is bisected.
+                // Perf impact is negligible: the hot real-time path (Speex AEC) is C,
+                // and everything else waits on network/disk. No-op in debug.
+                .unsafeFlags(["-Onone", "-no-whole-module-optimization"], .when(configuration: .release))
             ]
         ),
         .testTarget(

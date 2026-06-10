@@ -41,10 +41,12 @@ run: build
 # Assemble a proper .app bundle and codesign ad-hoc so permission
 # dialogs (mic / screen recording) attribute to "Aria".
 release: verify-release
-	# -no-whole-module-optimization is REQUIRED: WMO miscompiles SwiftUI actor
-	# isolation on Swift 6.3 / macOS 26.3 and a release build crashes on the first
-	# control tap. Per-file -O is kept. See README "release builds".
-	swift build -c release -Xswiftc -no-whole-module-optimization
+	# -Onone + -no-whole-module-optimization are REQUIRED: the Swift optimizer
+	# miscompiles SwiftUI actor isolation on macOS 26.3.x — release builds crash
+	# on the first control tap (v8: WMO/EXC_BAD_ACCESS; 26.3.1: even per-file -O,
+	# EXC_BREAKPOINT in MainActor.assumeIsolated). Debug-level codegen never
+	# crashes. Pinned until the optimizer bug is bisected. See README.
+	swift build -c release -Xswiftc -Onone -Xswiftc -no-whole-module-optimization
 	rm -rf $(APP_BUNDLE)
 	mkdir -p $(APP_BUNDLE)/Contents/MacOS
 	mkdir -p $(APP_BUNDLE)/Contents/Resources
@@ -66,7 +68,11 @@ verify-release:
 		{ echo "FAIL: Makefile release target lost -no-whole-module-optimization"; exit 1; }
 	@grep -q -- '-no-whole-module-optimization' Package.swift || \
 		{ echo "FAIL: Package.swift release swiftSettings lost -no-whole-module-optimization"; exit 1; }
-	@echo "verify-release OK: WMO disabled in Makefile + Package.swift"
+	@grep -q -- '-Onone' Makefile || \
+		{ echo "FAIL: Makefile release target lost -Onone (26.3.1 SwiftUI tap-crash mitigation)"; exit 1; }
+	@grep -q -- '"-Onone"' Package.swift || \
+		{ echo "FAIL: Package.swift release swiftSettings lost -Onone (26.3.1 SwiftUI tap-crash mitigation)"; exit 1; }
+	@echo "verify-release OK: optimizer mitigations present (Onone + no-WMO)"
 
 # Package the signed app into a distributable .dmg (drag-to-Applications layout).
 # Works with any identity, but only a notarized build (see `notarize`) opens without
