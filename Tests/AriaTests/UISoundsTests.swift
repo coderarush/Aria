@@ -27,6 +27,12 @@ final class UISoundsTests: XCTestCase {
         XCTAssertEqual(UISounds.pcm(for: .wake), UISounds.pcm(for: .wake))
     }
 
+    func testAllFourKindsExistAndDiffer() {
+        XCTAssertEqual(UISounds.Kind.allCases.count, 4)
+        XCTAssertNotEqual(UISounds.pcm(for: .task), UISounds.pcm(for: .wake))
+        XCTAssertNotEqual(UISounds.pcm(for: .error), UISounds.pcm(for: .done))
+    }
+
     func testWavDataIsPlayableSize() {
         let data = UISounds.wavData(for: .done)
         XCTAssertGreaterThan(data.count, 44, "must contain a WAV header + samples")

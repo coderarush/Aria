@@ -240,6 +240,29 @@ struct GeneralSettingsTab: View {
                 }
             }
 
+            SSection("Orb") {
+                HStack {
+                    Text("Size")
+                    Slider(value: $settings.orbScale, in: 0.7...1.3, step: 0.05)
+                    Text(String(format: "%.0f%%", settings.orbScale * 100)).monospacedDigit()
+                }
+                Picker("Position", selection: $settings.orbPosition) {
+                    ForEach(AppSettings.OrbPosition.allCases.filter { $0 != .custom }) {
+                        Text($0.label).tag($0)
+                    }
+                }
+            }
+
+            SSection("Personality") {
+                Picker("Style", selection: $settings.personaStyle) {
+                    ForEach(PersonaStyle.allCases, id: \.rawValue) {
+                        Text($0.label).tag($0.rawValue)
+                    }
+                }
+                Text("How Aria talks — same brain, different manner. Takes effect on the next conversation.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             SSection("Behavior") {
                 HStack {
                     Text("Response duration")
@@ -737,7 +760,8 @@ struct APIKeyTab: View {
                     TextField("Ollama model", text: $settings.localModelName)
                 }
                 if settings.localFirstEnabled {
-                    Text("Planning, files, calendar, notes and similar tasks run on your Mac first — private, fast, no quota. Research, complex reasoning and conversation stay on the cloud model, and anything the local model can't handle falls back automatically. Requires Ollama (ollama.com) with the model pulled — Qwen 3 8B recommended.")
+                    Toggle("Local conversation too (experimental)", isOn: $settings.localChatEnabled)
+                    Text("Planning, agents, knowledge and similar work runs on your Mac first — private, free, no quota — with automatic cloud fallback. Live conversation can run locally too, but needs a fast instruct model (thinking models like Qwen 3.5 take minutes per spoken reply; try llama3.1:8b or qwen2.5:7b-instruct). Requires Ollama (ollama.com) with the model pulled.")
                         .font(.caption).foregroundStyle(.secondary)
                 } else if settings.localModelEnabled {
                     Text("Last resort — works offline. Requires Ollama running (ollama.com) with the model pulled. Slower, but never hits a limit.")

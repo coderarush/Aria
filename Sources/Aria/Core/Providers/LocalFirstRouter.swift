@@ -23,10 +23,38 @@ struct LocalFirstRouter {
         self.availability = availability
     }
 
-    private var enabled: Bool { defaults.bool(forKey: Self.toggleKey) }
-    private var modelName: String { defaults.string(forKey: Self.modelKey) ?? "" }
+    private var enabled: Bool { defaults.object(forKey: Self.toggleKey) as? Bool ?? true }   // local is the default (V9)
+    var localModelName: String { defaults.string(forKey: Self.modelKey) ?? "" }
 
-    private func provider() -> any ModelProvider { makeProvider(modelName) }
+    private func provider() -> any ModelProvider { makeProvider(localModelName) }
+
+    // Cached availability so the live conversation path never pays the 1.5s
+    // dead-server probe per turn. 30s TTL; guarded for cross-task access.
+    private static let probeLock = NSLock()
+    nonisolated(unsafe) private static var lastProbe: (at: Date, alive: Bool)?
+
+    static let chatToggleKey = "app.localChat"
+
+    /// Cheap "should LIVE CHAT go local right now?" — needs the master toggle,
+    /// the separate chat opt-in, and a live server. Chat is opt-in (default
+    /// off) because voice UX needs first-token in ~1s and full replies in
+    /// seconds; measured on a 4B thinking model the full conversation payload
+    /// runs minutes. Planner/agents/knowledge calls (short prompts) stay
+    /// local by default — flip this on when running a faster instruct model.
+    func chatGoesLocal() async -> Bool {
+        guard enabled, defaults.bool(forKey: Self.chatToggleKey) else { return false }
+        Self.probeLock.lock()
+        if let p = Self.lastProbe, Date().timeIntervalSince(p.at) < 30 {
+            Self.probeLock.unlock()
+            return p.alive
+        }
+        Self.probeLock.unlock()
+        let alive = await provider().isAvailable()
+        Self.probeLock.lock()
+        Self.lastProbe = (Date(), alive)
+        Self.probeLock.unlock()
+        return alive
+    }
 
     /// Routing decision for this task class right now. Skips the availability
     /// probe entirely when the toggle is off or the class is cloud-bound.

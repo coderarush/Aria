@@ -136,10 +136,10 @@ export default function App() {
           </Reveal>
           <div className="featRow">
             {[
-              ["◉", "Voice first", "Natural conversation — no commands to memorize."],
-              ["✦", "Context aware", "She sees the window, the selection, the field you're in."],
-              ["↯", "Takes action", "Opens apps, clicks, types, sends — completes the task."],
-              ["◌", "Private by default", "On-device wake word; your data stays on your Mac."],
+              ["●", "Voice first", "Natural conversation — no commands to memorize."],
+              ["◐", "Context aware", "She sees the window, the selection, the field you're in."],
+              ["→", "Takes action", "Opens apps, clicks, types, sends — completes the task."],
+              ["○", "Private by default", "On-device wake word; your data stays on your Mac."],
             ].map(([glyph, title, body], i) => (
               <Reveal key={title} i={i} className="feat">
                 <span className="featIcon" aria-hidden="true">{glyph}</span>
@@ -168,7 +168,7 @@ export default function App() {
             </Reveal>
             <Reveal i={2} className="menubarMock" aria-hidden="true">
               <div className="mbBar">
-                <span>📶</span><span>🎧</span><span>🔋</span>
+                <span className="mbGlyph" /><span className="mbGlyph" /><span className="mbGlyph wide" />
                 <span className="mbTime">Tue 9:41 AM</span>
                 <span className="mbBlob"><Blob size={22} mood="calm" /></span>
               </div>
@@ -270,7 +270,7 @@ export default function App() {
             </ul>
           </div>
           <Reveal i={2} className="lockWrap" aria-hidden="true">
-            <div className="lockCard"><div className="lockCircle">🔒</div></div>
+            <div className="lockCard"><div className="lockCircle"><span className="lockShape" /></div></div>
           </Reveal>
         </div>
       </section>
@@ -357,8 +357,8 @@ export default function App() {
           </div>
           <div className="footMeta">
             <div className="social">
-              <a href={GITHUB} target="_blank" rel="noreferrer" aria-label="GitHub">◉</a>
-              <a href={`mailto:${CONTACT}`} aria-label="Email">✉</a>
+              <a href={GITHUB} target="_blank" rel="noreferrer">GitHub</a>
+              <a href={`mailto:${CONTACT}`}>Email</a>
             </div>
             <span>© 2026 Aria. All rights reserved.</span>
           </div>

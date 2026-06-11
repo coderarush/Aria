@@ -41,9 +41,12 @@ struct IslandView: View {
             Color.clear
             blob
                 .opacity(showBlob ? 1 : 0)
-                .scaleEffect((active ? 1 : (viewModel.hasSuggestion ? 0.82 : 0.4)) * (pulse ? 1.06 : 1.0))
+                .scaleEffect((active ? 1 : (viewModel.hasSuggestion ? 0.82 : 0.4))
+                             * (pulse ? 1.06 : 1.0)
+                             * AppSettings.shared.orbScale)
                 .padding(.bottom, showCaption ? 134 : 64)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .padding(.horizontal, 48)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: Self.orbAlignment)
                 .animation(.spring(response: 0.55, dampingFraction: 0.62), value: active)
                 .animation(.spring(response: 0.6, dampingFraction: 0.7), value: viewModel.hasSuggestion)
                 .animation(.spring(response: 0.5, dampingFraction: 0.72), value: showCaption)
@@ -96,6 +99,14 @@ struct IslandView: View {
                         radius: 16 + (suggesting ? 10 * breathe : 0))
         }
         .frame(width: 184, height: 184)
+    }
+
+    /// User-chosen home for the orb along the bottom edge.
+    static var orbAlignment: Alignment {
+        switch AppSettings.shared.orbPosition {
+        case .bottomRight: return .bottomTrailing
+        default:           return .bottom
+        }
     }
 
     private var caption: some View {

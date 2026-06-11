@@ -36,15 +36,19 @@ final class RoutingPolicyTests: XCTestCase {
     }
 
     func testLocalEligibleClassesRouteLocalWhenEnabledAndAvailable() {
+        // Local-primary (constitution: "local is default, cloud is optional"):
+        // conversation and everyday work run on the local model.
         for cls: TaskClass in [.fileOps, .productivity, .contextRetrieval, .memory,
-                               .documentUnderstanding, .planning] {
+                               .documentUnderstanding, .planning, .simpleChat] {
             let d = RoutingPolicy.route(taskClass: cls, localFirstEnabled: true, localAvailable: true)
             XCTAssertEqual(d.tier, .local, "\(cls) should prefer local")
         }
     }
 
     func testCloudClassesStayCloudEvenWhenLocalEnabled() {
-        for cls: TaskClass in [.deepResearch, .complexReasoning, .vision, .simpleChat] {
+        // Deep research / heavy reasoning / vision stay cloud — the 10% an 8B
+        // local model genuinely can't match.
+        for cls: TaskClass in [.deepResearch, .complexReasoning, .vision] {
             let d = RoutingPolicy.route(taskClass: cls, localFirstEnabled: true, localAvailable: true)
             XCTAssertEqual(d.tier, .cloud, "\(cls) must stay cloud")
         }

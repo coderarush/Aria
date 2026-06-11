@@ -13,6 +13,11 @@ enum UISounds {
         case wake
         /// A task finished: one warm note, settling down.
         case done
+        /// She's deploying into a longer multi-step task: a purposeful
+        /// three-note ascent — "rolling up sleeves".
+        case task
+        /// Something failed: a gentle low double-tap, never alarming.
+        case error
     }
 
     /// 16-bit mono PCM at `sampleRate`. Deterministic.
@@ -26,6 +31,15 @@ enum UISounds {
             // E6 → A5 settle, slightly longer tail.
             return note(freq: 1318.5, secs: 0.08, amp: 0.13)
                  + note(freq: 880, secs: 0.18, amp: 0.15)
+        case .task:
+            // A5 → C#6 → E6 — a small major arpeggio, things are happening.
+            return note(freq: 880, secs: 0.07, amp: 0.13)
+                 + note(freq: 1108.7, secs: 0.07, amp: 0.13)
+                 + note(freq: 1318.5, secs: 0.16, amp: 0.14)
+        case .error:
+            // Two soft low E4 taps — informative, not punitive.
+            return note(freq: 329.6, secs: 0.09, amp: 0.15)
+                 + note(freq: 329.6, secs: 0.14, amp: 0.12)
         }
     }
 

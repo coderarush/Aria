@@ -70,10 +70,17 @@ final class AppSettings: ObservableObject {
     /// V9 local-first: prefer the local model for local-eligible task classes
     /// (planning, files, productivity…). Cloud always remains the fallback.
     @Published var localFirstEnabled: Bool { didSet { defaults.set(localFirstEnabled, forKey: K.localFirstEnabled) } }
+    /// Run LIVE CONVERSATION on the local model too (experimental — needs a
+    /// fast instruct model; thinking models are too slow for voice).
+    @Published var localChatEnabled: Bool { didSet { defaults.set(localChatEnabled, forKey: K.localChatEnabled) } }
     /// Speak a short play-by-play line as each autonomous step starts (alive + transparent).
     @Published var spokenStepNarration: Bool { didSet { defaults.set(spokenStepNarration, forKey: K.spokenStepNarration) } }
     /// Soft interaction chimes (wake, task done). Synthesized, AEC-cancelled.
     @Published var uiSoundsEnabled: Bool { didSet { defaults.set(uiSoundsEnabled, forKey: K.uiSoundsEnabled) } }
+    /// Orb size multiplier (0.7 small … 1.3 large).
+    @Published var orbScale: Double { didSet { defaults.set(orbScale, forKey: K.orbScale) } }
+    /// Personality flavor (PersonaStyle raw value).
+    @Published var personaStyle: String { didSet { defaults.set(personaStyle, forKey: PersonaStyle.key) } }
 
     var accentChoice: AccentChoice {
         get { Theme.decodeChoice(accentChoiceRaw) }
@@ -105,9 +112,12 @@ final class AppSettings: ObservableObject {
         speakerVerificationEnabled = defaults.bool(forKey: K.speakerVerificationEnabled)
         localModelEnabled = defaults.bool(forKey: K.localModelEnabled)
         localModelName = defaults.string(forKey: K.localModelName) ?? "qwen3:8b"
-        localFirstEnabled = defaults.bool(forKey: K.localFirstEnabled)
+        localFirstEnabled = defaults.object(forKey: K.localFirstEnabled) as? Bool ?? true   // local is the default (V9)
+        localChatEnabled = defaults.bool(forKey: K.localChatEnabled)
         spokenStepNarration = defaults.object(forKey: K.spokenStepNarration) as? Bool ?? true
         uiSoundsEnabled = defaults.object(forKey: K.uiSoundsEnabled) as? Bool ?? true
+        orbScale = defaults.object(forKey: K.orbScale) as? Double ?? 1.0
+        personaStyle = defaults.string(forKey: PersonaStyle.key) ?? "balanced"
     }
 
     /// Register/unregister the app as a login item (SMAppService, macOS 13+).
@@ -143,7 +153,9 @@ final class AppSettings: ObservableObject {
         static let localModelEnabled = "app.localModelEnabled"
         static let localModelName = "app.localModelName"
         static let localFirstEnabled = "app.localFirst"
+        static let localChatEnabled = "app.localChat"
         static let spokenStepNarration = "app.spokenStepNarration"
         static let uiSoundsEnabled = "app.uiSounds"
+        static let orbScale = "app.orbScale"
     }
 }

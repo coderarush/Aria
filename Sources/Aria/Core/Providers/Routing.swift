@@ -59,11 +59,12 @@ enum TaskClassifier {
 /// dead local server always falls back to cloud. Cloud behavior is therefore
 /// byte-identical until the user opts in — preservation by default.
 enum RoutingPolicy {
-    /// Classes the constitution lists as local tasks. `simpleChat` stays cloud
-    /// for now: conversation is the brand-defining path, it moves last.
+    /// Local-primary (constitution: "local is default, cloud is optional"):
+    /// everything runs on the local model except the 10% an 8B model genuinely
+    /// can't match — deep research, heavy reasoning, and vision.
     static let localEligible: Set<TaskClass> = [
         .fileOps, .productivity, .contextRetrieval, .memory,
-        .documentUnderstanding, .planning
+        .documentUnderstanding, .planning, .simpleChat
     ]
 
     static func route(taskClass: TaskClass,

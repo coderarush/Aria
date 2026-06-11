@@ -75,7 +75,32 @@ final class AriaController {
         if !d.bool(forKey: "app.disableAgents") { configureBackgroundAgents(); Log.trace("start: agents") }
         if !d.bool(forKey: "app.disableHotkeys") { configureHotkeys() }
         configureDebugHooks()
+        warmLocalModel()
         Log.trace("start: done")
+    }
+
+    /// Pull the local model into RAM right after launch so the FIRST real turn
+    /// doesn't pay the cold-load + prompt-eval penalty (measured ~2-3 min cold
+    /// on a 4B model with the full tool catalog; warm it's seconds). Quiet,
+    /// background, only when local-first is on and a server is reachable.
+    private func warmLocalModel() {
+        Task.detached(priority: .utility) {
+            let router = LocalFirstRouter()
+            guard await router.chatGoesLocal() else { return }
+            let model = router.localModelName.isEmpty ? OllamaProvider.defaultModel : router.localModelName
+            let provider = OllamaProvider(model: model)
+            Log.trace("local: warming \(model)…")
+            let start = Date()
+            _ = try? await provider.generateText(prompt: "Reply with: ok", temperature: 0)
+            Log.trace("local: warm in \(Int(Date().timeIntervalSince(start)))s")
+            // Keep it resident: Ollama unloads after ~5 idle minutes, which
+            // would put the cold-load penalty back on the next conversation.
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 240_000_000_000)   // 4 min
+                guard await router.chatGoesLocal() else { continue }
+                _ = try? await provider.generateText(prompt: "ok", temperature: 0)
+            }
+        }
     }
 
     /// Global hotkeys: ⌥Space = push-to-talk summon (coexists with the wake
@@ -85,9 +110,26 @@ final class AriaController {
         hotkeyTap = HotkeyTap(
             onTalk: { [weak self] in self?.summonAria() },
             onType: { [weak self] in self?.showTypePanel() })
-        hotkeyTap?.start()
+        if hotkeyTap?.start() != true {
+            // Accessibility not granted yet (or granted AFTER launch — taps
+            // can't be created retroactively). Keep retrying so the user never
+            // has to relaunch after flipping the toggle in System Settings.
+            retryHotkeysUntilLive()
+        }
         typePanel = CommandInputPanel { [weak self] text in
             self?.handleTypedCommand(text)
+        }
+    }
+
+    private func retryHotkeysUntilLive(attempt: Int = 0) {
+        guard attempt < 120 else { return }   // give up after ~30 min
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+            guard let self, let tap = self.hotkeyTap else { return }
+            if tap.start() {
+                Log.trace("hotkeys: live after retry \(attempt + 1)")
+            } else {
+                self.retryHotkeysUntilLive(attempt: attempt + 1)
+            }
         }
     }
 
@@ -765,6 +807,7 @@ final class AriaController {
 
     private func runAutonomousTask(_ goal: String, resume: Bool = false) {
         taskActive = true
+        playChime(.task)   // "rolling up sleeves" — a longer job is starting
         wakeEngine.isSuspended = true
         isSpeaking = true
         speechStartedAt = Date()
@@ -812,7 +855,7 @@ final class AriaController {
                         self.streamVoice.enqueue(line)
                     case .finished(let ok, let summary):
                         self.taskActive = false   // now the next queue-drain re-arms wake
-                        if ok { self.playChime(.done) }
+                        self.playChime(ok ? .done : .error)
                         self.streamVoice.enqueue(summary)
                         if !self.streamVoice.isSpeaking { self.streamVoice.onAllFinished?() }
                         let finishedGoal = goal
