@@ -324,6 +324,18 @@ struct ConversationSettingsTab: View {
                 }
             }
 
+            SSection("Plan preview") {
+                Picker("Before bigger tasks", selection: Binding(
+                    get: { UserDefaults.standard.string(forKey: "app.planPreview") ?? "auto" },
+                    set: { UserDefaults.standard.set($0, forKey: "app.planPreview") })) {
+                    Text("Ask when 4+ steps").tag("auto")
+                    Text("Always ask").tag("always")
+                    Text("Just do it").tag("never")
+                }
+                Text("Aria says her plan out loud and waits for your go-ahead. Silence means go.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             SSection("Play-by-play") {
                 Toggle("Narrate steps aloud", isOn: $settings.spokenStepNarration)
                 Text("During a multi-step task, Aria says a short play-by-play as she works (“Searching the web…”, “Saving your note…”). Turn off to keep her quiet between the plan and the result.")
@@ -519,7 +531,7 @@ struct AgentsSettingsTab: View {
                     Button("Add") {
                         add(BackgroundAgent(
                             name: "Daily briefing",
-                            goal: "Prepare my daily briefing: list today's calendar events and any reminders due today, then save a short briefing note titled with today's date.",
+                            goal: BriefingComposer.agentSentinel,   // composed, not planned
                             trigger: .daily(hour: briefingHour, minute: 0)))
                     }.disabled(agents.contains { $0.name == "Daily briefing" })
                 }

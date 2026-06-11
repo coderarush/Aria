@@ -91,6 +91,7 @@ final class AgentCoordinator {
         Log.trace("agents: running '\(agent.name)'")
         let (ok, summary) = await runner(agent.goal)
         await store.markRun(agent.id, at: Date(), ok: ok, summary: summary)
+        await WorkJournal.shared.record(kind: .agent, title: agent.name, outcome: summary, ok: ok)
         // Never silent: success or failure, the user can see what happened.
         notify(ok ? "\(agent.name) — done" : "\(agent.name) — failed",
                String(summary.prefix(140)))

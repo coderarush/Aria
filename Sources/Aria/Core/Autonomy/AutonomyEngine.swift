@@ -28,19 +28,25 @@ actor AutonomyEngine {
     private let context: GeminiClient.SystemContext
     private let runAction: @Sendable (AgentAction, String) async -> ToolResult
     private let confirm: @Sendable (String) async -> Bool
+    /// Plan-preview hook (V10 P2): called with the parsed steps before
+    /// execution; return false to cancel. Default approves everything, so
+    /// existing callers (background agents, resume) are unaffected.
+    private let approvePlan: @Sendable ([TaskStep]) async -> Bool
 
     init(gemini: GeminiClient,
          registry: ToolRegistry,
          subAgents: SubAgentRegistry,
          context: GeminiClient.SystemContext,
          runAction: @escaping @Sendable (AgentAction, String) async -> ToolResult,
-         confirm: @escaping @Sendable (String) async -> Bool) {
+         confirm: @escaping @Sendable (String) async -> Bool,
+         approvePlan: @escaping @Sendable ([TaskStep]) async -> Bool = { _ in true }) {
         self.gemini = gemini
         self.registry = registry
         self.subAgents = subAgents
         self.context = context
         self.runAction = runAction
         self.confirm = confirm
+        self.approvePlan = approvePlan
     }
 
     func run(goal: String, emit: @escaping @Sendable (TaskEvent) -> Void) async {
@@ -61,6 +67,11 @@ actor AutonomyEngine {
         }
         var plan = TaskPlan(goal: goal, steps: steps)
         emit(.planReady(plan))
+        guard await approvePlan(steps) else {
+            Log.trace("autonomy: plan declined by user")
+            emit(.finished(ok: false, summary: "Okay, I won't do that."))
+            return
+        }
         emit(.narrate("On it — " + plan.steps.map { $0.summary }.prefix(3).joined(separator: ", ") + "."))
         Log.trace("autonomy: plan has \(plan.steps.count) step(s) for '\(goal)'")
         await runLoop(&plan, goal: goal, completed: [], lastOutput: "", startIndex: 0, emit: emit)

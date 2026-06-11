@@ -138,6 +138,12 @@ actor KnowledgeIndex {
         return path
     }
 
+    /// Most recently modified indexed documents — "what was I touching lately"
+    /// input for the daily briefing.
+    func recentDocuments(limit: Int) -> [IndexedDocument] {
+        Array(documents.values.sorted { $0.mtime > $1.mtime }.prefix(limit))
+    }
+
     /// Forget everything (privacy: one obvious clear-all).
     func clear() {
         documents = [:]

@@ -31,6 +31,9 @@ final class AriaController {
     /// True between revealing a suggestion and hearing the user's yes/no, so the
     /// next command is interpreted as the answer.
     private var proactiveAwaitingReply = false
+    /// Pending plan-preview decision: the next spoken/typed reply resolves it.
+    private var planDecision: CheckedContinuation<Bool, Never>?
+    private var planDecisionTimer: Timer?
     /// Background agents (v9): recurring workflows + folder watchers, run
     /// silently through the same autonomy engine + safety gates.
     private var agentCoordinator: AgentCoordinator?
@@ -251,12 +254,18 @@ final class AriaController {
     /// Run one autonomy goal without touching the voice/orb surfaces; returns
     /// the engine's final summary.
     private func runSilentTask(goal: String) async -> (Bool, String) {
+        // The daily briefing is composed deterministically, not planned —
+        // crafted output, fixed inputs, no model roulette.
+        if goal == BriefingComposer.agentSentinel {
+            let (text, ok) = await deliverBriefing(silent: true)
+            return (ok, String(text.prefix(140)))
+        }
         actor ResultBox {
             var value: (Bool, String)?
             func set(_ v: (Bool, String)) { if value == nil { value = v } }
         }
         let box = ResultBox()
-        await orchestrator.runTask(goal: goal) { event in
+        await orchestrator.runTask(goal: goal, silent: true) { event in
             if case .finished(let ok, let summary) = event {
                 Task { await box.set((ok, summary)) }
             }
@@ -487,6 +496,20 @@ final class AriaController {
         speakAndListen("Done — I'll take care of that automatically from now on.")
     }
 
+    /// Compose today's briefing, save it as a note, and (for the scheduled
+    /// agent) notify. Returns (briefing text, ok).
+    @discardableResult
+    private func deliverBriefing(silent: Bool) async -> (String, Bool) {
+        let (text, ok) = await BriefingComposer.compose(gemini: orchestrator.geminiClient)
+        let title = "Briefing — \(Date().formatted(date: .abbreviated, time: .omitted))"
+        _ = try? await SaveNoteTool().run(input: ["title": title, "content": text])
+        if silent {
+            Notifier.notify(title: "Your briefing is ready",
+                            body: String(text.prefix(140)))
+        }
+        return (text, ok)
+    }
+
     /// Pull calendar events starting within `window` seconds. Returns nothing
     /// unless calendar access is already granted (never prompts from a timer).
     nonisolated private static func upcomingCalendarEvents(now: Date, window: TimeInterval) async -> [UpcomingEvent] {
@@ -507,7 +530,44 @@ final class AriaController {
             await orchestrator.setConfirmationHandler { prompt in
                 await MainActor.run { Self.confirm(prompt) }
             }
+            // Plan preview (V10): for bigger foreground tasks, speak the plan
+            // and wait for a spoken/typed go-ahead before executing.
+            await orchestrator.setPlanApprovalHandler { [weak self] steps in
+                await self?.previewPlanAndAwaitApproval(steps) ?? true
+            }
         }
+    }
+
+    /// Speak a short plan summary and wait for yes/no. Modes (Settings):
+    /// auto = preview only multi-step plans (default), always, never.
+    /// No reply within 20s = proceed — the user asked for the task.
+    @MainActor
+    private func previewPlanAndAwaitApproval(_ steps: [TaskStep]) async -> Bool {
+        let mode = UserDefaults.standard.string(forKey: "app.planPreview") ?? "auto"
+        switch mode {
+        case "never": return true
+        case "always": break
+        default: if steps.count < 4 { return true }     // auto
+        }
+        let summary = steps.prefix(4).enumerated()
+            .map { "\($0.offset + 1). \($0.element.summary)" }
+            .joined(separator: ", ")
+        let extra = steps.count > 4 ? ", and \(steps.count - 4) more" : ""
+        let approved = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            planDecision = cont
+            planDecisionTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: false) { [weak self] _ in
+                Task { @MainActor in self?.resolvePlanDecision(true) }   // silence = go
+            }
+            speakAndListen("Here's my plan: \(summary)\(extra). Should I go ahead?")
+        }
+        return approved
+    }
+
+    @MainActor
+    private func resolvePlanDecision(_ approved: Bool) {
+        planDecisionTimer?.invalidate(); planDecisionTimer = nil
+        planDecision?.resume(returning: approved)
+        planDecision = nil
     }
 
     @MainActor
@@ -756,6 +816,17 @@ final class AriaController {
     private func handleCommand(_ command: String) {
         let lower = command.lowercased()
 
+        // Answering a plan preview? Affirmative → execute; anything else →
+        // cancel the task (an explicit different request becomes the next turn).
+        if planDecision != nil {
+            let yes = ProactiveReply.isAffirmative(command)
+            resolvePlanDecision(yes)
+            if yes { return }
+            let negatives = ["no", "nope", "stop", "cancel", "don't", "never mind", "nah"]
+            if negatives.contains(where: lower.contains) { return }
+            // Not yes, not an explicit no — treat as a brand-new request.
+        }
+
         // Answering a revealed proactive offer? Yes → run it; anything else →
         // dismiss the offer and treat the words as a normal request.
         if proactiveAwaitingReply {
@@ -772,6 +843,21 @@ final class AriaController {
 
         if lower.contains("dismiss") || lower.contains("thanks aria") || lower.contains("never mind") {
             streamVoice.stop(); session?.end(); return
+        }
+
+        // "Brief me" — the signature daily-briefing workflow, on demand.
+        if BriefingComposer.isBriefingIntent(command) {
+            islandViewModel.beginThinking()
+            playChime(.task)
+            currentTurnTask = Task { [weak self] in
+                guard let self else { return }
+                let (text, _) = await self.deliverBriefing(silent: false)
+                await MainActor.run {
+                    self.islandViewModel.appendResponse(text)
+                    self.speakAndListen(text)
+                }
+            }
+            return
         }
 
         // Resume the interrupted task. resumeTask() reports "nothing to resume" itself
@@ -875,6 +961,9 @@ final class AriaController {
                     case .finished(let ok, let summary):
                         self.taskActive = false   // now the next queue-drain re-arms wake
                         self.playChime(ok ? .done : .error)
+                        // Project memory: every finished task is recallable later.
+                        Task { await WorkJournal.shared.record(kind: .task, title: goal,
+                                                               outcome: summary, ok: ok) }
                         self.streamVoice.enqueue(summary)
                         if !self.streamVoice.isSpeaking { self.streamVoice.onAllFinished?() }
                         let finishedGoal = goal

@@ -38,6 +38,16 @@ actor AgentOrchestrator {
         confirmationHandler = handler
     }
 
+    /// The shared model client (briefing composer reuses its rotation/pacing).
+    var geminiClient: GeminiClient { gemini }
+
+    /// Plan-preview hook (V10): consulted before a foreground task executes its
+    /// parsed plan. nil (and silent/background runs) = approve everything.
+    var planApprovalHandler: (@Sendable ([TaskStep]) async -> Bool)?
+    func setPlanApprovalHandler(_ handler: @escaping @Sendable ([TaskStep]) async -> Bool) {
+        planApprovalHandler = handler
+    }
+
     func handle(command: String, privacyMode: Bool = false) async -> AriaResponse {
         Log.agent.info("Handling command: \(command, privacy: .public)")
 
@@ -230,7 +240,7 @@ actor AgentOrchestrator {
     /// Run a multi-step autonomous task. Emits `TaskEvent` values as each planning
     /// and execution step completes. Hooks into the same `execute` + `confirmationHandler`
     /// plumbing used by the normal command path.
-    private func makeAutonomyEngine() async -> AutonomyEngine {
+    private func makeAutonomyEngine(silent: Bool = false) async -> AutonomyEngine {
         // currentSystemContext() is @MainActor, so we hop to it explicitly.
         let context = await MainActor.run { Self.currentSystemContext() }
         return AutonomyEngine(
@@ -243,6 +253,10 @@ actor AgentOrchestrator {
             },
             confirm: { [weak self] prompt in
                 await self?.confirmationHandler?(prompt) ?? false
+            },
+            approvePlan: { [weak self] steps in
+                guard !silent, let handler = await self?.planApprovalHandler else { return true }
+                return await handler(steps)
             })
     }
 
@@ -258,8 +272,11 @@ actor AgentOrchestrator {
         await makeAutonomyEngine().resume(persisted, emit: emit)
     }
 
-    func runTask(goal: String, emit: @escaping @Sendable (TaskEvent) -> Void) async {
-        await makeAutonomyEngine().run(goal: goal, emit: emit)
+    /// `silent: true` (background agents) skips the plan preview — nothing may
+    /// speak or wait on the user from a background run.
+    func runTask(goal: String, silent: Bool = false,
+                 emit: @escaping @Sendable (TaskEvent) -> Void) async {
+        await makeAutonomyEngine(silent: silent).run(goal: goal, emit: emit)
     }
 
     /// Streaming answer path (Phase 2: text + native function-calling loop).
