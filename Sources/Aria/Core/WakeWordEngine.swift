@@ -59,6 +59,10 @@ final class WakeWordEngine {
     private(set) var isRunning = false
     var isSuspended = false
     var conversationActive = false
+    /// User-controlled mute (menu bar "Pause listening"): blocks wake-phrase
+    /// detection AND programmatic summon until turned off. Separate from
+    /// `isSuspended`, which the speech flow toggles constantly.
+    var manuallyMuted = false
     var isInWakeMode: Bool { mode == .wake }
 
     // MARK: Lifecycle
@@ -200,7 +204,7 @@ final class WakeWordEngine {
     // MARK: Transcript handling
 
     private func handleTranscript(_ text: String) {
-        guard !isSuspended else { return }
+        guard !isSuspended, !manuallyMuted else { return }
         let lower = text.lowercased()
         switch mode {
         case .wake:
@@ -266,7 +270,7 @@ final class WakeWordEngine {
     /// a physical keypress IS the user. No-op while suspended (Aria speaking)
     /// or already capturing.
     func summon() {
-        guard !isSuspended, mode == .wake else { return }
+        guard !isSuspended, !manuallyMuted, mode == .wake else { return }
         Log.trace("summon — push-to-talk wake")
         mode = .command
         committedCommand = ""

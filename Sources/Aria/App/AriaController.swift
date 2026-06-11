@@ -188,6 +188,28 @@ final class AriaController {
         typePanel?.present()
     }
 
+    /// Menu bar "Pause listening": hard-mutes the wake word and push-to-talk
+    /// until turned back off. The mic stays technically open (tearing the
+    /// audio engine down and back up is the historic source of deafness bugs)
+    /// — Aria simply ignores everything she hears.
+    var isListeningPaused: Bool {
+        get { wakeEngine.manuallyMuted }
+        set {
+            wakeEngine.manuallyMuted = newValue
+            Log.trace("listening \(newValue ? "PAUSED" : "resumed") via menu")
+            if newValue { islandViewModel.dismiss() }
+        }
+    }
+
+    /// One-line status for the menu bar: what Aria last did.
+    func lastActivityLine() async -> String? {
+        if let run = await AgentStore.shared.recentRuns(1).first {
+            let when = run.date.formatted(date: .omitted, time: .shortened)
+            return "\(run.ok ? "✓" : "✗") \(run.agentName) — \(when)"
+        }
+        return nil
+    }
+
     /// A typed command enters the exact same conversation pipeline as speech.
     func handleTypedCommand(_ text: String) {
         if session == nil {

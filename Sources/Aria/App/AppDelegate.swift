@@ -5,7 +5,7 @@ import SwiftUI
 /// `LSUIElement = true`, so there is no Dock icon — the ⬡ menu-bar item is the
 /// only chrome.
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var statusItem: NSStatusItem?
     private let controller = AriaController()
@@ -77,18 +77,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.toolTip = "Aria"
 
         let menu = NSMenu()
+        menu.delegate = self   // rebuilt on every open (status line, mute state)
+        item.menu = menu
+        statusItem = item
+    }
+
+    /// Rebuild the status menu each time it opens — live status, current mute
+    /// state, and the standard actions.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+
         let summonItem = NSMenuItem(title: "Talk to Aria", action: #selector(summon), keyEquivalent: " ")
         summonItem.keyEquivalentModifierMask = [.option]
         menu.addItem(summonItem)
         let typeItem = NSMenuItem(title: "Type to Aria…", action: #selector(typeToAria), keyEquivalent: " ")
         typeItem.keyEquivalentModifierMask = [.option, .shift]
         menu.addItem(typeItem)
+
+        menu.addItem(.separator())
+
+        if let status = cachedStatusLine {
+            let statusItem = NSMenuItem(title: status, action: nil, keyEquivalent: "")
+            statusItem.isEnabled = false
+            menu.addItem(statusItem)
+        }
+        let mute = NSMenuItem(
+            title: controller.isListeningPaused ? "Resume Listening" : "Pause Listening",
+            action: #selector(toggleListening), keyEquivalent: "")
+        menu.addItem(mute)
+
+        menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Aria", action: #selector(quit), keyEquivalent: "q"))
         menu.items.forEach { $0.target = self }
-        item.menu = menu
-        statusItem = item
+
+        // Refresh the status line for NEXT open (menuNeedsUpdate is sync).
+        Task { @MainActor [weak self] in
+            self?.cachedStatusLine = await self?.controller.lastActivityLine() ?? nil
+        }
+    }
+
+    private var cachedStatusLine: String?
+
+    @objc private func toggleListening() {
+        controller.isListeningPaused.toggle()
+        statusItem?.button?.appearsDisabled = controller.isListeningPaused
     }
 
     /// Aria's blob as the menu bar icon — same layered-sine outline as the orb
