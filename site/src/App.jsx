@@ -125,6 +125,22 @@ export default function App() {
         </header>
       </div>
 
+      {/* ---------- 01.5 · THE FILM ---------- */}
+      <section className="filmSec">
+        <div className="wrap">
+          <Label n="01">Watch</Label>
+          <Reveal i={1}>
+            <video
+              className="film"
+              src="/aria-launch.mp4"
+              controls
+              playsInline
+              preload="metadata"
+            />
+          </Reveal>
+        </div>
+      </section>
+
       {/* ---------- 02 · FEATURES ---------- */}
       <section id="features" ref={featRef}>
         <div className="wrap">

@@ -33,3 +33,17 @@ Demo mode graduates from a marketing aid to launch infrastructure:
    knowledge query) — one take, every take.
 3. **Press/tester mode (Phase D):** document `ARIA_DEMO_MODE=1` in the README
    so reviewers can exercise the full product without keys.
+
+## V10 status (2026-06-11)
+
+All four phases complete and shipped as v10.0.0-pre:
+- A reliability/perf floor: idle CPU -30%, keychain hang class fixed, native
+  notifications, make smoke 10/10 (d87d480)
+- B premium surface: command palette, menu bar v2, pause listening (826a235)
+- C intelligence: WorkJournal + recall_work, plan preview, Daily Briefing v2 (017dde8)
+- D customization/integrations: wake phrase, hotkey presets, notification prefs,
+  notes_read, tab_content, unified history (80289e0)
+- Launch film v2 with sound (3c205e4); embedded on the website.
+
+Remaining for public launch (user decisions/actions): product name, $99
+notarization, tester hardening week, waitlist endpoint + domain deploy.

@@ -125,6 +125,19 @@ Requirements: **macOS 14+**, **Xcode 16+** (Swift 6). For permissions that persi
 rebuilds, run `make cert` once (creates a stable self-signed identity). `make dmg` packages a
 distributable disk image.
 
+### Demo mode (press & testing)
+
+Want to exercise the full product — orb, voice, tools UI — without any API key?
+
+```bash
+ARIA_DEMO_MODE=1 /Applications/Aria.app/Contents/MacOS/Aria
+```
+
+Model replies are scripted and deterministic (ask about *the meeting*, *downloads*,
+*pricing*, or for *a joke*); everything else is the real engine. `ARIA_DEMO_SCRIPT=path.json`
+swaps in your own script — this is also what powers the repeatable demo recordings and the
+headless smoke suite (`make smoke`).
+
 ## Configuration
 
 Aria uses your own [Google AI Studio](https://aistudio.google.com/app/apikey) key — the free
