@@ -11,8 +11,10 @@ screen, and operates your apps by voice — she does the task, she doesn't just 
 [Build from source](#build-from-source) ·
 [How it works](#how-it-works)
 
-**V9 pre-release** — local-first intelligence, a knowledge engine over your own files,
-background agents, push-to-talk, and ambient anticipation. Testers welcome; expect edges.
+**V10 pre-release (launch candidate)** — say **“brief me”** for your daily briefing, ask
+*“what were we working on yesterday?”*, preview her plan before bigger tasks, and summon a
+Raycast-grade palette with ⌥⇧Space — on top of V9's local-first intelligence, knowledge
+engine, and background agents. Testers welcome.
 
 </div>
 
