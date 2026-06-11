@@ -76,7 +76,12 @@ final class HotkeyTap {
         let shift = flags.contains(.maskShift)
         let command = flags.contains(.maskCommand)
         let control = flags.contains(.maskControl)
-        guard option, !command, !control else { return Unmanaged.passUnretained(event) }
+        // User-selectable modifier (Settings → Conversation): option (default)
+        // or control — always Space, type panel = +shift.
+        let wantControl = UserDefaults.standard.string(forKey: "app.hotkeyModifier") == "control"
+        let primary = wantControl ? control : option
+        let other = wantControl ? option : control
+        guard primary, !command, !other else { return Unmanaged.passUnretained(event) }
         let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
         if !isRepeat {
             Task { @MainActor in

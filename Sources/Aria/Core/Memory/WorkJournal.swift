@@ -47,6 +47,11 @@ actor WorkJournal {
         entries.filter { $0.date >= from && $0.date < to }
     }
 
+    /// Newest-first recent entries (the unified workflow-history view).
+    func recent(_ limit: Int) -> [WorkEntry] {
+        Array(entries.suffix(limit).reversed())
+    }
+
     /// Newest-first free-text search over titles and outcomes.
     func search(_ query: String, limit: Int = 8) -> [WorkEntry] {
         let q = query.lowercased()

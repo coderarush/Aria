@@ -241,6 +241,7 @@ final class AriaController {
                 return await self.runSilentTask(goal: goal)
             },
             notify: { title, body in
+                guard UserDefaults.standard.object(forKey: "app.notifyAgentRuns") as? Bool ?? true else { return }
                 Notifier.notify(title: title, body: body)
             })
         agentCoordinator = coordinator
@@ -299,6 +300,7 @@ final class AriaController {
             try? await Task.sleep(nanoseconds: 2_000_000_000)   // let launch settle first
             guard let self, let pending = await self.orchestrator.pendingTask() else { return }
             let remaining = pending.unfinishedCount
+            guard UserDefaults.standard.object(forKey: "app.notifyResume") as? Bool ?? true else { return }
             let msg = "Unfinished task: “\(pending.goal)” — \(remaining) step\(remaining == 1 ? "" : "s") left. Say “Hey Aria, resume” to continue."
             Notifier.notify(title: "Aria", body: msg)
             Log.trace("resume: offered pending task '\(pending.goal)'")

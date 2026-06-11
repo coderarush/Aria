@@ -49,8 +49,19 @@ final class WakeWordEngine {
     private var rollingTimer: Timer?
     private var watchdogTimer: Timer?
 
-    private let wakeVariants = ["hey aria", "hey arya", "hey aria's",
-                               "hey, aria", "aria", "hey ariel"]
+    /// Built-in wake variants plus an optional user-chosen phrase
+    /// ("app.wakePhrase"). The custom phrase ADDS to the built-ins — "Hey
+    /// Aria" always works, so a mis-set custom phrase can't brick waking.
+    var wakeVariants: [String] {
+        var variants = ["hey aria", "hey arya", "hey aria's",
+                        "hey, aria", "aria", "hey ariel"]
+        let custom = (UserDefaults.standard.string(forKey: "app.wakePhrase") ?? "")
+            .lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        if custom.count >= 3, !variants.contains(custom) {
+            variants.append(custom)
+        }
+        return variants
+    }
     private let commandSilence: TimeInterval = 1.4
     private let commandLeadGrace: TimeInterval = 6.0
     private let rollingRestart: TimeInterval = 50

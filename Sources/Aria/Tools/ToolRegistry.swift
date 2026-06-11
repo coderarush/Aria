@@ -57,6 +57,8 @@ actor ToolRegistry {
             WebFetchTool(),
             KnowledgeSearchTool(),
             RecallWorkTool(),
+            NotesReadTool(),
+            TabContentTool(),
             UIReadTool(),
             UIClickTool(),
             UITypeTool(),

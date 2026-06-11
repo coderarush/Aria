@@ -324,6 +324,34 @@ struct ConversationSettingsTab: View {
                 }
             }
 
+            SSection("Wake phrase") {
+                TextField("Also wake to… (e.g. “hey assistant”)", text: Binding(
+                    get: { UserDefaults.standard.string(forKey: "app.wakePhrase") ?? "" },
+                    set: { UserDefaults.standard.set($0, forKey: "app.wakePhrase") }))
+                Text("Adds an extra wake phrase alongside “Hey Aria” (which always works). Three characters minimum; takes effect on the next listen.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            SSection("Shortcuts") {
+                Picker("Hotkey modifier", selection: Binding(
+                    get: { UserDefaults.standard.string(forKey: "app.hotkeyModifier") ?? "option" },
+                    set: { UserDefaults.standard.set($0, forKey: "app.hotkeyModifier") })) {
+                    Text("⌥ Option + Space").tag("option")
+                    Text("⌃ Control + Space").tag("control")
+                }
+                Text("Talk = modifier + Space · Type = modifier + ⇧ + Space. Applies immediately.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            SSection("Notifications") {
+                Toggle("Background agent results", isOn: Binding(
+                    get: { UserDefaults.standard.object(forKey: "app.notifyAgentRuns") as? Bool ?? true },
+                    set: { UserDefaults.standard.set($0, forKey: "app.notifyAgentRuns") }))
+                Toggle("Resume offers after an interrupted task", isOn: Binding(
+                    get: { UserDefaults.standard.object(forKey: "app.notifyResume") as? Bool ?? true },
+                    set: { UserDefaults.standard.set($0, forKey: "app.notifyResume") }))
+            }
+
             SSection("Plan preview") {
                 Picker("Before bigger tasks", selection: Binding(
                     get: { UserDefaults.standard.string(forKey: "app.planPreview") ?? "auto" },
@@ -629,7 +657,7 @@ struct AgentsSettingsTab: View {
 struct TransparencyTab: View {
     @State private var context: GeminiClient.SystemContext?
     @State private var decisions: [RoutingLogEntry] = []
-    @State private var runs: [AgentRun] = []
+    @State private var work: [WorkEntry] = []
     private let localFirstOn = AppSettings.shared.localFirstEnabled
 
     var body: some View {
@@ -673,18 +701,24 @@ struct TransparencyTab: View {
                 }
             }
 
-            SSection("Workflow runs") {
-                if runs.isEmpty {
-                    Text("Background-agent runs appear here. Every individual tool action is in the Activity tab.")
+            SSection("Workflow history") {
+                if work.isEmpty {
+                    Text("Everything Aria completes — voice tasks and background agents — appears here. Per-action detail lives in the Activity tab.")
                         .font(.callout).foregroundStyle(.secondary)
                 } else {
-                    ForEach(Array(runs.prefix(10).enumerated()), id: \.offset) { _, run in
+                    ForEach(Array(work.prefix(12).enumerated()), id: \.offset) { _, e in
                         HStack(alignment: .top, spacing: 8) {
-                            Circle().fill(run.ok ? Color.green : .orange).frame(width: 7, height: 7).padding(.top, 5)
+                            Image(systemName: e.kind == .agent ? "clock.arrow.2.circlepath" : "waveform")
+                                .font(.system(size: 10))
+                                .foregroundStyle(e.ok ? Color.green : .orange)
+                                .frame(width: 14)
+                                .padding(.top, 3)
                             VStack(alignment: .leading, spacing: 1) {
-                                Text(run.agentName).font(.system(size: 12, weight: .semibold))
-                                Text(run.summary).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
-                                Text(run.date.formatted(date: .abbreviated, time: .shortened))
+                                Text(e.title).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                                if !e.outcome.isEmpty {
+                                    Text(e.outcome).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                                }
+                                Text(e.date.formatted(date: .abbreviated, time: .shortened))
                                     .font(.caption2).foregroundStyle(.tertiary)
                             }
                             Spacer(minLength: 0)
@@ -698,7 +732,7 @@ struct TransparencyTab: View {
         .task {
             refreshContext()
             decisions = await RoutingLog.shared.recent(10)
-            runs = await AgentStore.shared.recentRuns(10)
+            work = await WorkJournal.shared.recent(12)
         }
     }
 
