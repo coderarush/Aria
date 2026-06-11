@@ -232,8 +232,8 @@ export default function App() {
             <motion.ul className="askList"
               initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.5 }}
               variants={{ visible: { transition: { staggerChildren: 0.14, delayChildren: 0.2 } } }}>
-              {["Write an email to Sam", "Summarize this document",
-                "Find tomorrow's meeting", "Create a project plan"].map((s) => (
+              {["Brief me on my day", "Run my morning startup",
+                "Continue my Verdai work", "What did I do today?"].map((s) => (
                 <motion.li key={s} variants={{
                   hidden: { opacity: 0, x: -12 },
                   visible: { opacity: 1, x: 0, transition: { duration: 0.45 } },
@@ -249,10 +249,10 @@ export default function App() {
               <motion.div initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.5 }}
                 variants={{ visible: { transition: { staggerChildren: 0.22, delayChildren: 0.4 } } }}>
                 {[
-                  ["Email drafted", "To: Sam — ready to review"],
-                  ["Document summarized", "Key points saved to notes"],
-                  ["Meeting found", "Tomorrow at 10:00 AM"],
-                  ["Project plan created", "8 steps, in your notes"],
+                  ["Briefing ready", "3 meetings, one suggested focus"],
+                  ["Recipe complete", "Calendar, Mail, briefing — done"],
+                  ["Project recalled", "Verdai — deck finished yesterday"],
+                  ["Timeline", "14 things done today"],
                 ].map(([t, s]) => (
                   <motion.div key={t} className="noteRow" variants={{
                     hidden: { opacity: 0, y: 12 },
@@ -268,18 +268,65 @@ export default function App() {
         </div>
       </section>
 
-      {/* ---------- 06 · PRIVACY ---------- */}
+      {/* ---------- 06 · INTELLIGENCE (V11) ---------- */}
+      <section id="intelligence">
+        <div className="wrap cols">
+          <div>
+            <Label n="06">Intelligence</Label>
+            <Reveal i={1}><h2 className="display">She remembers.<br />She anticipates.</h2></Reveal>
+            <Reveal i={2}>
+              <p className="body sub">Aria runs your day, not just your commands. A briefing
+              every morning. A timeline of everything you got done. Projects she picks up
+              where you left them. Watchers that stay quiet until something actually changed.</p>
+            </Reveal>
+            <ul className="plainList">
+              {["Daily briefing — calendar, reminders, projects, one focus",
+                "Timeline — “what did I do today?”, answered",
+                "Project memory — “continue my Verdai work”",
+                "Recipes & focus modes — your workflows, repeatable",
+                "Watchers — inbox and web, fingerprinted, never noisy"].map((s, i) => (
+                <Reveal key={s} i={i + 2}><li>{s}</li></Reveal>
+              ))}
+            </ul>
+          </div>
+          <Reveal i={2} className="noteCardWrap" aria-hidden="true">
+            <div className="noteCard">
+              <div className="noteHead"><span className="noteOrb"><Blob size={18} mood="calm" /></span> Your briefing</div>
+              <motion.div initial="hidden" whileInView="visible" viewport={{ once: true, amount: 0.5 }}
+                variants={{ visible: { transition: { staggerChildren: 0.22, delayChildren: 0.4 } } }}>
+                {[
+                  ["Today", "Investor sync 10:00 · design review 2:00"],
+                  ["Carry-over", "Pricing model finished — deck needs it"],
+                  ["Suggested focus", "Close the pricing question before 10"],
+                  ["Runs on your Mac", "Local model · private · free"],
+                ].map(([t, s]) => (
+                  <motion.div key={t} className="noteRow" variants={{
+                    hidden: { opacity: 0, y: 12 },
+                    visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: "easeOut" } },
+                  }}>
+                    <strong>{t}</strong><span>{s}</span>
+                  </motion.div>
+                ))}
+              </motion.div>
+              <span className="noteAll">Say “brief me”</span>
+            </div>
+          </Reveal>
+        </div>
+      </section>
+
+      {/* ---------- 07 · PRIVACY ---------- */}
       <section id="privacy">
         <div className="wrap cols">
           <div>
-            <Label n="06">Privacy</Label>
+            <Label n="07">Privacy</Label>
             <Reveal i={1}><h2 className="display">Your data stays<br />your data.</h2></Reveal>
             <Reveal i={2}>
               <p className="body sub">Aria is built with privacy at the core. Everything can be
               processed on your Mac. Nothing leaves your device without you choosing it.</p>
             </Reveal>
             <ul className="plainList">
-              {["On-device processing", "No cloud storage", "Keys in your Keychain",
+              {["Local model by default — one-click setup, sized to your Mac",
+                "On-device processing", "No cloud storage", "Keys in your Keychain",
                 "You're in control — every action logged, undoable"].map((s, i) => (
                 <Reveal key={s} i={i + 2}><li>{s}</li></Reveal>
               ))}
@@ -291,15 +338,15 @@ export default function App() {
         </div>
       </section>
 
-      {/* ---------- 07 · DOWNLOAD ---------- */}
+      {/* ---------- 08 · DOWNLOAD ---------- */}
       <section id="download" className="downloadSec">
         <div className="wrap cols">
           <div>
-            <Label n="07">Download</Label>
+            <Label n="08">Download</Label>
             <Reveal i={1}><h2 className="display">Early access for<br />focused people.</h2></Reveal>
             <Reveal i={2}>
-              <p className="body sub">Aria is in pre-release. Grab the build today — free, open
-              source — or leave your email for the polished release.</p>
+              <p className="body sub">Aria is a launch candidate. Grab the build today — free,
+              open source — or leave your email for the polished release.</p>
             </Reveal>
             <Reveal i={3}><Waitlist /></Reveal>
           </div>
@@ -312,11 +359,11 @@ export default function App() {
         </div>
       </section>
 
-      {/* ---------- 08 · BLOG ---------- */}
+      {/* ---------- 09 · BLOG ---------- */}
       <section id="blog">
         <div className="wrap cols">
           <div>
-            <Label n="08">Blog</Label>
+            <Label n="09">Blog</Label>
             <Reveal i={1}><h2 className="display">Thoughts on design,<br />privacy, and the<br />future of computing.</h2></Reveal>
             <Reveal i={2}><a className="btn ghost" href={GITHUB} target="_blank" rel="noreferrer">Visit the blog →</a></Reveal>
           </div>
@@ -335,11 +382,11 @@ export default function App() {
         </div>
       </section>
 
-      {/* ---------- 09 · ABOUT ---------- */}
+      {/* ---------- 10 · ABOUT ---------- */}
       <section id="about">
         <div className="wrap cols">
           <div>
-            <Label n="09">About</Label>
+            <Label n="10">About</Label>
             <Reveal i={1}><h2 className="display">About Aria</h2></Reveal>
             <Reveal i={2}>
               <p className="body sub">We're a small team building the next generation of

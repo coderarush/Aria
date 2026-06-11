@@ -11,10 +11,11 @@ screen, and operates your apps by voice — she does the task, she doesn't just 
 [Build from source](#build-from-source) ·
 [How it works](#how-it-works)
 
-**V10 pre-release (launch candidate)** — say **“brief me”** for your daily briefing, ask
-*“what were we working on yesterday?”*, preview her plan before bigger tasks, and summon a
-Raycast-grade palette with ⌥⇧Space — on top of V9's local-first intelligence, knowledge
-engine, and background agents. Testers welcome.
+**V11 launch candidate** — one-click private model setup, a timeline of everything you got
+done, projects she remembers and resumes, watchers for your inbox and the web, reusable
+recipes (“run my morning startup”), and Focus Mode — on top of V10's daily briefing, command
+palette, and plan preview, and V9's local-first intelligence, knowledge engine, and
+background agents. Testers welcome.
 
 </div>
 
@@ -62,7 +63,40 @@ Google's Gemini free tier with your own key.
   synthesized chimes mark listening, task start, done, and errors — cancelled out of the mic
   by the echo canceller so she never hears herself.
 
-### New in V9 (pre-release)
+### New in V11 (launch candidate)
+
+- **Private model, zero setup.** First run detects your Mac (chip, RAM, disk), recommends the
+  right local model (Qwen 3 4B / 8B / 14B via Ollama), and installs it with one click and a
+  live progress bar. Local-first is the default: everyday work runs on your Mac — private,
+  free, no quota — with cloud fallback only when needed. Settings shows the model's live
+  health (replies, latency, failures).
+- **Your day, on a timeline.** Ask *“what did I do today?”* or *“show my week”* — tasks,
+  background-agent runs, and individual actions merge into one chronological timeline, with
+  per-day rollups. Also visible in Settings → Transparency.
+- **Projects she remembers.** Work is tagged by project automatically (“continue my Verdai
+  work” → she recalls exactly where that project stands). The daily briefing now opens with
+  your active projects and recent notes.
+- **Watchers.** “Watch my inbox for investor emails.” “Watch this page for changes.” Quiet
+  polling with content fingerprints — she only speaks up when something genuinely changed,
+  and silent checks never clutter your history.
+- **Recipes & persona packs.** Reusable workflows that run the same way every time, no
+  improvising: *“run my morning startup”* opens Calendar and Mail and composes your briefing.
+  Founder / Student / Developer packs install curated recipes + a scheduled briefing in one
+  click (Settings → Recipes).
+- **Focus Mode.** *“Enter developer focus mode”* opens your work apps, closes the
+  distractions, and starts a session; *“end focus mode”* recaps what you accomplished from
+  the timeline. Student / Founder / Developer presets.
+- **Sharper context.** *“Summarize this chart”* captures the screen instantly; a bare
+  *“explain this”* uses your selection first and only looks at the screen when nothing is
+  selected.
+- **A first run that proves it.** Onboarding now walks permissions → private model → persona
+  → starter pack → your first briefing, generated live — Aria is useful in the first five
+  minutes.
+- **Searchable settings**, spoken scheduled briefings, more proactive signals (a fresh PDF
+  in Downloads offers a summary; a productive day offers a recap), and visible recovery —
+  when a step fails she says she's trying another way, never silently.
+
+### New in V9–V10
 
 - **Local-first intelligence.** Planning, agents, knowledge and everyday work run on a local
   model (Ollama) by default — private, free, no quota — with automatic Gemini fallback the
@@ -116,7 +150,7 @@ free Gemini key in Settings → API Key.
 ```bash
 git clone https://github.com/coderarush/Aria.git
 cd Aria
-make test       # 335 unit tests
+make test       # 428 unit tests
 make release    # assemble Aria.app (ad-hoc signed)
 open .build/Aria.app
 ```
@@ -135,8 +169,9 @@ ARIA_DEMO_MODE=1 /Applications/Aria.app/Contents/MacOS/Aria
 
 Model replies are scripted and deterministic (ask about *the meeting*, *downloads*,
 *pricing*, or for *a joke*); everything else is the real engine. `ARIA_DEMO_SCRIPT=path.json`
-swaps in your own script — this is also what powers the repeatable demo recordings and the
-headless smoke suite (`make smoke`).
+swaps in your own script — ready-made Founder / Student / Developer persona scripts live in
+`scripts/demos/`. This also powers the repeatable demo recordings and the headless smoke
+suite (`make smoke`).
 
 ## Configuration
 
@@ -150,6 +185,11 @@ Keychain and sent only to the provider you configured.
 
 | Say | Aria does |
 |---|---|
+| “Brief me.” | your day: calendar, reminders, projects, carry-over, one focus |
+| “What did I do today?” | your timeline — tasks, agents, actions, merged |
+| “Continue my Verdai work.” | recalls that project's state and picks it up |
+| “Run my morning startup.” | executes your recipe, step for step |
+| “Enter developer focus mode.” | opens work apps, closes distractions, tracks the session |
 | “Summarize this.” | reads the focused window / selection, summarizes |
 | “Check my email.” | reads your inbox (Apple Mail / Gmail) |
 | “Draft a reply to Sarah saying I'm running late.” | prepares a draft for you to review |
@@ -170,12 +210,22 @@ Sources/Aria/
 ├── Core/       WakeWordEngine, AudioBus (+ AEC), GeminiClient, AgentOrchestrator,
 │              ActivityLog (durable, traceable), UndoStack (rollback)
 │   ├── ComputerUse/   AXReader, UIActuator, ScreenContext, VisionLocator, ContextRelevance
-│   ├── Autonomy/      AutonomyEngine, Safety, TaskNarration, TaskStore (resumable tasks)
-│   ├── Memory/        LongTermMemory, MemoryCapture
+│   ├── Autonomy/      AutonomyEngine (planned + prebuilt plans), Safety, TaskNarration,
+│   │                  TaskStore (resumable tasks)
+│   ├── Agents/        AgentCoordinator, BackgroundAgent (daily/interval/folder/mail/url
+│   │                  triggers), WatcherCheck, BriefingComposer
+│   ├── Knowledge/     KnowledgeIndex (on-device folder index), TextExtractor
+│   ├── Memory/        LongTermMemory, MemoryCapture, WorkJournal (project memory),
+│   │                  Timeline (merged what-I-did view), ProjectTagger
+│   ├── Proactive/     ProactiveEngine + signal providers (calendar, routines,
+│   │                  downloads, sessions)
+│   ├── Recipes/       Recipe, RecipeStore, WorkflowPack (persona packs), FocusMode
 │   ├── Licensing/     LicenseManager, UpdateChecker
-│   └── Providers/     OpenAI-compatible fallback (Groq/Cerebras/OpenRouter/Ollama)
+│   └── Providers/     LocalFirstRouter, OllamaProvider, HardwareProfiler,
+│                      ModelInstaller, LocalModelHealth + cloud fallbacks
+│                      (Groq/Cerebras/OpenRouter)
 ├── Tools/      AriaTool implementations (files, web, apps, EventKit, email/Mail,
-│              Finder, browser, computer-use, vision, undo…)
+│              Finder, browser, computer-use, vision, timeline, briefing, undo…)
 ├── UI/         IslandView + MorphingBlob, IslandViewModel, SettingsView, OnboardingView
 └── Utilities/  KeychainManager, PermissionsManager, AppSettings, Logger
 
@@ -183,10 +233,11 @@ Sources/CSpeexDSP/   vendored Speex echo canceller (C) — the AEC far-end refer
                      that lets her talk and listen at once without hearing herself
 ```
 
-Swift 6, SwiftUI + AppKit, structured concurrency (async/await + actors), MVVM. 195 unit
+Swift 6, SwiftUI + AppKit, structured concurrency (async/await + actors), MVVM. 428 unit
 tests cover the model protocol, agent loop, tool declarations, autonomy, computer-use logic,
-memory, the activity log, undo, resumable-task journaling, context relevance, voice chunking,
-and the wake/barge state machines.
+project memory + timeline, recipes + packs, watcher prechecks, local-model setup, proactive
+signals, the activity log, undo, resumable-task journaling, context relevance, voice
+chunking, and the wake/barge state machines.
 
 ### Release builds ship the debug configuration — on purpose
 
