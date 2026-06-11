@@ -259,6 +259,12 @@ final class AriaController {
         // crafted output, fixed inputs, no model roulette.
         if goal == BriefingComposer.agentSentinel {
             let (text, ok) = await deliverBriefing(silent: true)
+            // V11 P4: optionally speak the scheduled briefing — but never on
+            // top of an active conversation or task.
+            if ok, AppSettings.shared.briefingSpoken,
+               !isSpeaking, !taskActive, !wakeEngine.conversationActive {
+                speakAndListen(text)
+            }
             return (ok, String(text.prefix(140)))
         }
         actor ResultBox {
@@ -403,7 +409,10 @@ final class AriaController {
         let routine = RoutineSignalProvider { now in
             await pe.patternsToSuggest(now: now)
         }
-        let engine = ProactiveEngine(providers: [calendar, routine],
+        // V11 P13: fresh-download summaries + busy-session recaps.
+        let downloads = DownloadsSignalProvider()
+        let session = SessionSignalProvider()
+        let engine = ProactiveEngine(providers: [calendar, routine, downloads, session],
                                      settings: { ProactiveSettings.load() })
         proactiveEngine = engine
 

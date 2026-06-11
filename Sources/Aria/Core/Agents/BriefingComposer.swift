@@ -1,5 +1,6 @@
 import Foundation
 import EventKit
+import AppKit
 
 /// The Daily Briefing (V10 P3 — a signature workflow): gathers today's
 /// calendar, due reminders, yesterday's work journal, and recently-touched
@@ -20,9 +21,12 @@ enum BriefingComposer {
     }
 
     /// The composition prompt — pure and testable. Empty sections read "(none)"
-    /// so the model never invents content for missing inputs.
+    /// so the model never invents content for missing inputs. V11 P4 adds
+    /// active projects and recent notes (defaulted so existing callers/tests
+    /// stay valid).
     static func prompt(calendar: String, reminders: String, yesterdayWork: String,
-                       recentDocs: String, date: Date) -> String {
+                       recentDocs: String, projects: String = "", notes: String = "",
+                       date: Date) -> String {
         func section(_ s: String) -> String {
             s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "(none)" : s
         }
@@ -33,9 +37,10 @@ enum BriefingComposer {
         Style: calm, personal, premium — like a great chief of staff. Three short
         sections with these exact headers: "Today", "Carry-over", "Suggested focus".
         Under Today: the schedule and due reminders, with times. Under Carry-over:
-        what yesterday's work implies for today (done things need no action).
-        Under Suggested focus: ONE concrete suggestion. Plain text, no markdown
-        symbols, under 160 words total. Never invent events or work.
+        what yesterday's work implies for today (done things need no action) and
+        which active project most needs attention. Under Suggested focus: ONE
+        concrete suggestion. Plain text, no markdown symbols, under 160 words
+        total. Never invent events, work, projects, or notes.
 
         TODAY'S CALENDAR:
         \(section(calendar))
@@ -45,6 +50,12 @@ enum BriefingComposer {
 
         YESTERDAY'S WORK (from Aria's journal):
         \(section(yesterdayWork))
+
+        ACTIVE PROJECTS (most recently touched first):
+        \(section(projects))
+
+        RECENT NOTES:
+        \(section(notes))
 
         RECENTLY TOUCHED DOCUMENTS:
         \(section(recentDocs))
@@ -62,9 +73,12 @@ enum BriefingComposer {
         let work = await WorkJournal.shared.digest(from: startYesterday, to: now)
         let docs = await KnowledgeIndex.shared.recentDocuments(limit: 5)
             .map(\.title).joined(separator: ", ")
+        let projects = await activeProjects()
+        let notes = await recentNoteTitles()
 
         let p = prompt(calendar: calendarLines, reminders: reminderLines,
-                       yesterdayWork: work, recentDocs: docs, date: now)
+                       yesterdayWork: work, recentDocs: docs,
+                       projects: projects, notes: notes, date: now)
         do {
             let text = try await gemini.generateText(prompt: p, temperature: 0.4,
                                                      taskClass: .documentUnderstanding)
@@ -76,6 +90,33 @@ enum BriefingComposer {
             if !work.isEmpty { fallback += "\nYesterday:\n\(work)" }
             return (fallback, false)
         }
+    }
+
+    /// Each active project with its latest outcome — "Verdai: ✓ deck — 6 slides".
+    static func activeProjects(journal: WorkJournal = .shared) async -> String {
+        let names = await journal.projects(limit: 3)
+        var lines: [String] = []
+        for name in names {
+            let last = await journal.entries(project: name, limit: 1).first
+            let tail = last.map { " — last: \($0.ok ? "✓" : "✗") \($0.title)" } ?? ""
+            lines.append("• \(name)\(tail)")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// Recent Apple Notes titles — but only when Notes is already running and
+    /// Automation access is in place. A scheduled briefing must never launch
+    /// Notes or trigger a permission prompt; missing notes just read "(none)".
+    private static func recentNoteTitles() async -> String {
+        let notesRunning = await MainActor.run {
+            NSWorkspace.shared.runningApplications
+                .contains { $0.bundleIdentifier == "com.apple.Notes" }
+        }
+        guard notesRunning else { return "" }
+        guard let result = try? await NotesReadTool().run(input: [:]), result.success,
+              result.output.hasPrefix("Recent notes:") else { return "" }
+        return String(result.output.dropFirst("Recent notes:".count))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // MARK: inputs (EventKit reads only when access is already granted)

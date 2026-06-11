@@ -81,6 +81,9 @@ final class AppSettings: ObservableObject {
     @Published var orbScale: Double { didSet { defaults.set(orbScale, forKey: K.orbScale) } }
     /// Personality flavor (PersonaStyle raw value).
     @Published var personaStyle: String { didSet { defaults.set(personaStyle, forKey: PersonaStyle.key) } }
+    /// Speak the scheduled daily briefing aloud when it lands (V11 P4).
+    /// On-demand "brief me" always speaks; this governs the background agent.
+    @Published var briefingSpoken: Bool { didSet { defaults.set(briefingSpoken, forKey: K.briefingSpoken) } }
 
     var accentChoice: AccentChoice {
         get { Theme.decodeChoice(accentChoiceRaw) }
@@ -118,6 +121,7 @@ final class AppSettings: ObservableObject {
         uiSoundsEnabled = defaults.object(forKey: K.uiSoundsEnabled) as? Bool ?? true
         orbScale = defaults.object(forKey: K.orbScale) as? Double ?? 1.0
         personaStyle = defaults.string(forKey: PersonaStyle.key) ?? "balanced"
+        briefingSpoken = defaults.bool(forKey: K.briefingSpoken)
     }
 
     /// Register/unregister the app as a login item (SMAppService, macOS 13+).
@@ -157,5 +161,6 @@ final class AppSettings: ObservableObject {
         static let spokenStepNarration = "app.spokenStepNarration"
         static let uiSoundsEnabled = "app.uiSounds"
         static let orbScale = "app.orbScale"
+        static let briefingSpoken = "app.briefingSpoken"
     }
 }

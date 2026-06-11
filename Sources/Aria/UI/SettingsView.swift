@@ -416,6 +416,10 @@ struct ProactiveSettingsTab: View {
                                  "A quiet heads-up just before your meetings.")
                     sourceToggle("Learned routines", .routine,
                                  "Offer to automate habits she notices on-device.")
+                    sourceToggle("New downloads", .downloads,
+                                 "A fresh PDF in Downloads — she offers a summary.")
+                    sourceToggle("Work sessions", .session,
+                                 "After a productive stretch, she offers a recap of the day.")
                     Text("More signals (recurring commands, on-screen context) are coming.")
                         .font(.caption2).foregroundStyle(.tertiary)
                 }
@@ -563,6 +567,10 @@ struct AgentsSettingsTab: View {
                             trigger: .daily(hour: briefingHour, minute: 0)))
                     }.disabled(agents.contains { $0.name == "Daily briefing" })
                 }
+                Toggle("Speak the scheduled briefing aloud", isOn: Binding(
+                    get: { AppSettings.shared.briefingSpoken },
+                    set: { AppSettings.shared.briefingSpoken = $0 }))
+                    .help("When the daily briefing agent runs, Aria reads it to you — unless you're mid-conversation or mid-task.")
                 Button("Watch Downloads — offer to organize new files") {
                     add(BackgroundAgent(
                         name: "Downloads watcher",
@@ -658,6 +666,8 @@ struct TransparencyTab: View {
     @State private var context: GeminiClient.SystemContext?
     @State private var decisions: [RoutingLogEntry] = []
     @State private var work: [WorkEntry] = []
+    @State private var todayEvents: [TimelineEvent] = []
+    @State private var projects: [String] = []
     private let localFirstOn = AppSettings.shared.localFirstEnabled
 
     var body: some View {
@@ -701,6 +711,40 @@ struct TransparencyTab: View {
                 }
             }
 
+            SSection("Timeline — today") {
+                if todayEvents.isEmpty {
+                    Text("Ask “what did I do today?” or “show my week” anytime. Tasks, agent runs and actions all land here as they happen.")
+                        .font(.callout).foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array(todayEvents.suffix(10).enumerated()), id: \.offset) { _, e in
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: e.source == .action ? "bolt" : (e.source == .agent ? "clock.arrow.2.circlepath" : "waveform"))
+                                .font(.system(size: 10))
+                                .foregroundStyle(e.ok ? Color.green : .orange)
+                                .frame(width: 14)
+                                .padding(.top, 3)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(e.title).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                                HStack(spacing: 6) {
+                                    Text(e.date.formatted(date: .omitted, time: .shortened))
+                                        .font(.caption2).foregroundStyle(.tertiary)
+                                    if let p = e.project {
+                                        Text(p).font(.caption2).foregroundStyle(.secondary)
+                                            .padding(.horizontal, 5).padding(.vertical, 1)
+                                            .background(Capsule().fill(Color.secondary.opacity(0.12)))
+                                    }
+                                }
+                            }
+                            Spacer(minLength: 0)
+                        }
+                    }
+                }
+                if !projects.isEmpty {
+                    Text("Projects: \(projects.joined(separator: ", "))")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+
             SSection("Workflow history") {
                 if work.isEmpty {
                     Text("Everything Aria completes — voice tasks and background agents — appears here. Per-action detail lives in the Activity tab.")
@@ -733,6 +777,9 @@ struct TransparencyTab: View {
             refreshContext()
             decisions = await RoutingLog.shared.recent(10)
             work = await WorkJournal.shared.recent(12)
+            let now = Date()
+            todayEvents = await Timeline().events(from: Calendar.current.startOfDay(for: now), to: now)
+            projects = await WorkJournal.shared.projects(limit: 6)
         }
     }
 

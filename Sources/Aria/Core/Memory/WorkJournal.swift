@@ -11,6 +11,9 @@ struct WorkEntry: Codable, Equatable, Sendable {
     let title: String      // the goal/agent name, as the user phrased it
     let outcome: String    // one-line result summary
     let ok: Bool
+    /// Project Memory 2.0 (V11 P5): which project this work belongs to.
+    /// Optional so journals written before V11 decode unchanged.
+    var project: String?
 }
 
 /// Project memory (V10 P4): a durable journal of what Aria actually did —
@@ -24,7 +27,7 @@ actor WorkJournal {
     private let cap: Int
     private var entries: [WorkEntry]
 
-    init(fileURL: URL? = nil, cap: Int = 300) {
+    init(fileURL: URL? = nil, cap: Int = 1000) {
         let url = fileURL ?? PersistencePaths.applicationSupportBaseDirectory()
             .appendingPathComponent("journal.json")
         self.fileURL = url
@@ -33,11 +36,13 @@ actor WorkJournal {
     }
 
     func record(kind: WorkEntry.Kind, title: String, outcome: String, ok: Bool,
-                at date: Date = Date()) {
+                project: String? = nil, at date: Date = Date()) {
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedTitle.isEmpty else { return }
+        let tag = project ?? ProjectTagger.infer(from: trimmedTitle)
         entries.append(WorkEntry(date: date, kind: kind, title: trimmedTitle,
-                                 outcome: String(outcome.prefix(200)), ok: ok))
+                                 outcome: String(outcome.prefix(200)), ok: ok,
+                                 project: tag))
         if entries.count > cap { entries.removeFirst(entries.count - cap) }
         save()
     }
@@ -50,6 +55,36 @@ actor WorkJournal {
     /// Newest-first recent entries (the unified workflow-history view).
     func recent(_ limit: Int) -> [WorkEntry] {
         Array(entries.suffix(limit).reversed())
+    }
+
+    /// Newest-first entries tagged with `project` (case-insensitive).
+    func entries(project: String, limit: Int = 20) -> [WorkEntry] {
+        let p = project.lowercased()
+        return entries.reversed().filter { $0.project?.lowercased() == p }
+            .prefix(limit).map { $0 }
+    }
+
+    /// Distinct projects, most recently touched first.
+    func projects(limit: Int = 12) -> [String] {
+        var seen = Set<String>()
+        var out: [String] = []
+        for e in entries.reversed() {
+            guard let p = e.project, seen.insert(p.lowercased()).inserted else { continue }
+            out.append(p)
+            if out.count == limit { break }
+        }
+        return out
+    }
+
+    /// Human-readable digest of one project's recent work — feeds
+    /// "continue my X work" with where things actually stand.
+    func projectDigest(_ project: String, limit: Int = 10) -> String {
+        entries(project: project, limit: limit).map { e in
+            let day = e.date.formatted(date: .abbreviated, time: .shortened)
+            let mark = e.ok ? "✓" : "✗"
+            let tail = e.outcome.isEmpty ? "" : " — \(e.outcome)"
+            return "\(mark) \(day) \(e.title)\(tail)"
+        }.joined(separator: "\n")
     }
 
     /// Newest-first free-text search over titles and outcomes.

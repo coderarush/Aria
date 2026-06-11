@@ -7,6 +7,10 @@ enum SuggestionSource: String, Codable, Sendable, CaseIterable {
     case routine
     case command
     case screen
+    /// V11 P13: a document just landed in Downloads.
+    case downloads
+    /// V11 P13: a long work session — offer a recap.
+    case session
 }
 
 /// How urgently a suggestion wants to surface. Time-critical ones (a meeting

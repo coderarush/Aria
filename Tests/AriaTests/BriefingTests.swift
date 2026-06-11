@@ -32,6 +32,30 @@ final class BriefingTests: XCTestCase {
                                         recentDocs: "", date: Date(timeIntervalSince1970: 0))
         XCTAssertTrue(p.contains("(none)"), "empty sections must read as none, not vanish")
     }
+
+    // V11 P4 — projects and notes feed the briefing.
+
+    func testPromptIncludesProjectsAndNotes() {
+        let p = BriefingComposer.prompt(
+            calendar: "", reminders: "", yesterdayWork: "", recentDocs: "",
+            projects: "• Verdai — last: ✓ deck",
+            notes: "• Investor questions",
+            date: Date(timeIntervalSince1970: 1_750_000_000))
+        XCTAssertTrue(p.contains("Verdai"))
+        XCTAssertTrue(p.contains("Investor questions"))
+        XCTAssertTrue(p.contains("ACTIVE PROJECTS"))
+        XCTAssertTrue(p.contains("RECENT NOTES"))
+    }
+
+    func testActiveProjectsDigestShowsLatestOutcome() async {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("journal-\(UUID().uuidString).json")
+        let j = WorkJournal(fileURL: url)
+        await j.record(kind: .task, title: "deck", outcome: "6 slides", ok: true, project: "Verdai")
+        let digest = await BriefingComposer.activeProjects(journal: j)
+        XCTAssertTrue(digest.contains("Verdai"))
+        XCTAssertTrue(digest.contains("deck"))
+    }
 }
 
 final class KnowledgeRecentDocsTests: XCTestCase {

@@ -5,9 +5,10 @@ import Foundation
 /// journal (tasks Aria ran, background agent runs, outcomes).
 struct RecallWorkTool: AriaTool {
     static let name = "recall_work"
-    static let description = "Recall what the user and Aria worked on before. Input: {timeframe: today|yesterday|this week|last week} or {query: free text}. Use when the user asks about previous work, recent projects, what happened earlier, or wants to continue something."
+    static let description = "Recall what the user and Aria worked on before. Input: {timeframe: today|yesterday|this week|last week}, {project: name} for one project's history, or {query: free text}. Use when the user asks about previous work, recent projects, what happened earlier, or wants to continue something (e.g. 'continue my Verdai work' → project: Verdai)."
     static let paramHints: [String: String] = [
         "timeframe": "today, yesterday, this week, or last week",
+        "project": "Project name — returns that project's recent work, newest first",
         "query": "Free-text search over past work instead of a timeframe"
     ]
 
@@ -20,6 +21,17 @@ struct RecallWorkTool: AriaTool {
     }
 
     func run(input: [String: String]) async throws -> ToolResult {
+        if let project = input["project"], !project.isEmpty {
+            let digest = await journal.projectDigest(project)
+            if !digest.isEmpty {
+                return .ok("Recent \(project) work, newest first:\n\(digest)")
+            }
+            let known = await journal.projects()
+            guard !known.isEmpty else {
+                return .ok("No project history yet — the journal tags projects as work happens.")
+            }
+            return .ok("Nothing recorded for “\(project)”. Projects with history: \(known.joined(separator: ", ")).")
+        }
         if let query = input["query"], !query.isEmpty {
             let hits = await journal.search(query)
             guard !hits.isEmpty else { return .ok("Nothing in the work journal matches “\(query)”.") }
