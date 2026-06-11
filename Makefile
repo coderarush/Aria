@@ -24,7 +24,7 @@ ifeq ($(strip $(SIGN_ID)),)
 SIGN_ID := -
 endif
 
-.PHONY: build test run release verify-release dmg notarize clean xcode cert
+.PHONY: build test run release verify-release smoke dmg notarize clean xcode cert
 
 DMG   := $(BUILD_DIR)/$(APP_NAME).dmg
 STAGE := $(BUILD_DIR)/dmg-stage
@@ -63,6 +63,13 @@ release: verify-release
 		$(APP_BUNDLE) || codesign --force --deep --sign "$(SIGN_ID)" $(APP_BUNDLE)
 	@echo "Built $(APP_BUNDLE) (signed: $(SIGN_ID)) — open with: open $(APP_BUNDLE)"
 	@if [ "$(SIGN_ID)" = "-" ]; then echo "NOTE: ad-hoc signed — macOS will re-ask for permissions after each rebuild. Run 'make cert' once to make them stick."; fi
+
+# Headless smoke test: builds + installs the app bundle, then drives a real
+# session (summon, two conversation turns) via the debug hooks and asserts on
+# the trace log. Catches dead-capture / hung-turn / re-arm regressions that
+# unit tests can't. Speaks through your speakers; needs a Gemini key.
+smoke: release
+	./scripts/smoke.sh .build/Aria.app
 
 # Guard: the WMO flag must be present in BOTH places that build release binaries.
 # If either check fails, someone dropped `-no-whole-module-optimization` and release

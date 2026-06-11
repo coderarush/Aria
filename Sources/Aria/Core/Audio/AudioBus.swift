@@ -51,12 +51,40 @@ final class AudioBus {
         drain()
     }
 
+    /// Echo-tail window after playback during which the filter keeps running.
+    static let aecTailSeconds: TimeInterval = 2.0
+    /// Last moment far-end audio was queued or playing (audio thread; farLock).
+    private var lastPlaybackActivity: TimeInterval = 0
+
+    /// True when the echo canceller can be skipped entirely: nothing queued on
+    /// the far end and playback ended past the echo tail. At idle this is the
+    /// app's main CPU cost (full Speex MDF math per mic frame for a guaranteed
+    /// near-passthrough) — measured ~9% of a core; bypassing drops idle CPU to
+    /// the platform audio/recognition floor. During and shortly after speech
+    /// the filter always runs, so talk-over barge-in is unaffected.
+    static func shouldBypassAEC(farQueued: Bool, now: TimeInterval,
+                                lastPlaybackActivity: TimeInterval) -> Bool {
+        !farQueued && (now - lastPlaybackActivity) > aecTailSeconds
+    }
+
     /// Pair mic + far frames and run AEC. With no far audio queued (Aria silent),
     /// the far-end is zeros and the AEC is a near-passthrough.
     private func drain() {
         while let near = micRing.pop() {
-            farLock.lock(); let far = farRing.pop() ?? [Int16](repeating: 0, count: AudioBus.frameSize); farLock.unlock()
-            let cleaned = aec.process(near: near, far: far)
+            farLock.lock()
+            let far = farRing.pop()
+            if far != nil { lastPlaybackActivity = Date.timeIntervalSinceReferenceDate }
+            let lastActivity = lastPlaybackActivity
+            farLock.unlock()
+            let cleaned: [Int16]
+            if far == nil, AudioBus.shouldBypassAEC(farQueued: false,
+                                                    now: Date.timeIntervalSinceReferenceDate,
+                                                    lastPlaybackActivity: lastActivity) {
+                cleaned = near
+            } else {
+                cleaned = aec.process(near: near,
+                                      far: far ?? [Int16](repeating: 0, count: AudioBus.frameSize))
+            }
             onCleanedFrame?(cleaned)
         }
     }

@@ -216,9 +216,7 @@ final class AriaController {
                 return await self.runSilentTask(goal: goal)
             },
             notify: { title, body in
-                let t = AppleScriptTool.quotedLiteral(title)
-                let b = AppleScriptTool.quotedLiteral(body)
-                _ = AppleScriptTool.execute("display notification \"\(b)\" with title \"\(t)\"")
+                Notifier.notify(title: title, body: body)
             })
         agentCoordinator = coordinator
         coordinator.start()
@@ -271,8 +269,7 @@ final class AriaController {
             guard let self, let pending = await self.orchestrator.pendingTask() else { return }
             let remaining = pending.unfinishedCount
             let msg = "Unfinished task: “\(pending.goal)” — \(remaining) step\(remaining == 1 ? "" : "s") left. Say “Hey Aria, resume” to continue."
-            let escaped = AppleScriptTool.quotedLiteral(msg)
-            _ = AppleScriptTool.execute("display notification \"\(escaped)\" with title \"Aria\"")
+            Notifier.notify(title: "Aria", body: msg)
             Log.trace("resume: offered pending task '\(pending.goal)'")
         }
     }
