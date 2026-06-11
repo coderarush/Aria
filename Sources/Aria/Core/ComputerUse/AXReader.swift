@@ -158,12 +158,12 @@ enum AXReader {
         var posV: CFTypeRef?, sizeV: CFTypeRef?
         var pos = CGPoint.zero, size = CGSize.zero
         if AXUIElementCopyAttributeValue(el, kAXPositionAttribute as CFString, &posV) == .success,
-           let p = posV, CFGetTypeID(p) == AXValueGetTypeID() {
-            AXValueGetValue((p as! AXValue), .cgPoint, &pos)
+           let point = AXGeometry.point(from: posV) {
+            pos = point
         }
         if AXUIElementCopyAttributeValue(el, kAXSizeAttribute as CFString, &sizeV) == .success,
-           let s = sizeV, CFGetTypeID(s) == AXValueGetTypeID() {
-            AXValueGetValue((s as! AXValue), .cgSize, &size)
+           let parsed = AXGeometry.size(from: sizeV) {
+            size = parsed
         }
         return CGRect(origin: pos, size: size)
     }

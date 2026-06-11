@@ -102,6 +102,22 @@ actor GeminiClient {
         }
     }
 
+    /// Build a Gemini request URL with proper percent-encoding for the model and key.
+    static func geminiURL(model: String, apiKey: String, streaming: Bool = false) -> URL? {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "generativelanguage.googleapis.com"
+        components.path = "/v1beta/models/\(model)\(streaming ? ":streamGenerateContent" : ":generateContent")"
+        components.queryItems = [
+            URLQueryItem(name: "alt", value: streaming ? "sse" : nil),
+            URLQueryItem(name: "key", value: apiKey)
+        ].compactMap { item in
+            if item.name == "alt", item.value == nil { return nil }
+            return item
+        }
+        return components.url
+    }
+
     /// Send a turn to Gemini and decode the structured AriaResponse.
     func send(transcript: String,
               screenshotJPEG: Data?,
@@ -139,7 +155,165 @@ actor GeminiClient {
                     toolCatalog: String = "",
                     specs: [ToolSpec] = [],
                     preferredModel: String? = nil) -> AsyncThrowingStream<StreamEvent, Error> {
-        AsyncThrowingStream { continuation in
+        // ARIA_DEMO_MODE: scripted, deterministic replies for recordings —
+        // streamed in sentence chunks so the UI/voice pipeline behaves normally.
+        if DemoMode.isEnabled() {
+            return AsyncThrowingStream { continuation in
+                let reply = DemoMode.reply(for: transcript)
+                for sentence in reply.split(separator: ". ", omittingEmptySubsequences: true) {
+                    let chunk = sentence.hasSuffix(".") ? String(sentence) : sentence + ". "
+                    continuation.yield(.text(String(chunk)))
+                }
+                continuation.finish()
+            }
+        }
+        // LOCAL-PRIMARY (V9): conversation runs on the local model when the
+        // toggle is on and a server answers the (cached) probe; Gemini becomes
+        // the fallback. The local OpenAI-compatible path supports streaming AND
+        // tool-calling, so capability is preserved — and any failure before the
+        // first token falls through to the untouched cloud pipeline below.
+        let cloud: () -> AsyncThrowingStream<StreamEvent, Error> = { [self] in
+            cloudStreamSend(transcript: transcript, screenshotJPEG: screenshotJPEG,
+                            history: history, context: context,
+                            toolCatalog: toolCatalog, specs: specs,
+                            preferredModel: preferredModel)
+        }
+        // Vision turns need Gemini (local models here are text-only).
+        if screenshotJPEG == nil {
+            let router = LocalFirstRouter()
+            return AsyncThrowingStream { continuation in
+                let task = Task {
+                    if await router.chatGoesLocal() {
+                        await RoutingLog.shared.record(RoutingDecision(
+                            taskClass: .simpleChat, tier: .local, reason: "conversation on local model"))
+                        Log.trace("chat: local model")
+                        let local = OllamaProvider(model: router.localModelName)
+                        // Trimmed tool catalog: prompt-eval cost on a small local
+                        // model scales with spec bytes — the full 25-tool catalog
+                        // costs ~3x the first-token time of this core set. Tools
+                        // outside it route via cloud turns or the autonomy path.
+                        let localSpecs = specs.filter { Self.localChatTools.contains($0.name) }
+                        let stream = Self.streamWithFallback(
+                            primary: local.streamChat(transcript: transcript, history: history,
+                                                      system: ProviderConfig.chatSystemPrompt, specs: localSpecs),
+                            fallback: {
+                                Log.trace("chat: local failed before output — Gemini fallback")
+                                return cloud()
+                            },
+                            firstTokenTimeout: 15)
+                        do {
+                            for try await ev in stream { continuation.yield(ev) }
+                            continuation.finish()
+                        } catch { continuation.finish(throwing: error) }
+                    } else {
+                        do {
+                            for try await ev in cloud() { continuation.yield(ev) }
+                            continuation.finish()
+                        } catch { continuation.finish(throwing: error) }
+                    }
+                }
+                continuation.onTermination = { _ in task.cancel() }
+            }
+        }
+        return cloud()
+    }
+
+    /// Core everyday tools for local-model chat (kept small on purpose — see
+    /// localSpecs above).
+    static let localChatTools: Set<String> = [
+        "open_app", "open_url", "web_search", "clipboard", "file_read", "file_write",
+        "save_note", "calendar", "reminders", "notify", "knowledge_search"
+    ]
+
+    /// Relay `primary` unless it fails — or stays silent past
+    /// `firstTokenTimeout` — BEFORE producing any event; then switch to
+    /// `fallback`. After first output we propagate errors instead (silently
+    /// restarting on another model would double-speak to the user). The
+    /// timeout is what makes a cold local model safe as the default: a slow
+    /// first token degrades to cloud instead of a frozen conversation.
+    static func streamWithFallback(
+        primary: AsyncThrowingStream<StreamEvent, Error>,
+        fallback: @escaping @Sendable () -> AsyncThrowingStream<StreamEvent, Error>,
+        firstTokenTimeout: TimeInterval = 12
+    ) -> AsyncThrowingStream<StreamEvent, Error> {
+        // Single consumer on `primary` (AsyncThrowingStream supports exactly one
+        // iterator — a racing second consumer parks forever) + a watchdog that
+        // only acts if nothing arrived by the deadline. Lock-guarded flags keep
+        // the pump and the watchdog from both deciding the outcome.
+        final class State: @unchecked Sendable {
+            private let lock = NSLock()
+            private var gotFirst = false
+            private var resolved = false
+            /// Pump got an event. Returns false if the watchdog already won.
+            func noteFirst() -> Bool {
+                lock.lock(); defer { lock.unlock() }
+                if resolved { return false }
+                gotFirst = true
+                return true
+            }
+            /// Watchdog fired. True (= run fallback) only if nothing arrived yet.
+            func timeoutWins() -> Bool {
+                lock.lock(); defer { lock.unlock() }
+                if gotFirst || resolved { return false }
+                resolved = true
+                return true
+            }
+            var firstArrived: Bool { lock.lock(); defer { lock.unlock() }; return gotFirst }
+        }
+
+        return AsyncThrowingStream { continuation in
+            let state = State()
+            let pump = Task {
+                do {
+                    for try await ev in primary {
+                        guard state.noteFirst() else { return }   // watchdog already fell back
+                        continuation.yield(ev)
+                    }
+                    if state.firstArrived {
+                        continuation.finish()
+                    } else if state.timeoutWins() {               // ended empty before deadline
+                        await Self.pump(fallback(), into: continuation)
+                    }
+                } catch {
+                    if state.firstArrived {
+                        continuation.finish(throwing: error)      // post-output: propagate
+                    } else if state.timeoutWins() {
+                        Log.trace("stream: primary failed before output — fallback")
+                        await Self.pump(fallback(), into: continuation)
+                    }
+                }
+            }
+            let watchdog = Task {
+                try? await Task.sleep(nanoseconds: UInt64(firstTokenTimeout * 1_000_000_000))
+                guard state.timeoutWins() else { return }
+                Log.trace("stream: primary gave nothing in \(Int(firstTokenTimeout))s — fallback")
+                pump.cancel()
+                await Self.pump(fallback(), into: continuation)
+            }
+            continuation.onTermination = { _ in
+                pump.cancel()
+                watchdog.cancel()
+            }
+        }
+    }
+
+    private static func pump(_ stream: AsyncThrowingStream<StreamEvent, Error>,
+                             into continuation: AsyncThrowingStream<StreamEvent, Error>.Continuation) async {
+        do {
+            for try await ev in stream { continuation.yield(ev) }
+            continuation.finish()
+        } catch { continuation.finish(throwing: error) }
+    }
+
+    /// The original Gemini streaming pipeline (rotation, pacing, fallbacks).
+    private func cloudStreamSend(transcript: String,
+                                 screenshotJPEG: Data?,
+                                 history: [ConversationTurn],
+                                 context: SystemContext,
+                                 toolCatalog: String,
+                                 specs: [ToolSpec],
+                                 preferredModel: String?) -> AsyncThrowingStream<StreamEvent, Error> {
+        return AsyncThrowingStream { continuation in
             let task = Task {
                 do {
                     let tools = specs.isEmpty ? nil : ToolDeclarations.declarations(for: specs)
@@ -167,7 +341,11 @@ actor GeminiClient {
                         }
                         let model = await reserveModel(preferred: first ? preferredModel : nil)
                         first = false
-                        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):streamGenerateContent?alt=sse&key=\(apiKey)")!
+                        guard let url = Self.geminiURL(model: model, apiKey: apiKey, streaming: true) else {
+                            lastError = GeminiError.decodeFailed("invalid Gemini request URL")
+                            attempt += 1
+                            continue
+                        }
                         var req = URLRequest(url: url)
                         req.httpMethod = "POST"
                         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -252,7 +430,24 @@ actor GeminiClient {
     /// the planner and by agents synthesizing prose. Spreads across model buckets via
     /// performWithFallback (free-tier safe). Returns the model's text, fences stripped.
     func generateText(prompt: String, temperature: Double = 0.3,
-                      preferredModel: String? = nil) async throws -> String {
+                      preferredModel: String? = nil,
+                      taskClass: TaskClass? = nil) async throws -> String {
+        if DemoMode.isEnabled() { return DemoMode.reply(for: prompt) }
+        // Local-first pre-step (V9): when the caller declares a task class, route
+        // it. Master toggle defaults OFF and any local failure falls through, so
+        // the cloud path below is byte-identical until the user opts in.
+        if let taskClass {
+            let router = LocalFirstRouter()
+            let decision = await router.decide(taskClass: taskClass)
+            await RoutingLog.shared.record(decision)
+            if decision.tier == .local {
+                if let text = await router.tryLocal(prompt: prompt, temperature: temperature) {
+                    Log.trace("local-first: \(taskClass.rawValue) answered locally")
+                    return Self.stripCodeFences(text)
+                }
+                Log.trace("local-first: \(taskClass.rawValue) local attempt failed — cloud fallback")
+            }
+        }
         let payload: [String: Any] = [
             "contents": [["role": "user", "parts": [["text": prompt]]]],
             "generationConfig": ["temperature": temperature]
@@ -365,7 +560,11 @@ actor GeminiClient {
             // any failure, fall back to normal rotation so we still route around it.
             let firstTry = (attempt == 0 && quotaWaits == 0)
             let model = await reserveModel(preferred: firstTry ? preferredModel : nil)
-            let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent?key=\(apiKey)")!
+            guard let url = Self.geminiURL(model: model, apiKey: apiKey) else {
+                lastError = GeminiError.decodeFailed("invalid Gemini request URL")
+                attempt += 1
+                continue
+            }
             do {
                 let data = try await performOnce(url: url, body: body)
                 Log.trace("gemini: \(model) ok")
@@ -446,7 +645,7 @@ actor GeminiClient {
         if jsonMode { generationConfig["response_mime_type"] = "application/json" }
         var payload: [String: Any] = [
             "system_instruction": [
-                "parts": [["text": Self.systemPrompt]]
+                "parts": [["text": Self.systemPrompt + PersonaStyle.current.promptSuffix]]
             ],
             "contents": [["role": "user", "parts": parts]],
             "generationConfig": generationConfig

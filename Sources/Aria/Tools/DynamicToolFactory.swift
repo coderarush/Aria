@@ -18,8 +18,8 @@ actor DynamicToolFactory {
     }
 
     static func defaultToolsDir() -> URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Aria/tools", isDirectory: true)
+        PersistencePaths.applicationSupportBaseDirectory()
+            .appendingPathComponent("tools", isDirectory: true)
     }
 
     // MARK: Generation

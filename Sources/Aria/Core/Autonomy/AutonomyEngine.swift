@@ -28,19 +28,25 @@ actor AutonomyEngine {
     private let context: GeminiClient.SystemContext
     private let runAction: @Sendable (AgentAction, String) async -> ToolResult
     private let confirm: @Sendable (String) async -> Bool
+    /// Plan-preview hook (V10 P2): called with the parsed steps before
+    /// execution; return false to cancel. Default approves everything, so
+    /// existing callers (background agents, resume) are unaffected.
+    private let approvePlan: @Sendable ([TaskStep]) async -> Bool
 
     init(gemini: GeminiClient,
          registry: ToolRegistry,
          subAgents: SubAgentRegistry,
          context: GeminiClient.SystemContext,
          runAction: @escaping @Sendable (AgentAction, String) async -> ToolResult,
-         confirm: @escaping @Sendable (String) async -> Bool) {
+         confirm: @escaping @Sendable (String) async -> Bool,
+         approvePlan: @escaping @Sendable ([TaskStep]) async -> Bool = { _ in true }) {
         self.gemini = gemini
         self.registry = registry
         self.subAgents = subAgents
         self.context = context
         self.runAction = runAction
         self.confirm = confirm
+        self.approvePlan = approvePlan
     }
 
     func run(goal: String, emit: @escaping @Sendable (TaskEvent) -> Void) async {
@@ -61,8 +67,30 @@ actor AutonomyEngine {
         }
         var plan = TaskPlan(goal: goal, steps: steps)
         emit(.planReady(plan))
+        guard await approvePlan(steps) else {
+            Log.trace("autonomy: plan declined by user")
+            emit(.finished(ok: false, summary: "Okay, I won't do that."))
+            return
+        }
         emit(.narrate("On it — " + plan.steps.map { $0.summary }.prefix(3).joined(separator: ", ") + "."))
         Log.trace("autonomy: plan has \(plan.steps.count) step(s) for '\(goal)'")
+        await runLoop(&plan, goal: goal, completed: [], lastOutput: "", startIndex: 0, emit: emit)
+    }
+
+    /// Run a pre-built plan (V11 P8 recipes): the deterministic path — no
+    /// model planning, no plan roulette — through the SAME step loop as
+    /// planned tasks, so Safety gates, journaling, narration, resume and the
+    /// task panel all behave identically.
+    func runPrebuilt(goal: String, steps: [TaskStep],
+                     emit: @escaping @Sendable (TaskEvent) -> Void) async {
+        guard !steps.isEmpty else {
+            emit(.finished(ok: false, summary: "That recipe has no steps."))
+            return
+        }
+        var plan = TaskPlan(goal: goal, steps: steps)
+        emit(.planReady(plan))
+        emit(.narrate("Running \(goal) — \(steps.count) step\(steps.count == 1 ? "" : "s")."))
+        Log.trace("autonomy: prebuilt plan, \(steps.count) step(s) for '\(goal)'")
         await runLoop(&plan, goal: goal, completed: [], lastOutput: "", startIndex: 0, emit: emit)
     }
 
@@ -127,6 +155,9 @@ actor AutonomyEngine {
             // Recover (alternative action) for anything still failing except a decline —
             // a missing-input CAN be fixed by a different action, a decline must not be.
             if !result.success, !result.wasDeclined {
+                // V11 P16: recovery is visible, never silent — the panel and the
+                // narration both say a different approach is being tried.
+                emit(.narrate("That didn't work — trying another way."))
                 result = await recover(step: step, lastOutput: lastOutput, material: material, goal: goal)
             }
 
@@ -178,7 +209,8 @@ actor AutonomyEngine {
                 : prompt + "\n\nReminder: output ONLY the raw JSON array — no prose, no code fences."
             do {
                 let raw = try await gemini.generateText(prompt: p, temperature: 0.2,
-                                                        preferredModel: ModelRouter.fastStructured)
+                                                        preferredModel: ModelRouter.fastStructured,
+                                                        taskClass: .planning)
                 gotResponse = true
                 let steps = PlanParser.steps(fromJSON: raw)
                 if !steps.isEmpty { return .steps(steps) }

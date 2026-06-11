@@ -66,6 +66,19 @@ final class GeminiClientTests: XCTestCase {
         XCTAssertTrue(lower.contains("tool"))   // mentions using tools/functions
     }
 
+    func testGeminiURLEncodesModelAndKey() {
+        let url = GeminiClient.geminiURL(model: "gemini 2.5 flash", apiKey: "abc#123", streaming: false)
+        XCTAssertEqual(url?.scheme, "https")
+        XCTAssertTrue(url?.absoluteString.contains("/v1beta/models/gemini%202.5%20flash:generateContent") == true)
+        XCTAssertTrue(url?.absoluteString.contains("key=abc%23123") == true)
+    }
+
+    func testGeminiStreamingURLUsesSSEQuery() {
+        let url = GeminiClient.geminiURL(model: "gemini-2.5-flash", apiKey: "k", streaming: true)
+        XCTAssertTrue(url?.absoluteString.contains(":streamGenerateContent") == true)
+        XCTAssertTrue(url?.absoluteString.contains("alt=sse") == true)
+    }
+
     // Encode a string as a JSON string literal (with quotes + escaping).
     private func jsonString(_ s: String) -> String {
         let data = try! JSONEncoder().encode(s)

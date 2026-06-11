@@ -12,7 +12,7 @@ import Foundation
 /// Escape a string for an AppleScript double-quoted literal. Critically, AppleScript
 /// source can't contain raw newlines/tabs inside a string — a multi-line email body
 /// would break the script — so those become \n \r \t escapes too (backslashes first).
-private func asLiteral(_ s: String) -> String {
+func asLiteral(_ s: String) -> String {
     s.replacingOccurrences(of: "\\", with: "\\\\")
      .replacingOccurrences(of: "\"", with: "\\\"")
      .replacingOccurrences(of: "\n", with: "\\n")
@@ -97,7 +97,8 @@ struct EmailDraftTool: AriaTool {
     ]
 
     func run(input: [String: String]) async throws -> ToolResult {
-        let to = asLiteral(input["to"] ?? "")
+        let toRaw = input["to"] ?? ""
+        let to = asLiteral(toRaw)
         let subject = asLiteral(input["subject"] ?? "")
         let body = asLiteral(input["body"] ?? input["content"] ?? "")
         let recipientLine = to.isEmpty ? "" :
@@ -112,7 +113,7 @@ struct EmailDraftTool: AriaTool {
         """
         let r = await AppleScriptTool.execute(script)
         return r.success
-            ? .ok("Drafted the email in Mail\(to.isEmpty ? "" : " to \(input["to"]!)") — review and send when you're ready.")
+            ? .ok("Drafted the email in Mail\(toRaw.isEmpty ? "" : " to \(toRaw)") — review and send when you're ready.")
             : .fail("I couldn't open a draft in Mail — Aria may need Automation access for Mail.")
     }
 }

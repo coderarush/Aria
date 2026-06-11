@@ -49,8 +49,19 @@ final class WakeWordEngine {
     private var rollingTimer: Timer?
     private var watchdogTimer: Timer?
 
-    private let wakeVariants = ["hey aria", "hey arya", "hey aria's",
-                               "hey, aria", "aria", "hey ariel"]
+    /// Built-in wake variants plus an optional user-chosen phrase
+    /// ("app.wakePhrase"). The custom phrase ADDS to the built-ins — "Hey
+    /// Aria" always works, so a mis-set custom phrase can't brick waking.
+    var wakeVariants: [String] {
+        var variants = ["hey aria", "hey arya", "hey aria's",
+                        "hey, aria", "aria", "hey ariel"]
+        let custom = (UserDefaults.standard.string(forKey: "app.wakePhrase") ?? "")
+            .lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        if custom.count >= 3, !variants.contains(custom) {
+            variants.append(custom)
+        }
+        return variants
+    }
     private let commandSilence: TimeInterval = 1.4
     private let commandLeadGrace: TimeInterval = 6.0
     private let rollingRestart: TimeInterval = 50
@@ -59,6 +70,10 @@ final class WakeWordEngine {
     private(set) var isRunning = false
     var isSuspended = false
     var conversationActive = false
+    /// User-controlled mute (menu bar "Pause listening"): blocks wake-phrase
+    /// detection AND programmatic summon until turned off. Separate from
+    /// `isSuspended`, which the speech flow toggles constantly.
+    var manuallyMuted = false
     var isInWakeMode: Bool { mode == .wake }
 
     // MARK: Lifecycle
@@ -100,8 +115,24 @@ final class WakeWordEngine {
         let rms = WakeWordEngine.rms(samples)
         // Only fingerprint voiced frames while the speaker gate is active (off by default).
         let voiceprint: [Float]? = (gateActive && rms > 0.05) ? VoiceFeatures.extract(samples) : nil
+        // Throttle the main-actor hop: a Task per audio frame churns task/metadata
+        // machinery from the realtime thread (contributed to a debug-build
+        // metadata-cache deadlock). Hop only when the level moved visibly or a
+        // voiceprint needs recording; the watchdog tolerates sparse updates.
+        let now = Date.timeIntervalSinceReferenceDate
+        feedLock.lock()
+        let movedEnough = abs(rms - lastSentLevel) > 0.015
+        let heartbeat = now - lastSentAt > 2.0     // keep the never-deaf watchdog fed
+        let send = movedEnough || heartbeat || voiceprint != nil
+        if send { lastSentLevel = rms; lastSentAt = now }
+        feedLock.unlock()
+        guard send else { return }
         Task { @MainActor in self.noteAudio(level: rms, voiceprint: voiceprint) }
     }
+
+    /// Last forwarded level/time; guarded by feedLock (audio thread).
+    nonisolated(unsafe) private var lastSentLevel: Float = -1
+    nonisolated(unsafe) private var lastSentAt: TimeInterval = 0
 
     @MainActor private func noteAudio(level: Float, voiceprint: [Float]? = nil) {
         lifecycle.sawAudio(at: Date.timeIntervalSinceReferenceDate)
@@ -184,7 +215,7 @@ final class WakeWordEngine {
     // MARK: Transcript handling
 
     private func handleTranscript(_ text: String) {
-        guard !isSuspended else { return }
+        guard !isSuspended, !manuallyMuted else { return }
         let lower = text.lowercased()
         switch mode {
         case .wake:
@@ -199,7 +230,10 @@ final class WakeWordEngine {
                 : (committedCommand + " " + sessionText).trimmingCharacters(in: .whitespacesAndNewlines)
             let grew = combined.count > commandBuffer.count
             commandBuffer = combined
-            if grew { resetSilenceTimer(commandSilence) }
+            if grew {
+                resetSilenceTimer(commandSilence)
+                Log.trace("capture: buffer now \(combined.count) chars")
+            }
         }
     }
 
@@ -220,7 +254,9 @@ final class WakeWordEngine {
         committedCommand = ""
         commandBuffer = stripWakePhrase(from: initialTranscript, original: initialTranscript)
         onWake?()
-        resetSilenceTimer(commandBuffer.isEmpty ? commandLeadGrace : commandSilence)
+        let grace = commandBuffer.isEmpty ? commandLeadGrace : commandSilence
+        resetSilenceTimer(grace)
+        Log.trace("command mode armed (buffer='\(commandBuffer)', grace=\(grace)s)")
     }
 
     private func resetSilenceTimer(_ timeout: TimeInterval) {
@@ -238,6 +274,21 @@ final class WakeWordEngine {
         commandBuffer = ""
         committedCommand = ""
         beginRecognition()
+    }
+
+    /// Programmatic wake (push-to-talk hotkey / menu summon): enter command
+    /// capture as if the wake phrase was just heard. Skips the speaker gate —
+    /// a physical keypress IS the user. No-op while suspended (Aria speaking)
+    /// or already capturing.
+    func summon() {
+        guard !isSuspended, !manuallyMuted, mode == .wake else { return }
+        Log.trace("summon — push-to-talk wake")
+        mode = .command
+        committedCommand = ""
+        commandBuffer = ""
+        recentVoiceprints = []
+        onWake?()
+        resetSilenceTimer(commandLeadGrace)
     }
 
     /// Leave conversation mode and go back to wake-word listening.

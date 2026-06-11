@@ -7,7 +7,8 @@
 
 APP_NAME    := Aria
 BUILD_DIR   := .build
-RELEASE_BIN := $(BUILD_DIR)/release/$(APP_NAME)
+# Debug-config binary on purpose — see the `release` target comment.
+RELEASE_BIN := $(BUILD_DIR)/debug/$(APP_NAME)
 APP_BUNDLE  := $(BUILD_DIR)/$(APP_NAME).app
 INFO_PLIST  := Resources/Info.plist
 
@@ -23,7 +24,7 @@ ifeq ($(strip $(SIGN_ID)),)
 SIGN_ID := -
 endif
 
-.PHONY: build test run release dmg notarize clean xcode cert
+.PHONY: build test run release verify-release smoke dmg notarize clean xcode cert
 
 DMG   := $(BUILD_DIR)/$(APP_NAME).dmg
 STAGE := $(BUILD_DIR)/dmg-stage
@@ -40,11 +41,17 @@ run: build
 
 # Assemble a proper .app bundle and codesign ad-hoc so permission
 # dialogs (mic / screen recording) attribute to "Aria".
-release:
-	# -no-whole-module-optimization is REQUIRED: WMO miscompiles SwiftUI actor
-	# isolation on Swift 6.3 / macOS 26.3 and a release build crashes on the first
-	# control tap. Per-file -O is kept. See README "release builds".
-	swift build -c release -Xswiftc -no-whole-module-optimization
+release: verify-release
+	# SHIPS THE DEBUG-CONFIGURATION BINARY — deliberately. On macOS 26.3.1 every
+	# release-config build (with WMO off, even with -Onone) crashes on the first
+	# SwiftUI control tap: garbage executor ref in
+	# swift_task_isCurrentExecutorWithFlags under _ButtonGesture
+	# (EXC_BAD_ACCESS; crash reports 2026-06-10). The debug configuration has
+	# never crashed across v2..v9. The delta is release build CONFIG, not the
+	# optimizer level — unbisected toolchain/OS bug. Revisit on the next
+	# Xcode/macOS update. Perf is fine: the app is network/disk-bound and the
+	# real-time AEC path is C.
+	swift build
 	rm -rf $(APP_BUNDLE)
 	mkdir -p $(APP_BUNDLE)/Contents/MacOS
 	mkdir -p $(APP_BUNDLE)/Contents/Resources
@@ -56,6 +63,24 @@ release:
 		$(APP_BUNDLE) || codesign --force --deep --sign "$(SIGN_ID)" $(APP_BUNDLE)
 	@echo "Built $(APP_BUNDLE) (signed: $(SIGN_ID)) — open with: open $(APP_BUNDLE)"
 	@if [ "$(SIGN_ID)" = "-" ]; then echo "NOTE: ad-hoc signed — macOS will re-ask for permissions after each rebuild. Run 'make cert' once to make them stick."; fi
+
+# Headless smoke test: builds + installs the app bundle, then drives a real
+# session (summon, two conversation turns) via the debug hooks and asserts on
+# the trace log. Catches dead-capture / hung-turn / re-arm regressions that
+# unit tests can't. Speaks through your speakers; needs a Gemini key.
+smoke: release
+	./scripts/smoke.sh .build/Aria.app
+
+# Guard: the WMO flag must be present in BOTH places that build release binaries.
+# If either check fails, someone dropped `-no-whole-module-optimization` and release
+# builds will crash on the first tap of any SwiftUI control (Swift 6.3 / macOS 26
+# actor-isolation miscompile). This is a build-config regression, not a code bug.
+verify-release:
+	@grep -q 'debug/$$(APP_NAME)' Makefile || \
+		{ echo "FAIL: release must bundle the DEBUG binary — release-config builds crash on first tap on macOS 26.3.1 (see release target comment)"; exit 1; }
+	@grep -q -- '-no-whole-module-optimization' Package.swift || \
+		{ echo "FAIL: Package.swift lost -no-whole-module-optimization (defense if someone ships release-config again)"; exit 1; }
+	@echo "verify-release OK: shipping debug-config binary (26.3.1 tap-crash mitigation)"
 
 # Package the signed app into a distributable .dmg (drag-to-Applications layout).
 # Works with any identity, but only a notarized build (see `notarize`) opens without

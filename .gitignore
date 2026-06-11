@@ -21,3 +21,7 @@ Resources/AppIcon.iconset/
 Resources/icon-1024.png
 site/node_modules/
 site/dist/
+
+# Remotion launch video
+video/node_modules/
+video/out/

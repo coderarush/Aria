@@ -30,11 +30,8 @@ actor LongTermMemory {
     }
 
     static func defaultFileURL() -> URL {
-        let base = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Aria", isDirectory: true)
-        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        return base.appendingPathComponent("memory.json")
+        PersistencePaths.applicationSupportBaseDirectory()
+            .appendingPathComponent("memory.json")
     }
 
     /// Remember a fact; ignores near-duplicates (same normalized text).

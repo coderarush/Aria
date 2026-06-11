@@ -49,6 +49,17 @@ struct AgentResult: Equatable {
     }
 }
 
+/// Scope enforcement for sub-agent tool use. An agent's `allowedTools` is a
+/// hard allowlist (empty = unrestricted, per the protocol contract); the
+/// orchestrator consults this before running any action an agent requests, so
+/// a confused or manipulated model can't route e.g. `shell` through a
+/// web-research agent.
+enum SubAgentPolicy {
+    static func permits(allowedTools: [String], tool: String) -> Bool {
+        allowedTools.isEmpty || allowedTools.contains(tool)
+    }
+}
+
 /// Registry of available sub-agents, keyed by `name`.
 actor SubAgentRegistry {
     private var agents: [String: SubAgent] = [:]

@@ -1,0 +1,7 @@
+{
+  "brief": "Today: standup at 9:30, code review for the auth PR is waiting, and the v2 release branch is due Thursday. Yesterday you fixed the websocket reconnect — the flaky test is still open.",
+  "standup": "For standup: yesterday you fixed the websocket reconnect and reviewed two PRs. Today the plan is the flaky test and the v2 release branch. No blockers logged.",
+  "resume": "You were on the payments refactor — last edit was StripeAdapter.swift, the failing test is testRetryOnTimeout, and your note says 'the mock clock is the problem'.",
+  "focus": "Developer focus is on: VS Code and Terminal open, Messages and Mail closed. The payments refactor is loaded — testRetryOnTimeout is where you stopped.",
+  "timeline": "Today: the reconnect fix shipped at 11, three PRs reviewed, the flaky test isolated, and 14 commits on the release branch."
+}

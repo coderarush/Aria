@@ -5,7 +5,7 @@ import SwiftUI
 /// `LSUIElement = true`, so there is no Dock icon — the ⬡ menu-bar item is the
 /// only chrome.
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var statusItem: NSStatusItem?
     private let controller = AriaController()
@@ -73,20 +73,93 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.title = "⬡"
+        item.button?.image = Self.blobStatusImage()
         item.button?.toolTip = "Aria"
 
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "Summon Aria", action: #selector(summon), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ","))
-        menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Quit Aria", action: #selector(quit), keyEquivalent: "q"))
-        menu.items.forEach { $0.target = self }
+        menu.delegate = self   // rebuilt on every open (status line, mute state)
         item.menu = menu
         statusItem = item
     }
 
-    @objc private func summon() { controller.toggleManually() }
+    /// Rebuild the status menu each time it opens — live status, current mute
+    /// state, and the standard actions.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+
+        let summonItem = NSMenuItem(title: "Talk to Aria", action: #selector(summon), keyEquivalent: " ")
+        summonItem.keyEquivalentModifierMask = [.option]
+        menu.addItem(summonItem)
+        let typeItem = NSMenuItem(title: "Type to Aria…", action: #selector(typeToAria), keyEquivalent: " ")
+        typeItem.keyEquivalentModifierMask = [.option, .shift]
+        menu.addItem(typeItem)
+
+        menu.addItem(.separator())
+
+        if let status = cachedStatusLine {
+            let statusItem = NSMenuItem(title: status, action: nil, keyEquivalent: "")
+            statusItem.isEnabled = false
+            menu.addItem(statusItem)
+        }
+        let mute = NSMenuItem(
+            title: controller.isListeningPaused ? "Resume Listening" : "Pause Listening",
+            action: #selector(toggleListening), keyEquivalent: "")
+        menu.addItem(mute)
+
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ","))
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Quit Aria", action: #selector(quit), keyEquivalent: "q"))
+        menu.items.forEach { $0.target = self }
+
+        // Refresh the status line for NEXT open (menuNeedsUpdate is sync).
+        Task { @MainActor [weak self] in
+            self?.cachedStatusLine = await self?.controller.lastActivityLine() ?? nil
+        }
+    }
+
+    private var cachedStatusLine: String?
+
+    @objc private func toggleListening() {
+        controller.isListeningPaused.toggle()
+        statusItem?.button?.appearsDisabled = controller.isListeningPaused
+    }
+
+    /// Aria's blob as the menu bar icon — same layered-sine outline as the orb
+    /// and the website. A template image, so macOS renders it ink-black on a
+    /// light menu bar and white on a dark one.
+    private static func blobStatusImage() -> NSImage {
+        let size: CGFloat = 18
+        let img = NSImage(size: NSSize(width: size, height: size), flipped: false) { _ in
+            let n = 11
+            var pts: [CGPoint] = []
+            for i in 0..<n {
+                let a = CGFloat(i)
+                let w = 0.6 * sin(0.6 + a * 0.9) + 0.3 * sin(1.02 + a * 1.7) + 0.1 * sin(0.3 + a * 2.3)
+                let r = size * 0.42 * (1 + 0.10 * w)
+                let ang = 2 * .pi * a / CGFloat(n) - .pi / 2
+                pts.append(CGPoint(x: size / 2 + cos(ang) * r, y: size / 2 + sin(ang) * r))
+            }
+            let path = NSBezierPath()
+            func pt(_ i: Int) -> CGPoint { pts[((i % n) + n) % n] }
+            path.move(to: pt(0))
+            for i in 0..<n {
+                let p0 = pt(i - 1), p1 = pt(i), p2 = pt(i + 1), p3 = pt(i + 2)
+                let c1 = CGPoint(x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6)
+                let c2 = CGPoint(x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6)
+                path.curve(to: p2, controlPoint1: c1, controlPoint2: c2)
+            }
+            path.close()
+            NSColor.black.setFill()
+            path.fill()
+            return true
+        }
+        img.isTemplate = true
+        return img
+    }
+
+    @objc private func summon() { controller.summonAria() }
+    @objc private func typeToAria() { controller.showTypePanel() }
     @objc private func quit() { NSApp.terminate(nil) }
 
     private var settingsWindow: NSWindow?
@@ -114,6 +187,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// One-time migration: if a key sits in ~/Aria/.apikey and the Keychain is
     /// empty, move it into the Keychain.
     private func migrateAPIKeyIfNeeded() {
+        // One-shot, and NEVER on the main thread at launch: the first Keychain
+        // access after a re-sign can block for minutes on the ACL check — this
+        // single call was the "Aria takes 1-2 minutes to come alive" hang.
+        let flag = "app.apikeyMigrationDone"
+        guard !UserDefaults.standard.bool(forKey: flag) else { return }
+        DispatchQueue.global(qos: .utility).async {
+            defer { UserDefaults.standard.set(true, forKey: flag) }
+            Self.migrateAPIKeyNow()
+        }
+    }
+
+    nonisolated private static func migrateAPIKeyNow() {
         guard KeychainManager.read(account: KeychainKey.geminiAPIKey) == nil else { return }
         let legacy = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Aria/.apikey")

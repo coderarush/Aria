@@ -106,7 +106,9 @@ final class VoiceEngine: NSObject {
     static func synthesizeGemini(text: String, voice: String, apiKey: String) async throws -> Data {
         guard !apiKey.isEmpty else { throw NSError(domain: "AriaTTS", code: 401) }
         let model = "gemini-2.5-flash-preview-tts"
-        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent?key=\(apiKey)")!
+        guard let url = GeminiClient.geminiURL(model: model, apiKey: apiKey) else {
+            throw NSError(domain: "AriaTTS", code: -3)
+        }
         let payload: [String: Any] = [
             "contents": [["parts": [["text": text]]]],
             "generationConfig": [
@@ -134,11 +136,11 @@ final class VoiceEngine: NSObject {
     }
 
     /// Wrap raw little-endian 16-bit mono PCM in a minimal WAV container.
-    static func wavData(fromPCM pcm: Data, sampleRate: Int = 24000, channels: Int = 1, bits: Int = 16) -> Data {
+    nonisolated static func wavData(fromPCM pcm: Data, sampleRate: Int = 24000, channels: Int = 1, bits: Int = 16) -> Data {
         let byteRate = sampleRate * channels * bits / 8
         let blockAlign = channels * bits / 8
         var h = Data()
-        func str(_ s: String) { h.append(s.data(using: .ascii)!) }
+        func str(_ s: String) { h.append(contentsOf: s.utf8) }
         func u32(_ v: UInt32) { var x = v.littleEndian; withUnsafeBytes(of: &x) { h.append(contentsOf: $0) } }
         func u16(_ v: UInt16) { var x = v.littleEndian; withUnsafeBytes(of: &x) { h.append(contentsOf: $0) } }
         str("RIFF"); u32(UInt32(36 + pcm.count)); str("WAVE")

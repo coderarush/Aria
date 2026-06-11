@@ -38,6 +38,16 @@ actor AgentOrchestrator {
         confirmationHandler = handler
     }
 
+    /// The shared model client (briefing composer reuses its rotation/pacing).
+    var geminiClient: GeminiClient { gemini }
+
+    /// Plan-preview hook (V10): consulted before a foreground task executes its
+    /// parsed plan. nil (and silent/background runs) = approve everything.
+    var planApprovalHandler: (@Sendable ([TaskStep]) async -> Bool)?
+    func setPlanApprovalHandler(_ handler: @escaping @Sendable ([TaskStep]) async -> Bool) {
+        planApprovalHandler = handler
+    }
+
     func handle(command: String, privacyMode: Bool = false) async -> AriaResponse {
         Log.agent.info("Handling command: \(command, privacy: .public)")
 
@@ -128,11 +138,19 @@ actor AgentOrchestrator {
         let agentName = action.tool == "agent" ? (action.input["name"] ?? "") : action.tool
         if let agent = await subAgents.agent(named: agentName) {
             let task = action.input["task"] ?? priorOutput
+            let allowed = agent.allowedTools
             let ctx = AgentContext(
                 gemini: gemini, registry: registry, factory: factory,
                 system: context,
                 runAction: { [weak self] act, prior in
-                    await self?.execute(act, priorOutput: prior, context: context)
+                    // Hard scope: an agent may only run its declared tools.
+                    guard SubAgentPolicy.permits(allowedTools: allowed, tool: act.tool) else {
+                        let denied = ToolResult.fail("\(act.tool) isn't permitted for \(agentName).")
+                        await ActivityLog.shared.record(
+                            tool: act.tool, detail: "blocked: outside \(agentName) scope", result: denied)
+                        return denied
+                    }
+                    return await self?.execute(act, priorOutput: prior, context: context)
                         ?? .fail("orchestrator gone")
                 })
             let result = await agent.execute(task: task, context: ctx)
@@ -222,7 +240,7 @@ actor AgentOrchestrator {
     /// Run a multi-step autonomous task. Emits `TaskEvent` values as each planning
     /// and execution step completes. Hooks into the same `execute` + `confirmationHandler`
     /// plumbing used by the normal command path.
-    private func makeAutonomyEngine() async -> AutonomyEngine {
+    private func makeAutonomyEngine(silent: Bool = false) async -> AutonomyEngine {
         // currentSystemContext() is @MainActor, so we hop to it explicitly.
         let context = await MainActor.run { Self.currentSystemContext() }
         return AutonomyEngine(
@@ -235,6 +253,10 @@ actor AgentOrchestrator {
             },
             confirm: { [weak self] prompt in
                 await self?.confirmationHandler?(prompt) ?? false
+            },
+            approvePlan: { [weak self] steps in
+                guard !silent, let handler = await self?.planApprovalHandler else { return true }
+                return await handler(steps)
             })
     }
 
@@ -250,8 +272,23 @@ actor AgentOrchestrator {
         await makeAutonomyEngine().resume(persisted, emit: emit)
     }
 
-    func runTask(goal: String, emit: @escaping @Sendable (TaskEvent) -> Void) async {
-        await makeAutonomyEngine().run(goal: goal, emit: emit)
+    /// `silent: true` (background agents) skips the plan preview — nothing may
+    /// speak or wait on the user from a background run.
+    func runTask(goal: String, silent: Bool = false,
+                 emit: @escaping @Sendable (TaskEvent) -> Void) async {
+        await makeAutonomyEngine(silent: silent).run(goal: goal, emit: emit)
+    }
+
+    /// Run a pre-built plan (V11 P8/P12) — deterministic steps, no model
+    /// planning, no plan-preview gate (the user invoked it by name).
+    func runPlan(goal: String, steps: [TaskStep],
+                 emit: @escaping @Sendable (TaskEvent) -> Void) async {
+        await makeAutonomyEngine(silent: true)
+            .runPrebuilt(goal: goal, steps: steps, emit: emit)
+    }
+
+    func runRecipe(_ recipe: Recipe, emit: @escaping @Sendable (TaskEvent) -> Void) async {
+        await runPlan(goal: recipe.name, steps: recipe.taskSteps(), emit: emit)
     }
 
     /// Streaming answer path (Phase 2: text + native function-calling loop).
@@ -276,22 +313,31 @@ actor AgentOrchestrator {
         async let specsLoad = registry.specs()
         async let recalledLoad = longTerm.recall(for: command, limit: 4)   // relevant long-term facts
 
-        let screenshot = await screenshotLoad
-        var history = Array(await historyLoad.suffix(8))
-        let context = await contextLoad
-        let specs = await specsLoad
-        let recalled = await recalledLoad
+        Log.trace("turn: setup begin")
+        let screenshot = await screenshotLoad;  Log.trace("turn: screenshot ok")
+        var history = Array(await historyLoad.suffix(8)); Log.trace("turn: history ok")
+        let context = await contextLoad;        Log.trace("turn: context ok")
+        let specs = await specsLoad;            Log.trace("turn: specs ok")
+        let recalled = await recalledLoad;      Log.trace("turn: recall ok")
         var transcript = command
         if !recalled.isEmpty {
             let known = recalled.map { "- \($0.text)" }.joined(separator: "\n")
             transcript = "(Relevant things you remember about me:\n\(known)\n)\n\n\(command)"
         }
         var turnScreenshot = screenshot
+        // V11 P10/P11: "explain this" with nothing selected — the deixis can
+        // only mean what's visible, so attach a late screenshot for this turn.
+        if turnScreenshot == nil, !privacyMode, ModelRouter.bareDeixis(command),
+           context.selection.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            turnScreenshot = try? await screen.capturePrimaryJPEG()
+            Log.trace("turn: deixis screenshot \(turnScreenshot == nil ? "failed" : "ok")")
+        }
         var full = ""
         let maxRounds = 4
         do {
             for _ in 0..<maxRounds {
                 var calls: [(name: String, args: [String: String])] = []
+                Log.trace("turn: streaming…")
                 let stream = await gemini.streamSend(transcript: transcript, screenshotJPEG: turnScreenshot,
                                                      history: history, context: context, toolCatalog: "", specs: specs,
                                                      preferredModel: ModelRouter.model(for: command))

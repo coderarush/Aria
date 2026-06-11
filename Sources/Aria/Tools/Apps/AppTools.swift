@@ -44,11 +44,22 @@ struct BrowserTool: AriaTool {
 
     func run(input: [String: String]) async throws -> ToolResult {
         guard let raw = input["url"], !raw.isEmpty else { throw ToolError.missingInput("url") }
-        let normalized = raw.hasPrefix("http") ? raw : "https://\(raw)"
-        guard let url = URL(string: normalized) else { return .fail("Invalid URL: \(raw)") }
+        guard let url = Self.normalizedURL(raw) else { return .fail("Invalid URL: \(raw)") }
         return await MainActor.run {
             NSWorkspace.shared.open(url)
-            return .ok("Opened \(normalized)")
+            return .ok("Opened \(url.absoluteString)")
         }
+    }
+
+    static func normalizedURL(_ raw: String) -> URL? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let withScheme = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
+        if let url = URL(string: withScheme) { return url }
+        let escaped = withScheme
+            .replacingOccurrences(of: " ", with: "%20")
+            .replacingOccurrences(of: "\n", with: "")
+            .replacingOccurrences(of: "\r", with: "")
+        return URL(string: escaped)
     }
 }

@@ -29,7 +29,10 @@ actor OpenAICompatibleClient {
     }
 
     private func authorizedRequest(path: String) -> URLRequest? {
-        guard let url = URL(string: baseURL + path) else { return nil }
+        guard let url = Self.requestURL(baseURL: baseURL, path: path) else {
+            Log.trace("\(label): invalid baseURL/path combination (\(baseURL)\(path))")
+            return nil
+        }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.timeoutInterval = 30   // fail fast to the next fallback provider, don't hang
@@ -38,6 +41,26 @@ actor OpenAICompatibleClient {
             req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         }
         return req
+    }
+
+    /// Build a request URL from a configured base URL and API path.
+    /// Returns nil for malformed configuration rather than producing a bad URL.
+    static func requestURL(baseURL: String, path: String) -> URL? {
+        guard let base = URL(string: baseURL),
+              base.scheme != nil,
+              base.host != nil,
+              var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        let suffix = path.hasPrefix("/") ? String(path.dropFirst()) : path
+        if components.path.isEmpty {
+            components.path = "/" + suffix
+        } else if components.path.hasSuffix("/") {
+            components.path += suffix
+        } else {
+            components.path += "/" + suffix
+        }
+        return components.url
     }
 
     /// Plain text generation (planner, agents, synthesis).

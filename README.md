@@ -11,6 +11,11 @@ screen, and operates your apps by voice — she does the task, she doesn't just 
 [Build from source](#build-from-source) ·
 [How it works](#how-it-works)
 
+**V10 pre-release (launch candidate)** — say **“brief me”** for your daily briefing, ask
+*“what were we working on yesterday?”*, preview her plan before bigger tasks, and summon a
+Raycast-grade palette with ⌥⇧Space — on top of V9's local-first intelligence, knowledge
+engine, and background agents. Testers welcome.
+
 </div>
 
 ---
@@ -53,7 +58,33 @@ Google's Gemini free tier with your own key.
 - **Honest + safe.** She confirms before anything destructive (Send / Pay / Delete) and shows
   a visible “Aria is controlling your Mac” indicator with a Stop button while she drives.
 - **Alive presence.** A single organic, morphing orb anchored to the corner: calm when idle,
-  swelling with your voice, swirling while she thinks, breathing while she speaks.
+  swelling with your voice, swirling while she thinks, breathing while she speaks. Soft
+  synthesized chimes mark listening, task start, done, and errors — cancelled out of the mic
+  by the echo canceller so she never hears herself.
+
+### New in V9 (pre-release)
+
+- **Local-first intelligence.** Planning, agents, knowledge and everyday work run on a local
+  model (Ollama) by default — private, free, no quota — with automatic Gemini fallback the
+  moment the local model can't deliver. Live conversation can go local too (Settings toggle;
+  needs a fast instruct model such as `llama3.1:8b`). Vision and deep research stay on the
+  cloud model.
+- **Knowledge engine.** Point her at folders of notes, PDFs, documents and code
+  (Settings → Knowledge). She indexes them on-device — incremental, never uploaded — and
+  answers “what did the investor say about pricing?” from *your* files, with sources.
+- **Background agents.** Set it once, let Aria handle it: a daily briefing at your hour, a
+  Downloads-folder watcher, or any recurring goal (Settings → Agents). Runs are silent, use
+  the same safety gates, always notify, and land in a visible history.
+- **Push-to-talk & type.** `⌥Space` to talk without the wake word, `⌥⇧Space` for a floating
+  type-to-Aria field — both coexist with “Hey Aria”. (Needs Accessibility, granted once.)
+- **Proactive presence.** She anticipates: a calendar event coming up or a learned routine
+  makes the orb glow softly. Glance or wake her and she leads with the offer; say “yes” or
+  just ignore it. Suppresses anything you dismiss repeatedly.
+- **Transparency.** Settings → Transparency shows what she sees right now, which model
+  answered and why (the local/cloud router's reasons), and what ran in the background. No
+  black boxes.
+- **Make her yours.** Orb size and position, personality style (Balanced / Warm / Witty /
+  Concise), interaction sounds, quiet hours — all in Settings.
 
 ## How it works
 
@@ -85,7 +116,7 @@ free Gemini key in Settings → API Key.
 ```bash
 git clone https://github.com/coderarush/Aria.git
 cd Aria
-make test       # 195 unit tests
+make test       # 335 unit tests
 make release    # assemble Aria.app (ad-hoc signed)
 open .build/Aria.app
 ```
@@ -93,6 +124,19 @@ open .build/Aria.app
 Requirements: **macOS 14+**, **Xcode 16+** (Swift 6). For permissions that persist across
 rebuilds, run `make cert` once (creates a stable self-signed identity). `make dmg` packages a
 distributable disk image.
+
+### Demo mode (press & testing)
+
+Want to exercise the full product — orb, voice, tools UI — without any API key?
+
+```bash
+ARIA_DEMO_MODE=1 /Applications/Aria.app/Contents/MacOS/Aria
+```
+
+Model replies are scripted and deterministic (ask about *the meeting*, *downloads*,
+*pricing*, or for *a joke*); everything else is the real engine. `ARIA_DEMO_SCRIPT=path.json`
+swaps in your own script — this is also what powers the repeatable demo recordings and the
+headless smoke suite (`make smoke`).
 
 ## Configuration
 
@@ -144,18 +188,16 @@ tests cover the model protocol, agent loop, tool declarations, autonomy, compute
 memory, the activity log, undo, resumable-task journaling, context relevance, voice chunking,
 and the wake/barge state machines.
 
-### Release builds — disable whole-module optimization
+### Release builds ship the debug configuration — on purpose
 
-**Build release with `-no-whole-module-optimization` (already wired into `make release` and
-`Package.swift`).** On Swift 6.3 / macOS 26.3, WMO miscompiles SwiftUI's actor-isolation:
-an optimized release build crashes on the **first tap of any SwiftUI control** (e.g. the
-Settings sidebar) inside `swift_task_isCurrentExecutorWithFlags` → `objc_msgSend`
-(`EXC_BAD_ACCESS`, null executor identity). Per-file `-O` is unaffected — only the
-cross-module pass breaks it, so we keep optimization and just turn WMO off; the cost is
-negligible here (the only hot real-time path, echo cancellation, is C). Debug builds are not
-WMO and never hit it. If this crash returns, the WMO flag was dropped from the build — not a
-code regression. (The runtime env var `SWIFT_IS_CURRENT_EXECUTOR_LEGACY_MODE_OVERRIDE=legacy`
-does **not** fix it in this toolchain; don't reach for it.)
+On macOS 26.3.x the Swift optimizer miscompiles SwiftUI's actor isolation: optimized
+release builds crash on the **first tap of any SwiftUI control** inside
+`swift_task_isCurrentExecutorWithFlags` (v8 hit it via whole-module optimization,
+EXC_BAD_ACCESS; on 26.3.1 it reproduces even with WMO off and `-Onone`). The debug
+configuration has never crashed, so `make release` bundles the debug binary until the
+toolchain bug is fixed — `make verify-release` guards the choice. The cost is negligible:
+the app is network/disk-bound and the only hot real-time path (echo cancellation) is C.
+If a first-tap crash ever returns, check the build flags before suspecting code.
 
 ## Privacy
 

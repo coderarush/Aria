@@ -28,4 +28,15 @@ final class LicenseManagerTests: XCTestCase {
         XCTAssertTrue(LicenseManager.parseGumroad(Data(#"{"success":true,"purchase":{}}"#.utf8)))
         XCTAssertFalse(LicenseManager.parseGumroad(Data("garbage".utf8)))
     }
+
+    func testFormBodyEncodesReservedCharacters() {
+        let data = LicenseManager.formBody(fields: [
+            "product_id": "abc&123",
+            "license_key": "k=1 & 2"
+        ])
+        let body = String(decoding: data, as: UTF8.self)
+        XCTAssertTrue(body.contains("product_id=abc%26123"))
+        XCTAssertTrue(body.contains("license_key=k%3D1%20%26%202"))
+        XCTAssertFalse(body.contains("&123"))
+    }
 }

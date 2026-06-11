@@ -58,9 +58,10 @@ actor ActivityLog {
 
     /// Record one action's outcome. Cheap: keeps the last `cap` entries and writes
     /// the (small) file atomically.
-    func record(tool: String, detail: String, result: ToolResult) {
+    func record(tool: String, detail: String, result: ToolResult, at date: Date = Date()) {
         load()
         let entry = ActivityEntry(
+            date: date,
             tool: tool,
             detail: ActivityEntry.tidy(detail),
             outcome: ActivityEntry.outcome(for: result),
@@ -73,6 +74,12 @@ actor ActivityLog {
     func recent(_ limit: Int = 50) -> [ActivityEntry] {
         load()
         return Array(entries.suffix(limit).reversed())
+    }
+
+    /// Chronological entries in [from, to) — feeds the Timeline (V11 P6).
+    func entries(from: Date, to: Date) -> [ActivityEntry] {
+        load()
+        return entries.filter { $0.date >= from && $0.date < to }
     }
 
     func clear() {
@@ -89,10 +96,8 @@ actor ActivityLog {
     }
 
     static func defaultURL() -> URL {
-        let base = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSTemporaryDirectory())
-        return base.appendingPathComponent("Aria/activity.json")
+        PersistencePaths.applicationSupportBaseDirectory()
+            .appendingPathComponent("activity.json")
     }
 
     // MARK: - Persistence
