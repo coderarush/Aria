@@ -155,6 +155,9 @@ actor AutonomyEngine {
             // Recover (alternative action) for anything still failing except a decline —
             // a missing-input CAN be fixed by a different action, a decline must not be.
             if !result.success, !result.wasDeclined {
+                // V11 P16: recovery is visible, never silent — the panel and the
+                // narration both say a different approach is being tried.
+                emit(.narrate("That didn't work — trying another way."))
                 result = await recover(step: step, lastOutput: lastOutput, material: material, goal: goal)
             }
 

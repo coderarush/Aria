@@ -1,12 +1,12 @@
-# Aria — V9 Pre-Release Working Context
+# Aria — V11 Launch Candidate Working Context
 
-**Status:** V9 pre-release on branch `aria-v9` (v8 shipped, merged to main).
+**Status:** V11 launch candidate on branch `aria-v11` (V10 pre-release shipped
+on `aria-v9`; v8 on main).
 **Governing docs (read these for product direction):**
+- `docs/v11/ARIA_V11_MASTER.md` — V11 launch-candidate constitution (21 priorities)
+- `docs/v10/ARIA_V10_MASTER.md` — V10 directive + status
 - `docs/v9/ARIA_V9_MASTER.md` — product + engineering constitution
 - `docs/v9/ARIA_WEBSITE_V9.md` — website design/motion/marketing constitution
-- `docs/v9/ROADMAP.md` — Phase A–D implementation roadmap (A = stabilize, B =
-  provider abstraction + local-first, C = knowledge engine/background agents/
-  interaction/transparency, D = demo mode + website/launch)
 
 ## What Aria is
 Execution-first intelligence layer for macOS. Turns user *intent* into *completed work*.
@@ -53,6 +53,24 @@ triggers, silent runs through the autonomy engine + Safety gates, completion
 always notifies, Settings → Agents), push-to-talk ⌥Space + Type-to-Aria ⌥⇧Space
 (WakeWordEngine.summon, HotkeyManager Carbon, CommandInputPanel), Transparency
 tab (context inspector / router dashboard / workflow runs).
+**V11 (all 21 priorities + FRE, 428 tests):** Project Memory 2.0 (WorkJournal
+project tags + ProjectTagger inference, recall_work {project}), Timeline
+(Core/Memory/Timeline.swift — aggregation over WorkJournal+ActivityLog, `timeline`
+tool, Transparency section), Briefing V2 (projects+notes inputs, spoken scheduled
+option, `daily_briefing` tool), proactive Downloads/Session signal providers,
+local-first setup (HardwareProfiler sysctl tiers → qwen3 4b/8b/14b,
+ModelInstaller ollama pull w/ progress + status machine, LocalModelHealth wired
+into LocalFirstRouter, LocalModelSetupView in Settings+onboarding), watcher
+triggers (.mailMatched/.urlChanged — WatcherCheck snapshot/hash/watermark
+precheck, AgentStore.touch quiet skips), Recipes+Packs (Core/Recipes/ —
+RecipeStore, AutonomyEngine.runPrebuilt deterministic plans, Founder/Student/
+Developer packs, PackInstaller idempotent, Settings → Recipes), vision deixis
+(ModelRouter visual hints eager-capture; bareDeixis late screenshot when
+selection empty), Focus Mode (FocusMode presets + FocusSession bracket +
+quit_app tool, "enter/end focus mode" intents), 8-step FRE onboarding
+(permissions → local model → key → persona+pack → first briefing), settings
+search (Section.keywords), recovery narration, persona demo scripts
+(scripts/demos/*.json for ARIA_DEMO_SCRIPT).
 
 ## Safety & reliability
 - Approval gates: send/pay/delete/external comms. Activity log: every action visible.

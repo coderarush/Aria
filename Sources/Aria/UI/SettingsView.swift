@@ -58,6 +58,31 @@ struct SettingsView: View {
              transparency = "Transparency",
              apiKey = "API Key", memory = "Memory", activity = "Activity", tools = "Tools", dynamic = "Dynamic", brain = "Brain", mirror = "Mirror", crew = "Crew", license = "License"
         var id: String { rawValue }
+
+        /// Searchable terms beyond the tab name (V11 P18) — "wake", "hotkey",
+        /// "local model" etc. find the right tab even when its name doesn't say.
+        var keywords: String {
+            switch self {
+            case .general:      return "appearance orb blob theme accent launch login hotkey shortcut wake phrase"
+            case .voice:        return "speech speak gemini voices tts sound"
+            case .conversation: return "listening barge interrupt echo silence timeout microphone"
+            case .proactive:    return "suggestions quiet hours calendar downloads session anticipate"
+            case .knowledge:    return "index folders documents search pdf notes on-device"
+            case .agents:       return "background scheduled briefing watcher inbox mail page automation"
+            case .recipes:      return "workflow pack persona founder student developer morning startup focus"
+            case .transparency: return "context inspector router dashboard timeline history what aria sees"
+            case .apiKey:       return "gemini keys groq cerebras openrouter local model ollama qwen fallback"
+            case .memory:       return "remember facts long-term"
+            case .activity:     return "log actions audit trace"
+            case .tools:        return "permissions enable disable"
+            case .dynamic:      return "generated code scripts"
+            case .brain:        return "learning patterns habits on-device"
+            case .mirror:       return "bridge companion stream network"
+            case .crew:         return "sub-agents specialists orion lyra atlas nova comet"
+            case .license:      return "purchase activate trial key"
+            }
+        }
+
         var icon: String {
             switch self {
             case .general:      return "gearshape"
@@ -82,12 +107,32 @@ struct SettingsView: View {
     }
 
     @State private var selection: Section = .general
+    @State private var query = ""
+
+    /// V11 P18: sections whose name or keywords match the search.
+    private var visibleSections: [Section] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return Section.allCases }
+        return Section.allCases.filter {
+            $0.rawValue.lowercased().contains(q) || $0.keywords.contains(q)
+        }
+    }
 
     var body: some View {
         HStack(spacing: 0) {
+            VStack(spacing: 0) {
+            HStack(spacing: 5) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                TextField("Search settings", text: $query)
+                    .textFieldStyle(.plain).font(.system(size: 12))
+            }
+            .padding(.horizontal, 8).padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 7).fill(Color.secondary.opacity(0.08)))
+            .padding(.horizontal, 8).padding(.top, 8)
             ScrollView {
                 VStack(spacing: 2) {
-                    ForEach(Section.allCases) { section in
+                    ForEach(visibleSections) { section in
                         Button {
                             selection = section
                         } label: {
@@ -106,6 +151,7 @@ struct SettingsView: View {
                     }
                 }
                 .padding(8)
+            }
             }
             .frame(width: 190)
 

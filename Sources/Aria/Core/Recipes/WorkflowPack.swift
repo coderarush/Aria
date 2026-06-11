@@ -18,6 +18,11 @@ struct WorkflowPack: Codable, Equatable, Sendable, Identifiable {
 
     static let builtins: [WorkflowPack] = [founder, student, developer]
 
+    /// Pack for a persona name ("Student" → student pack); nil for unknown.
+    static func forPersona(_ persona: String) -> WorkflowPack? {
+        builtins.first { $0.persona.lowercased() == persona.lowercased() }
+    }
+
     static let founder = WorkflowPack(
         key: "founder",
         persona: "Founder",

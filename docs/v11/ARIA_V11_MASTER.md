@@ -740,3 +740,28 @@ Immediate thought:
 
 Every decision should move Aria closer to that future.
 
+
+---
+
+# V11 STATUS (2026-06-11)
+
+All 21 priorities + the first-run experience implemented on branch aria-v11,
+in three phases (Preserve → Improve → Expand; zero feature removals):
+
+- v11-1 (e9d9e63): daily habit loop — project memory 2.0, timeline,
+  briefing v2, downloads/session proactive signals
+- v11-2 (28b6754): differentiation — local-first setup (hardware detect →
+  recommend → install → health), mail/url watchers, recipes + persona packs,
+  vision deixis, focus mode
+- v11-3: FRE onboarding (permissions → model → persona → pack → first
+  briefing), settings search, recovery narration, persona demo scripts
+
+Already complete before V11 (extended, not rebuilt): workflow planning engine
+(P3), premium surface (P2, V10-B), voice system + conversations (P14/P15 —
+frozen by design), multi-agent visibility (P16 core), demo mode (P20 infra),
+launch film (P21 — extend with new-feature beats before launch).
+
+Gate results: 428 tests green (359 at V10), make smoke 10/10, verify-release OK.
+
+Remaining for public launch (user decisions): notarization, tester week,
+waitlist/domain, film v3 with Timeline/Vision/Focus beats.
