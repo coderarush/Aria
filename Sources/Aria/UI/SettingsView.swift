@@ -54,6 +54,7 @@ struct SettingsView: View {
     enum Section: String, CaseIterable, Identifiable {
         case general = "General", voice = "Voice", conversation = "Conversation",
              proactive = "Proactive", knowledge = "Knowledge", agents = "Agents",
+             recipes = "Recipes",
              transparency = "Transparency",
              apiKey = "API Key", memory = "Memory", activity = "Activity", tools = "Tools", dynamic = "Dynamic", brain = "Brain", mirror = "Mirror", crew = "Crew", license = "License"
         var id: String { rawValue }
@@ -65,6 +66,7 @@ struct SettingsView: View {
             case .proactive:    return "bell.badge"
             case .knowledge:    return "books.vertical"
             case .agents:       return "clock.arrow.2.circlepath"
+            case .recipes:      return "list.bullet.clipboard"
             case .transparency: return "eye"
             case .apiKey:       return "key"
             case .memory:       return "brain.head.profile"
@@ -127,6 +129,7 @@ struct SettingsView: View {
         case .proactive:    ProactiveSettingsTab()
         case .knowledge:    KnowledgeSettingsTab()
         case .agents:       AgentsSettingsTab()
+        case .recipes:      RecipesSettingsTab()
         case .transparency: TransparencyTab()
         case .apiKey:       APIKeyTab()
         case .memory:       MemorySettingsTab()
@@ -553,6 +556,8 @@ struct AgentsSettingsTab: View {
     @State private var agents: [BackgroundAgent] = []
     @State private var runs: [AgentRun] = []
     @State private var briefingHour = 9
+    @State private var mailQuery = ""
+    @State private var watchURL = ""
 
     var body: some View {
         TabHead(title: "Background Agents", subtitle: "Set it once. Let Aria handle it — silently, with every run visible here.")
@@ -577,6 +582,32 @@ struct AgentsSettingsTab: View {
                         goal: "Look at the newest files in my Downloads folder and organize them into sensible subfolders by type. Don't delete anything.",
                         trigger: .folderChanged(path: NSHomeDirectory() + "/Downloads")))
                 }.disabled(agents.contains { $0.name == "Downloads watcher" })
+                HStack {
+                    TextField("Watch inbox for… (e.g. investor)", text: $mailQuery)
+                    Button("Add") {
+                        let q = mailQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !q.isEmpty else { return }
+                        add(BackgroundAgent(
+                            name: "Inbox: \(q)",
+                            goal: "Mail matching “\(q)” arrived. Read what's new below, then notify me with a one-line summary of who wrote and what about.",
+                            trigger: .mailMatched(query: q)))
+                        mailQuery = ""
+                    }.disabled(mailQuery.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                HStack {
+                    TextField("Watch a web page… (https://…)", text: $watchURL)
+                    Button("Add") {
+                        let u = watchURL.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard u.hasPrefix("http") else { return }
+                        add(BackgroundAgent(
+                            name: "Page: \((URL(string: u)?.host ?? u))",
+                            goal: "The page I watch (\(u)) changed. Fetch it, figure out what's different or noteworthy, and notify me with a one-line summary.",
+                            trigger: .urlChanged(url: u)))
+                        watchURL = ""
+                    }.disabled(!watchURL.trimmingCharacters(in: .whitespaces).hasPrefix("http"))
+                }
+                Text("Watchers check quietly (inbox every 5 min, pages every 30) and only speak up when something actually changed.")
+                    .font(.caption2).foregroundStyle(.tertiary)
             }
 
             SSection("Your agents (\(agents.count))") {
@@ -635,6 +666,8 @@ struct AgentsSettingsTab: View {
         case .daily(let h, let m): return String(format: "Daily at %d:%02d", h, m)
         case .interval(let s): return "Every \(Int(s / 60)) min"
         case .folderChanged(let p): return "When \((p as NSString).abbreviatingWithTildeInPath) changes"
+        case .mailMatched(let q): return "When inbox mail matches “\(q)”"
+        case .urlChanged(let u): return "When \(u) changes"
         }
     }
 
@@ -657,6 +690,87 @@ struct AgentsSettingsTab: View {
     private func reload() async {
         agents = await AgentStore.shared.all()
         runs = await AgentStore.shared.recentRuns(20)
+    }
+}
+
+// MARK: Recipes (V11 P8+P17)
+
+struct RecipesSettingsTab: View {
+    @State private var recipes: [Recipe] = []
+    @State private var installedMessage = ""
+
+    var body: some View {
+        TabHead(title: "Recipes", subtitle: "Reusable workflows that run the same way every time. Say “run my morning startup”.")
+        SForm {
+            SSection("Workflow packs") {
+                ForEach(WorkflowPack.builtins) { pack in
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(pack.persona).font(.system(size: 12, weight: .semibold))
+                            Text(pack.summary).font(.caption2).foregroundStyle(.secondary)
+                            Text(pack.recipes.map(\.name).joined(separator: " · "))
+                                .font(.caption2).foregroundStyle(.tertiary)
+                        }
+                        Spacer()
+                        Button(installed(pack) ? "Reinstall" : "Install") {
+                            Task {
+                                await PackInstaller.install(pack)
+                                await reload()
+                                installedMessage = "\(pack.persona) pack installed."
+                                NotificationCenter.default.post(name: .ariaAgentsChanged, object: nil)
+                            }
+                        }
+                    }
+                    Divider()
+                }
+                if !installedMessage.isEmpty {
+                    Text(installedMessage).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+
+            SSection("Your recipes (\(recipes.count))") {
+                if recipes.isEmpty {
+                    Text("Install a pack above to get started. Recipes run their steps exactly as written — no improvising.")
+                        .font(.callout).foregroundStyle(.secondary)
+                } else {
+                    ForEach(recipes) { recipe in
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "list.bullet.clipboard")
+                                .font(.system(size: 11)).foregroundStyle(.secondary)
+                                .frame(width: 14).padding(.top, 2)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(recipe.name).font(.system(size: 12, weight: .semibold))
+                                Text(recipe.steps.map(\.summary).joined(separator: " → "))
+                                    .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                            }
+                            Spacer(minLength: 0)
+                            Button {
+                                remove(recipe)
+                            } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
+                        }
+                        Divider()
+                    }
+                    Text("Run one by voice (“run my meeting prep”) or from the command palette.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .task { await reload() }
+    }
+
+    private func installed(_ pack: WorkflowPack) -> Bool {
+        recipes.contains { $0.packKey == pack.key }
+    }
+
+    private func remove(_ recipe: Recipe) {
+        Task {
+            await RecipeStore.shared.remove(recipe.id)
+            await reload()
+        }
+    }
+
+    private func reload() async {
+        recipes = await RecipeStore.shared.all()
     }
 }
 
@@ -847,6 +961,7 @@ struct APIKeyTab: View {
             }
 
             SSection("Local model") {
+                LocalModelSetupView()
                 Toggle("Use a local model when everything else is out (Ollama)", isOn: $settings.localModelEnabled)
                 Toggle("Local-first: prefer the local model for everyday tasks", isOn: $settings.localFirstEnabled)
                 if settings.localModelEnabled || settings.localFirstEnabled {

@@ -88,8 +88,43 @@ final class AgentCoordinator {
     }
 
     private func run(_ agent: BackgroundAgent) async {
+        // V11 P7: watcher triggers precheck their source first — no change,
+        // no run, no noise. The lastRun/watermark bump happens via touch()
+        // so quiet skips never pollute run history.
+        var goal = agent.goal
+        switch agent.trigger {
+        case .mailMatched(let query):
+            let snapshot = await WatcherCheck.mailSnapshot(query: query)
+            switch WatcherCheck.evaluate(current: snapshot, watermark: agent.watermark) {
+            case .unavailable:
+                await store.touch(agent.id, at: Date()); return
+            case .primed(let wm):
+                await store.touch(agent.id, at: Date(), watermark: wm); return
+            case .unchanged:
+                await store.touch(agent.id, at: Date()); return
+            case .fired(let context, let wm):
+                await store.touch(agent.id, at: Date(), watermark: wm)
+                goal += "\n\nNew matching mail since the last check:\n\(String(context.prefix(1200)))"
+            }
+        case .urlChanged(let url):
+            let snapshot = await WatcherCheck.urlSnapshot(url)
+            switch WatcherCheck.evaluate(current: snapshot, watermark: agent.watermark) {
+            case .unavailable:
+                await store.touch(agent.id, at: Date()); return
+            case .primed(let wm):
+                await store.touch(agent.id, at: Date(), watermark: wm); return
+            case .unchanged:
+                await store.touch(agent.id, at: Date()); return
+            case .fired(_, let wm):
+                await store.touch(agent.id, at: Date(), watermark: wm)
+                goal += "\n\nThe watched page (\(url)) just changed."
+            }
+        default:
+            break
+        }
+
         Log.trace("agents: running '\(agent.name)'")
-        let (ok, summary) = await runner(agent.goal)
+        let (ok, summary) = await runner(goal)
         await store.markRun(agent.id, at: Date(), ok: ok, summary: summary)
         await WorkJournal.shared.record(kind: .agent, title: agent.name, outcome: summary, ok: ok)
         // Never silent: success or failure, the user can see what happened.

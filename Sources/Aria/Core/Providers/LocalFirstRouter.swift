@@ -77,13 +77,22 @@ struct LocalFirstRouter {
 
     /// Run the prompt on the local model. nil on any failure or empty output —
     /// the caller falls through to the cloud path, so local can never make Aria
-    /// less capable than cloud-only.
+    /// less capable than cloud-only. Outcomes feed LocalModelHealth (V11 P1).
     func tryLocal(prompt: String, temperature: Double) async -> String? {
         let p = provider()
-        guard let text = try? await p.generateText(prompt: prompt, temperature: temperature),
-              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        let started = Date()
+        do {
+            let text = try await p.generateText(prompt: prompt, temperature: temperature)
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                await LocalModelHealth.shared.record(ok: false, latency: 0, error: "empty output")
+                return nil
+            }
+            await LocalModelHealth.shared.record(ok: true, latency: Date().timeIntervalSince(started))
+            return text
+        } catch {
+            await LocalModelHealth.shared.record(ok: false, latency: 0,
+                                                 error: String("\(error)".prefix(120)))
             return nil
         }
-        return text
     }
 }

@@ -878,6 +878,24 @@ final class AriaController {
             return
         }
 
+        // V11 P12: focus mode bracket — enter opens/closes apps and starts the
+        // session; end recaps it from the timeline.
+        if let modeName = FocusMode.enterIntent(command) {
+            enterFocusMode(named: modeName)
+            return
+        }
+        if FocusMode.isEndIntent(command) {
+            endFocusMode()
+            return
+        }
+
+        // V11 P8: "run my morning startup" — recipe-style phrasing goes down
+        // the task path, where the recipe store gets first claim on the goal.
+        if Recipe.invocationLikely(command) {
+            runAutonomousTask(command)
+            return
+        }
+
         if IntentRouter.isTask(command) {
             runAutonomousTask(command)
             return
@@ -921,7 +939,41 @@ final class AriaController {
         }
     }
 
-    private func runAutonomousTask(_ goal: String, resume: Bool = false) {
+    /// V11 P12: enter a focus mode — start the session, then run its
+    /// deterministic plan (open the work apps, close the distractions).
+    private func enterFocusMode(named name: String) {
+        let mode = FocusMode.preset(named: name)
+        Task { await FocusSession.shared.begin(mode: mode.name) }
+        runAutonomousTask("\(mode.name.capitalized) focus", prebuiltSteps: mode.taskSteps())
+    }
+
+    /// V11 P12: end the focus session — recap from the timeline, journal it.
+    private func endFocusMode() {
+        islandViewModel.beginThinking()
+        currentTurnTask = Task { [weak self] in
+            guard let self else { return }
+            guard let record = await FocusSession.shared.end() else {
+                await MainActor.run { self.speakAndListen("There's no focus session running.") }
+                return
+            }
+            let now = Date()
+            let events = await Timeline().events(from: record.startedAt, to: now)
+            let minutes = max(1, Int(now.timeIntervalSince(record.startedAt) / 60))
+            let done = events.filter(\.ok).count
+            var recap = "Focus session over — \(minutes) minute\(minutes == 1 ? "" : "s")"
+            recap += done > 0 ? ", \(done) thing\(done == 1 ? "" : "s") completed." : "."
+            await WorkJournal.shared.record(kind: .task,
+                                            title: "\(record.mode.capitalized) focus session",
+                                            outcome: "\(minutes) min, \(done) completed", ok: true)
+            await MainActor.run {
+                self.islandViewModel.appendResponse(recap)
+                self.speakAndListen(recap)
+            }
+        }
+    }
+
+    private func runAutonomousTask(_ goal: String, resume: Bool = false,
+                                   prebuiltSteps: [TaskStep]? = nil) {
         taskActive = true
         playChime(.task)   // "rolling up sleeves" — a longer job is starting
         wakeEngine.isSuspended = true
@@ -990,6 +1042,13 @@ final class AriaController {
             }
             if resume {
                 await self.orchestrator.resumeTask(emit: handler)
+            } else if let steps = prebuiltSteps {
+                // V11 P12: focus mode (and other callers) hand a ready plan.
+                await self.orchestrator.runPlan(goal: goal, steps: steps, emit: handler)
+            } else if let recipe = await RecipeStore.shared.match(command: goal) {
+                // V11 P8: a named recipe runs its pre-built plan — same panel,
+                // same gates, no model planning.
+                await self.orchestrator.runRecipe(recipe, emit: handler)
             } else {
                 await self.orchestrator.runTask(goal: goal, emit: handler)
             }

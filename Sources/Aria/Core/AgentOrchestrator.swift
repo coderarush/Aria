@@ -279,6 +279,18 @@ actor AgentOrchestrator {
         await makeAutonomyEngine(silent: silent).run(goal: goal, emit: emit)
     }
 
+    /// Run a pre-built plan (V11 P8/P12) — deterministic steps, no model
+    /// planning, no plan-preview gate (the user invoked it by name).
+    func runPlan(goal: String, steps: [TaskStep],
+                 emit: @escaping @Sendable (TaskEvent) -> Void) async {
+        await makeAutonomyEngine(silent: true)
+            .runPrebuilt(goal: goal, steps: steps, emit: emit)
+    }
+
+    func runRecipe(_ recipe: Recipe, emit: @escaping @Sendable (TaskEvent) -> Void) async {
+        await runPlan(goal: recipe.name, steps: recipe.taskSteps(), emit: emit)
+    }
+
     /// Streaming answer path (Phase 2: text + native function-calling loop).
     /// Calls `onText` with each text delta; runs up to maxRounds agentic turns.
     func handleStreaming(command: String, privacyMode: Bool,
@@ -313,6 +325,13 @@ actor AgentOrchestrator {
             transcript = "(Relevant things you remember about me:\n\(known)\n)\n\n\(command)"
         }
         var turnScreenshot = screenshot
+        // V11 P10/P11: "explain this" with nothing selected — the deixis can
+        // only mean what's visible, so attach a late screenshot for this turn.
+        if turnScreenshot == nil, !privacyMode, ModelRouter.bareDeixis(command),
+           context.selection.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            turnScreenshot = try? await screen.capturePrimaryJPEG()
+            Log.trace("turn: deixis screenshot \(turnScreenshot == nil ? "failed" : "ok")")
+        }
         var full = ""
         let maxRounds = 4
         do {

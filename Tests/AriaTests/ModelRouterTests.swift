@@ -26,3 +26,22 @@ final class ModelRouterTests: XCTestCase {
         XCTAssertNotEqual(ModelRouter.fastStructured, "gemini-2.5-pro")
     }
 }
+
+// V11 P10+P11 — visual deixis routing.
+extension ModelRouterTests {
+    func testVisualArtifactsEagerCaptureScreen() {
+        XCTAssertTrue(ModelRouter.needsScreen(for: "Summarize this chart"))
+        XCTAssertTrue(ModelRouter.needsScreen(for: "analyze this dashboard"))
+        XCTAssertTrue(ModelRouter.needsScreen(for: "what am I looking at"))
+        XCTAssertFalse(ModelRouter.needsScreen(for: "summarize this"),
+                       "bare deixis defers to selection first")
+    }
+
+    func testBareDeixisDetected() {
+        XCTAssertTrue(ModelRouter.bareDeixis("explain this"))
+        XCTAssertTrue(ModelRouter.bareDeixis("Summarize this for me"))
+        XCTAssertTrue(ModelRouter.bareDeixis("what does this mean"))
+        XCTAssertFalse(ModelRouter.bareDeixis("open spotify"))
+        XCTAssertFalse(ModelRouter.bareDeixis("research the best mics"))
+    }
+}

@@ -77,6 +77,23 @@ actor AutonomyEngine {
         await runLoop(&plan, goal: goal, completed: [], lastOutput: "", startIndex: 0, emit: emit)
     }
 
+    /// Run a pre-built plan (V11 P8 recipes): the deterministic path — no
+    /// model planning, no plan roulette — through the SAME step loop as
+    /// planned tasks, so Safety gates, journaling, narration, resume and the
+    /// task panel all behave identically.
+    func runPrebuilt(goal: String, steps: [TaskStep],
+                     emit: @escaping @Sendable (TaskEvent) -> Void) async {
+        guard !steps.isEmpty else {
+            emit(.finished(ok: false, summary: "That recipe has no steps."))
+            return
+        }
+        var plan = TaskPlan(goal: goal, steps: steps)
+        emit(.planReady(plan))
+        emit(.narrate("Running \(goal) — \(steps.count) step\(steps.count == 1 ? "" : "s")."))
+        Log.trace("autonomy: prebuilt plan, \(steps.count) step(s) for '\(goal)'")
+        await runLoop(&plan, goal: goal, completed: [], lastOutput: "", startIndex: 0, emit: emit)
+    }
+
     /// Resume a task that was interrupted (crash/quit) from its persisted snapshot —
     /// already-done steps are skipped and their outputs restored as material.
     func resume(_ persisted: PersistedTask, emit: @escaping @Sendable (TaskEvent) -> Void) async {

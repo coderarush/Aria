@@ -9,6 +9,21 @@ enum AgentTrigger: Codable, Equatable, Sendable {
     /// When the watched folder's contents change (fired by FolderWatcher, not
     /// the timer sweep).
     case folderChanged(path: String)
+    /// V11 P7: inbox mail matching `query` changed (polled; precheck keeps it
+    /// quiet until there's genuinely new mail).
+    case mailMatched(query: String)
+    /// V11 P7: the page at `url` changed (polled content hash).
+    case urlChanged(url: String)
+
+    /// Poll cadence for watcher triggers (the sweep runs every 60s; these
+    /// gate how often the precheck actually fetches).
+    var pollInterval: TimeInterval? {
+        switch self {
+        case .mailMatched: return 300      // inbox: every 5 minutes
+        case .urlChanged: return 1800      // web page: every 30 minutes
+        default: return nil
+        }
+    }
 }
 
 /// A user-visible recurring workflow ("set it once, let Aria handle it"):
@@ -24,9 +39,13 @@ struct BackgroundAgent: Codable, Equatable, Identifiable, Sendable {
     var enabled: Bool
     var lastRun: Date?
     var lastOutcome: String?
+    /// V11 P7: last observed state for watcher triggers (content hash) —
+    /// optional so pre-V11 agents.json decodes unchanged.
+    var watermark: String?
 
     init(id: UUID = UUID(), name: String, goal: String, trigger: AgentTrigger,
-         enabled: Bool = true, lastRun: Date? = nil, lastOutcome: String? = nil) {
+         enabled: Bool = true, lastRun: Date? = nil, lastOutcome: String? = nil,
+         watermark: String? = nil) {
         self.id = id
         self.name = name
         self.goal = goal
@@ -34,6 +53,7 @@ struct BackgroundAgent: Codable, Equatable, Identifiable, Sendable {
         self.enabled = enabled
         self.lastRun = lastRun
         self.lastOutcome = lastOutcome
+        self.watermark = watermark
     }
 }
 
@@ -61,6 +81,10 @@ enum AgentSchedule {
             return now.timeIntervalSince(last) >= seconds
         case .folderChanged:
             return false   // watcher-fired, never timer-due
+        case .mailMatched, .urlChanged:
+            guard let poll = trigger.pollInterval else { return false }
+            guard let last = lastRun else { return true }
+            return now.timeIntervalSince(last) >= poll
         }
     }
 }
@@ -104,6 +128,15 @@ actor AgentStore {
     /// Enabled agents whose trigger is due right now (timer sweep).
     func dueAgents(now: Date = Date()) -> [BackgroundAgent] {
         state.agents.filter { $0.enabled && AgentSchedule.isDue($0.trigger, now: now, lastRun: $0.lastRun) }
+    }
+
+    /// Quiet bookkeeping for watcher prechecks (V11 P7): bump lastRun (and
+    /// watermark) WITHOUT a run-history entry — "nothing new" is not a run.
+    func touch(_ id: UUID, at date: Date = Date(), watermark: String? = nil) {
+        guard let idx = state.agents.firstIndex(where: { $0.id == id }) else { return }
+        state.agents[idx].lastRun = date
+        if let watermark { state.agents[idx].watermark = watermark }
+        save()
     }
 
     /// Record a completed run: stamps the agent and appends to history.
