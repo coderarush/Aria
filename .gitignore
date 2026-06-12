@@ -25,3 +25,4 @@ site/dist/
 # Remotion launch video
 video/node_modules/
 video/out/
+.vercel/

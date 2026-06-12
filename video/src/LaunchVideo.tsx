@@ -11,7 +11,7 @@ const serif = loadSerif();
 const sans = loadSans();
 
 export const FPS = 30;
-export const DURATION_FRAMES = 40 * FPS; // 40s
+export const DURATION_FRAMES = 58 * FPS; // 58s — v3 adds Memory / Timeline / Focus beats
 
 const INK = "#15130d";
 const SOFT = "#5b5648";
@@ -43,11 +43,17 @@ const BLOB_PATH: BlobKey[] = [
   { t: 17.6, x: 0,    y: 318,  s: 0.42, amp: 0.12, speed: 0.80 },
   { t: 19.0, x: -640, y: -250, s: 0.14, amp: 0.10, speed: 0.70 },  // cards: tucks by the label
   { t: 23.6, x: -640, y: -250, s: 0.14, amp: 0.10, speed: 0.70 },
-  { t: 25.0, x: 0,    y: -60,  s: 0.30, amp: 0.05, speed: 0.45 },  // privacy: calm, ringed
-  { t: 29.6, x: 0,    y: -60,  s: 0.30, amp: 0.05, speed: 0.45 },
-  { t: 31.0, x: 0,    y: -340, s: 0.20, amp: 0.10, speed: 0.80 },  // roll: watches from above
-  { t: 34.0, x: 0,    y: -340, s: 0.20, amp: 0.10, speed: 0.80 },
-  { t: 35.4, x: 0,    y: -205, s: 0.62, amp: 0.12, speed: 0.80 },  // endcard: confident
+  { t: 25.0, x: 0,    y: 318,  s: 0.42, amp: 0.14, speed: 1.05 },  // memory: listening orb again
+  { t: 29.6, x: 0,    y: 318,  s: 0.42, amp: 0.12, speed: 0.80 },
+  { t: 31.0, x: -640, y: -250, s: 0.14, amp: 0.10, speed: 0.70 },  // timeline: tucks by the label
+  { t: 35.6, x: -640, y: -250, s: 0.14, amp: 0.10, speed: 0.70 },
+  { t: 37.0, x: 470,  y: 0,    s: 0.60, amp: 0.06, speed: 0.50 },  // focus: steady, settled right
+  { t: 41.6, x: 470,  y: 0,    s: 0.60, amp: 0.06, speed: 0.50 },
+  { t: 43.0, x: 0,    y: -60,  s: 0.30, amp: 0.05, speed: 0.45 },  // privacy: calm, ringed
+  { t: 47.6, x: 0,    y: -60,  s: 0.30, amp: 0.05, speed: 0.45 },
+  { t: 49.0, x: 0,    y: -340, s: 0.20, amp: 0.10, speed: 0.80 },  // roll: watches from above
+  { t: 52.0, x: 0,    y: -340, s: 0.20, amp: 0.10, speed: 0.80 },
+  { t: 53.4, x: 0,    y: -205, s: 0.62, amp: 0.12, speed: 0.80 },  // endcard: confident
 ];
 
 function blobAt(sec: number) {
@@ -296,7 +302,126 @@ const SceneTasks: React.FC = () => {
   );
 };
 
-// 24–30s · privacy (ring forms around the persistent blob)
+// 24–30s · project memory (a second exchange — she remembers)
+const SceneMemory: React.FC = () => {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const fadeOut = interpolate(frame, [5.2 * fps, 6 * fps], [1, 0], { extrapolateLeft: "clamp" });
+  const replyIn = spring({ frame: frame - Math.round(3.2 * fps), fps, config: { damping: 15 } });
+  return (
+    <AbsoluteFill style={{ opacity: fadeOut, alignItems: "center" }}>
+      <Rise delay={4} style={{ marginTop: 130 }}>
+        <Mono>Project memory</Mono>
+      </Rise>
+      <div style={{
+        marginTop: 56, background: PAPER, border: `1.5px solid ${LINE}`,
+        borderRadius: 999, padding: "22px 42px", minWidth: 760, textAlign: "center",
+        boxShadow: "0 24px 70px rgba(21,19,13,0.10)",
+        fontFamily: serif.fontFamily, fontSize: 42, fontWeight: 500,
+      }}>
+        <TypeOn text='"Continue my Verdai work."' startDelay={Math.round(0.7 * fps)} />
+      </div>
+      <div style={{
+        opacity: replyIn,
+        transform: `translateY(${interpolate(replyIn, [0, 1], [26, 0])}px)`,
+        marginTop: 26, background: INK, color: PAPER,
+        borderRadius: 999, padding: "18px 38px", fontSize: 28,
+      }}>
+        Verdai — the deck wrapped yesterday. Picking up at pricing.
+      </div>
+    </AbsoluteFill>
+  );
+};
+
+// 30–36s · timeline (your day, accounted for)
+const SceneTimeline: React.FC = () => {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const fadeOut = interpolate(frame, [5.2 * fps, 6 * fps], [1, 0], { extrapolateLeft: "clamp" });
+  const rows: [string, string][] = [
+    ["8:30", "Briefing delivered"],
+    ["11:02", "Pricing model finished"],
+    ["2:15", "Downloads organized"],
+    ["4:40", "Investor research saved"],
+  ];
+  return (
+    <AbsoluteFill style={{ opacity: fadeOut, justifyContent: "center" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 130, paddingLeft: 170 }}>
+        <div>
+          <Rise><div style={{ marginLeft: 56 }}><Mono>Timeline</Mono></div></Rise>
+          <Rise delay={4}>
+            <Kinetic text="What did I do today?" size={96} startDelay={6} />
+          </Rise>
+        </div>
+        <div style={{
+          width: 520, background: PAPER, border: `1.5px solid ${LINE}`,
+          borderRadius: 26, padding: "30px 30px 20px",
+          boxShadow: "0 40px 100px rgba(21,19,13,0.14)",
+        }}>
+          <div style={{
+            fontFamily: serif.fontFamily, fontWeight: 600, fontSize: 30,
+            display: "flex", alignItems: "center", gap: 14, marginBottom: 22,
+          }}>
+            <Blob size={34} amp={0.08} speed={0.6} /> Today
+          </div>
+          {rows.map(([time, t], i) => {
+            const d = Math.round((0.7 + i * 0.55) * fps);
+            const sp = spring({ frame: frame - d, fps, config: { damping: 15 } });
+            return (
+              <div key={t} style={{
+                opacity: sp,
+                transform: `translateY(${interpolate(sp, [0, 1], [22, 0])}px) scale(${interpolate(sp, [0, 1], [0.98, 1])})`,
+                background: BG, border: `1px solid ${LINE}`, borderRadius: 16,
+                padding: "15px 20px", marginBottom: 12,
+                display: "flex", alignItems: "baseline", gap: 14,
+              }}>
+                <span style={{
+                  fontFamily: "JetBrains Mono, SF Mono, monospace",
+                  fontSize: 17, color: FAINT, minWidth: 58,
+                }}>{time}</span>
+                <span style={{ fontWeight: 700, fontSize: 23 }}>✓ {t}</span>
+              </div>
+            );
+          })}
+          <div style={{
+            opacity: spring({ frame: frame - Math.round(3.2 * fps), fps, config: { damping: 15 } }),
+            color: FAINT, fontSize: 18, padding: "4px 6px 8px",
+          }}>
+            14 things done — say “show my week”
+          </div>
+        </div>
+      </div>
+    </AbsoluteFill>
+  );
+};
+
+// 36–42s · focus mode (close the noise)
+const SceneFocus: React.FC = () => {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const fadeOut = interpolate(frame, [5.2 * fps, 6 * fps], [1, 0], { extrapolateLeft: "clamp" });
+  const replyIn = spring({ frame: frame - Math.round(2.8 * fps), fps, config: { damping: 15 } });
+  return (
+    <AbsoluteFill style={{ opacity: fadeOut, justifyContent: "center" }}>
+      <div style={{ paddingLeft: 230, maxWidth: 1050 }}>
+        <Rise><Mono>Focus Mode</Mono></Rise>
+        <Rise delay={4} style={{ marginTop: 24 }}>
+          <Kinetic text="Close the noise." size={108} startDelay={6} />
+        </Rise>
+        <div style={{
+          opacity: replyIn,
+          transform: `translateY(${interpolate(replyIn, [0, 1], [26, 0])}px)`,
+          marginTop: 40, display: "inline-block", background: INK, color: PAPER,
+          borderRadius: 999, padding: "18px 38px", fontSize: 28,
+        }}>
+          Work apps open. Distractions closed. Recap when you're done.
+        </div>
+      </div>
+    </AbsoluteFill>
+  );
+};
+
+// 42–48s · privacy (ring forms around the persistent blob)
 const ScenePrivate: React.FC = () => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -327,7 +452,7 @@ const SceneRoll: React.FC = () => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const fadeOut = interpolate(frame, [4.2 * fps, 5 * fps], [1, 0], { extrapolateLeft: "clamp" });
-  const words = ["Voice", "Knowledge", "Agents", "Memory", "Free & open source"];
+  const words = ["Voice", "Local-first", "Timeline", "Recipes", "Agents", "Free & open source"];
   return (
     <AbsoluteFill style={{ opacity: fadeOut, justifyContent: "center", alignItems: "center" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "center", marginTop: 120 }}>
@@ -365,7 +490,7 @@ const SceneEnd: React.FC = () => {
             padding: "20px 44px", fontSize: 30, fontWeight: 600,
             transform: `scale(${pulse})`,
           }}>
-            Download the pre-release
+            Download the launch candidate
           </div>
         </Rise>
         <Rise delay={Math.round(1.8 * fps)} style={{ marginTop: 26 }}>
@@ -386,7 +511,13 @@ export const LaunchVideo: React.FC = () => (
     <Sequence from={Math.round(14.6 * FPS)} durationInFrames={FPS}>
       <Audio src={staticFile("task.wav")} volume={0.7} />
     </Sequence>
-    <Sequence from={Math.round(35.8 * FPS)} durationInFrames={FPS}>
+    <Sequence from={Math.round(24.8 * FPS)} durationInFrames={FPS}>
+      <Audio src={staticFile("wake.wav")} volume={0.6} />
+    </Sequence>
+    <Sequence from={Math.round(30.8 * FPS)} durationInFrames={FPS}>
+      <Audio src={staticFile("task.wav")} volume={0.6} />
+    </Sequence>
+    <Sequence from={Math.round(53.8 * FPS)} durationInFrames={FPS}>
       <Audio src={staticFile("done.wav")} volume={0.8} />
     </Sequence>
 
@@ -394,9 +525,12 @@ export const LaunchVideo: React.FC = () => (
     <Sequence from={5 * FPS} durationInFrames={6 * FPS}><SceneClaim /></Sequence>
     <Sequence from={11 * FPS} durationInFrames={7 * FPS}><SceneDemo /></Sequence>
     <Sequence from={18 * FPS} durationInFrames={6 * FPS}><SceneTasks /></Sequence>
-    <Sequence from={24 * FPS} durationInFrames={6 * FPS}><ScenePrivate /></Sequence>
-    <Sequence from={30 * FPS} durationInFrames={5 * FPS}><SceneRoll /></Sequence>
-    <Sequence from={35 * FPS} durationInFrames={5 * FPS}><SceneEnd /></Sequence>
+    <Sequence from={24 * FPS} durationInFrames={6 * FPS}><SceneMemory /></Sequence>
+    <Sequence from={30 * FPS} durationInFrames={6 * FPS}><SceneTimeline /></Sequence>
+    <Sequence from={36 * FPS} durationInFrames={6 * FPS}><SceneFocus /></Sequence>
+    <Sequence from={42 * FPS} durationInFrames={6 * FPS}><ScenePrivate /></Sequence>
+    <Sequence from={48 * FPS} durationInFrames={5 * FPS}><SceneRoll /></Sequence>
+    <Sequence from={53 * FPS} durationInFrames={5 * FPS}><SceneEnd /></Sequence>
 
     {/* the main character, continuous across every scene */}
     <BlobLayer />

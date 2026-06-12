@@ -7,6 +7,7 @@
 Aria is a free, native macOS voice agent. Say **“Hey Aria”** and she hears you, sees your
 screen, and operates your apps by voice — she does the task, she doesn't just explain it.
 
+[Website](https://aria-site-chi.vercel.app) ·
 [Download](https://github.com/coderarush/Aria/releases/latest) ·
 [Build from source](#build-from-source) ·
 [How it works](#how-it-works)
