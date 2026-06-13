@@ -434,7 +434,7 @@ struct ConnectorsPane: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 PaneHeader(title: "Connectors",
-                           subtitle: "Give Aria a way into the apps you live in. OAuth-backed ones connect once you add a client ID in Settings.")
+                           subtitle: "Give Aria a way into the apps you live in. OAuth-backed ones need a client ID you create once — add it on the card, then connect.")
                 VStack(spacing: 16) {
                     ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                         HStack(alignment: .top, spacing: 16) {
@@ -481,83 +481,101 @@ private struct ConnectorCard: View {
     let info: ConnectorInfo
     var live: ConnectorStatus?
     var onChange: () -> Void = {}
+
     @State private var hovering = false
     @State private var busy = false
+    @State private var showingSetup = false
+    @State private var errorText: String?
+    /// A non-blocking live proof for connected providers, e.g. "✓ linked".
+    @State private var linkVerified = false
 
-    /// Resolve the display status from the live backend snapshot.
+    /// Resolve the display status from the live backend snapshot (pure mapping).
     private var status: ConnectorInfo.Status {
-        guard info.connectorID != nil, let live else { return .comingSoon }
-        if live.isConnected { return .connected }
-        return live.isConfigured ? .available : .notConfigured
+        ConnectorSetup.status(connectorID: info.connectorID, live: live)
     }
 
     private var buttonLabel: String {
         switch status {
-        case .connected: return busy ? "Disconnecting…" : "Disconnect"
-        case .available: return busy ? "Connecting…" : "Connect"
-        case .notConfigured, .comingSoon: return "Connect"
+        case .connected:     return busy ? "Disconnecting…" : "Disconnect"
+        case .available:     return busy ? "Connecting…" : "Connect"
+        case .notConfigured: return "Add client ID"
+        case .comingSoon:    return "Coming soon"
         }
     }
 
+    /// The button is live for every OAuth status except "coming soon"; the
+    /// not-configured case opens the setup sheet rather than connecting.
     private var buttonEnabled: Bool {
-        !busy && (status == .available || status == .connected)
-    }
-
-    private var helpText: String {
-        switch status {
-        case .notConfigured: return "Add a \(info.name) OAuth client ID in Settings → API Keys"
-        case .comingSoon: return "Coming soon"
-        default: return ""
-        }
+        guard !busy else { return false }
+        return status != .comingSoon
     }
 
     private func handleTap() {
         guard let id = info.connectorID else { return }
+        switch status {
+        case .notConfigured:
+            errorText = nil
+            showingSetup = true
+        case .available:
+            connect(id)
+        case .connected:
+            disconnect(id)
+        case .comingSoon:
+            break
+        }
+    }
+
+    private func connect(_ id: ConnectorID) {
+        errorText = nil
         busy = true
         Task {
-            if status == .connected {
-                await ConnectorStore.shared.disconnect(id)
-            } else {
-                try? await ConnectorStore.shared.connect(id)
+            do {
+                try await ConnectorStore.shared.connect(id)
+            } catch let error as ConnectorError {
+                if case .notConfigured = error {
+                    errorText = "Add a client ID first."
+                    showingSetup = true
+                }
+            } catch is CancellationError {
+                // User closed the browser / cancelled — quietly reset.
+            } catch {
+                errorText = "Couldn't connect. Try again."
             }
             busy = false
             onChange()
         }
     }
 
+    private func disconnect(_ id: ConnectorID) {
+        busy = true
+        linkVerified = false
+        Task {
+            await ConnectorStore.shared.disconnect(id)
+            busy = false
+            onChange()
+        }
+    }
+
+    /// Off the main path: ask the store for a valid token and, if present, show a
+    /// tiny "✓ linked" proof. Never blocks the UI; failures just leave it hidden.
+    private func verifyLink() {
+        guard let id = info.connectorID, status == .connected else {
+            linkVerified = false
+            return
+        }
+        Task {
+            let token = await ConnectorStore.shared.validAccessToken(id)
+            linkVerified = (token != nil)
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top) {
-                Image(systemName: info.icon)
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 48, height: 48)
-                    .background(
-                        LinearGradient(colors: [info.tint, info.tint.opacity(0.72)],
-                                       startPoint: .topLeading, endPoint: .bottomTrailing),
-                        in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-                    .shadow(color: info.tint.opacity(0.35), radius: 8, y: 4)
-                Spacer(minLength: 0)
-                statusPill
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                Text(info.name).font(.system(size: 16, weight: .semibold, design: .rounded))
-                Text(info.blurb)
-                    .font(.system(size: 12.5)).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Button { handleTap() } label: {
-                Text(buttonLabel)
-                    .font(.system(size: 13, weight: .semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 9)
-                    .background(status == .connected ? info.tint.opacity(0.16) : Color.primary.opacity(0.06),
-                                in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .disabled(!buttonEnabled)
-            .opacity(buttonEnabled ? 1 : 0.55)
-            .help(helpText)
+            header
+            title
+            if status == .connected { connectedDetail }
+            if let errorText { errorRow(errorText) }
+            primaryButton
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -570,18 +588,127 @@ private struct ConnectorCard: View {
         .scaleEffect(hovering ? 1.01 : 1)
         .onHover { hovering = $0 }
         .animation(.spring(response: 0.3, dampingFraction: 0.72), value: hovering)
+        .task(id: live?.isConnected) { verifyLink() }
+        .sheet(isPresented: $showingSetup) {
+            if let id = info.connectorID {
+                ConnectorSetupSheet(connectorID: id, info: info) {
+                    showingSetup = false
+                    onChange()           // refresh status → card becomes "Ready"
+                } onCancel: {
+                    showingSetup = false
+                }
+            }
+        }
+    }
+
+    private var header: some View {
+        HStack(alignment: .top) {
+            Image(systemName: info.icon)
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 48, height: 48)
+                .background(
+                    LinearGradient(colors: [info.tint, info.tint.opacity(0.72)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing),
+                    in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                .shadow(color: info.tint.opacity(0.35), radius: 8, y: 4)
+            Spacer(minLength: 0)
+            statusPill
+        }
+    }
+
+    private var title: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(info.name).font(.system(size: 16, weight: .semibold, design: .rounded))
+            Text(info.blurb)
+                .font(.system(size: 12.5)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Connected-account hint + the live "✓ linked" proof.
+    @ViewBuilder private var connectedDetail: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let live, let hint = ConnectorSetup.connectedHint(live) {
+                Text(hint)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            if linkVerified {
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.system(size: 10.5))
+                    Text("linked")
+                        .font(.system(size: 10.5, weight: .semibold))
+                }
+                .foregroundStyle(Color(red: 0.25, green: 0.78, blue: 0.45))
+            }
+        }
+    }
+
+    private func errorRow(_ text: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 10.5))
+            Text(text)
+                .font(.system(size: 11, weight: .medium))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .foregroundStyle(Color(red: 0.95, green: 0.40, blue: 0.40))
+    }
+
+    private var primaryButton: some View {
+        Button { handleTap() } label: {
+            HStack(spacing: 6) {
+                if busy {
+                    ProgressView().controlSize(.small).scaleEffect(0.7)
+                        .frame(width: 12, height: 12)
+                }
+                Text(buttonLabel)
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 9)
+            .background(buttonBackground,
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(!buttonEnabled)
+        .opacity(buttonEnabled ? 1 : 0.55)
+        .help(helpText)
+    }
+
+    private var buttonBackground: Color {
+        switch status {
+        case .connected:     return info.tint.opacity(0.16)
+        case .notConfigured: return info.tint.opacity(0.16)
+        default:             return Color.primary.opacity(0.06)
+        }
+    }
+
+    private var helpText: String {
+        switch status {
+        case .notConfigured: return "Paste a \(info.name) OAuth client ID to get ready."
+        case .available:     return "Open \(info.name) in your browser to connect."
+        case .connected:     return "Remove Aria's access to \(info.name)."
+        case .comingSoon:    return "Coming soon."
+        }
     }
 
     @ViewBuilder private var statusPill: some View {
         switch status {
         case .connected:
-            pill(text: "Connected", color: Color(red: 0.25, green: 0.78, blue: 0.45), filled: true)
+            pill(text: ConnectorSetup.pillLabel(for: status),
+                 color: Color(red: 0.25, green: 0.78, blue: 0.45), filled: true)
         case .available:
-            pill(text: "Ready", color: Color(red: 0.26, green: 0.52, blue: 0.96), filled: false)
+            pill(text: ConnectorSetup.pillLabel(for: status),
+                 color: Color(red: 0.26, green: 0.52, blue: 0.96), filled: false)
         case .notConfigured:
-            pill(text: "Setup needed", color: Color(red: 0.93, green: 0.62, blue: 0.16), filled: false)
+            pill(text: ConnectorSetup.pillLabel(for: status),
+                 color: Color(red: 0.93, green: 0.62, blue: 0.16), filled: false)
         case .comingSoon:
-            pill(text: "Coming soon", color: .secondary, filled: false)
+            pill(text: ConnectorSetup.pillLabel(for: status), color: .secondary, filled: false)
         }
     }
 
@@ -592,5 +719,173 @@ private struct ConnectorCard: View {
             .padding(.horizontal, 9).padding(.vertical, 4)
             .background(
                 Capsule().fill(filled ? color : color.opacity(0.14)))
+    }
+}
+
+// MARK: - Client-ID setup sheet
+
+/// An inline sheet to paste an OAuth client ID (and, for Notion/Slack, a client
+/// secret). On save, both credentials are written to the Keychain via
+/// `KeychainManager` — never UserDefaults, never logged — and `onSaved` fires so
+/// the card refreshes to "Ready". Includes a short "how do I get a client ID?"
+/// disclosure with the real per-provider steps.
+@MainActor
+private struct ConnectorSetupSheet: View {
+    let connectorID: ConnectorID
+    let info: ConnectorInfo
+    let onSaved: () -> Void
+    let onCancel: () -> Void
+
+    @State private var clientID = ""
+    @State private var clientSecret = ""
+    @State private var showingHelp = false
+    @State private var saveError: String?
+
+    private var needsSecret: Bool { ConnectorSetup.requiresSecret(connectorID) }
+    private var canSave: Bool {
+        ConnectorSetup.canSave(connectorID, clientID: clientID, secret: clientSecret)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            // Header
+            HStack(spacing: 12) {
+                Image(systemName: info.icon)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
+                    .background(
+                        LinearGradient(colors: [info.tint, info.tint.opacity(0.72)],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing),
+                        in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Connect \(info.name)")
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                    Text("Paste the OAuth credentials from your own \(ConnectorSetup.consoleName(for: connectorID)).")
+                        .font(.system(size: 11.5)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+
+            // Fields
+            VStack(alignment: .leading, spacing: 12) {
+                field(title: "Client ID", text: $clientID,
+                      prompt: "1234…apps.googleusercontent.com", secure: false)
+                if needsSecret {
+                    field(title: "Client Secret", text: $clientSecret,
+                          prompt: "Your app's client secret", secure: true)
+                }
+            }
+
+            // Help disclosure
+            VStack(alignment: .leading, spacing: 8) {
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) { showingHelp.toggle() }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: showingHelp ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 9, weight: .bold))
+                        Text("How do I get a client ID?")
+                            .font(.system(size: 11.5, weight: .medium))
+                    }
+                    .foregroundStyle(.secondary)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if showingHelp {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(Array(ConnectorSetup.setupSteps(for: connectorID).enumerated()),
+                                id: \.offset) { idx, step in
+                            HStack(alignment: .top, spacing: 7) {
+                                Text("\(idx + 1).")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(info.tint)
+                                    .frame(width: 14, alignment: .trailing)
+                                Text(step)
+                                    .font(.system(size: 11.5))
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.primary.opacity(0.04),
+                                in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                }
+            }
+
+            if let saveError {
+                Text(saveError)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Color(red: 0.95, green: 0.40, blue: 0.40))
+            }
+
+            // Actions
+            HStack(spacing: 10) {
+                Spacer(minLength: 0)
+                Button("Cancel") { onCancel() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 13, weight: .medium))
+                    .padding(.horizontal, 14).padding(.vertical, 7)
+                    .background(Color.primary.opacity(0.06),
+                                in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                Button { save() } label: {
+                    Text("Save")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 18).padding(.vertical, 7)
+                        .background(canSave ? info.tint : Color.secondary.opacity(0.4),
+                                    in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSave)
+            }
+        }
+        .padding(24)
+        .frame(width: 420)
+    }
+
+    private func field(title: String, text: Binding<String>,
+                       prompt: String, secure: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary).textCase(.uppercase)
+            Group {
+                if secure {
+                    SecureField(prompt, text: text)
+                } else {
+                    TextField(prompt, text: text)
+                }
+            }
+            .textFieldStyle(.plain)
+            .font(.system(size: 13, design: .monospaced))
+            .padding(.horizontal, 11).padding(.vertical, 9)
+            .background(Color.primary.opacity(0.05),
+                        in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.08)))
+        }
+    }
+
+    /// Persist credentials to the Keychain, then notify. Secrets never go to
+    /// UserDefaults and are never logged.
+    private func save() {
+        guard canSave else { return }
+        let id = ConnectorSetup.sanitize(clientID)
+        do {
+            try KeychainManager.save(id, account: ConnectorSetup.clientIDAccount(connectorID))
+            if needsSecret {
+                let secret = ConnectorSetup.sanitize(clientSecret)
+                try KeychainManager.save(secret,
+                                         account: ConnectorSetup.clientSecretAccount(connectorID))
+            }
+            onSaved()
+        } catch {
+            saveError = "Couldn't save to Keychain. Please try again."
+        }
     }
 }

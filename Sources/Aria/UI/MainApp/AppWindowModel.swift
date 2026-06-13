@@ -51,9 +51,9 @@ struct ActivityDayGroup: Identifiable, Equatable, Sendable {
     let entries: [ActivityEntry]
 }
 
-/// A connector card descriptor. Status is intentionally static ("Coming soon")
-/// in this build — the OAuth backend is a separate effort and is NOT present in
-/// this worktree, so every connector ships as a beautiful, disabled placeholder.
+/// A connector card descriptor. OAuth-backed cards (those with a `connectorID`)
+/// drive the live `ConnectorStore`; the rest are non-OAuth placeholders that
+/// ship as "Coming soon".
 struct ConnectorInfo: Identifiable, Equatable, Sendable {
     enum Status: Equatable, Sendable {
         case comingSoon        // no backend (Apple Mail / iCloud, for now)
@@ -69,6 +69,159 @@ struct ConnectorInfo: Identifiable, Equatable, Sendable {
     /// The OAuth backend this card drives, if any. nil = non-OAuth placeholder.
     var connectorID: ConnectorID? = nil
     var status: Status = .comingSoon
+}
+
+/// Pure, view-independent logic for the Connectors setup flow. Lives here (not in
+/// the view) so it can be unit-tested without a window or the Keychain: client-ID
+/// trimming/validation, whether a provider needs a secret, the status→button-label
+/// mapping, the connected-account hint, and the per-provider setup steps.
+///
+/// No network, no SwiftUI — every method is `nonisolated` and deterministic.
+enum ConnectorSetup {
+
+    // MARK: Client-ID / secret validation
+
+    /// Trim surrounding whitespace/newlines from a pasted credential.
+    static func sanitize(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// A client ID is acceptable once it's non-empty after trimming. We don't
+    /// hard-validate the format (providers differ — Google's ends in
+    /// `.apps.googleusercontent.com`, Notion/Slack use opaque IDs), so a blank or
+    /// whitespace-only paste is the only rejection.
+    static func isValidClientID(_ raw: String) -> Bool {
+        !sanitize(raw).isEmpty
+    }
+
+    /// True when the provider's OAuth flow requires a client *secret* in addition
+    /// to the client ID. Google native apps use PKCE without a secret; Notion and
+    /// Slack issue a confidential secret that must be supplied.
+    static func requiresSecret(_ id: ConnectorID) -> Bool {
+        switch id {
+        case .google: return false
+        case .notion, .slack: return true
+        }
+    }
+
+    /// Whether the Save action should be enabled given the current field values.
+    /// The secret field only gates Save for providers that require one.
+    static func canSave(_ id: ConnectorID, clientID: String, secret: String) -> Bool {
+        guard isValidClientID(clientID) else { return false }
+        if requiresSecret(id) { return isValidClientID(secret) }
+        return true
+    }
+
+    // MARK: Keychain account keys (mirrors ConnectorProvider's convention)
+
+    static func clientIDAccount(_ id: ConnectorID) -> String {
+        "connector_\(id.rawValue)_client_id"
+    }
+
+    static func clientSecretAccount(_ id: ConnectorID) -> String {
+        "connector_\(id.rawValue)_client_secret"
+    }
+
+    // MARK: Status → presentation
+
+    /// Resolve the card's display status from a live backend snapshot. A nil
+    /// `connectorID` (non-OAuth placeholder) or a missing snapshot is "coming
+    /// soon"; otherwise connected ▸ configured-but-not-connected (ready) ▸ needs
+    /// a client ID.
+    static func status(connectorID: ConnectorID?,
+                       live: ConnectorStatus?) -> ConnectorInfo.Status {
+        guard connectorID != nil, let live else { return .comingSoon }
+        if live.isConnected { return .connected }
+        return live.isConfigured ? .available : .notConfigured
+    }
+
+    /// The primary button's label for a status (busy spinners handled by the view).
+    static func buttonLabel(for status: ConnectorInfo.Status) -> String {
+        switch status {
+        case .connected:                  return "Disconnect"
+        case .available:                  return "Connect"
+        case .notConfigured:              return "Add client ID"
+        case .comingSoon:                 return "Coming soon"
+        }
+    }
+
+    /// The status pill's text.
+    static func pillLabel(for status: ConnectorInfo.Status) -> String {
+        switch status {
+        case .connected:     return "Connected"
+        case .available:     return "Ready"
+        case .notConfigured: return "Setup needed"
+        case .comingSoon:    return "Coming soon"
+        }
+    }
+
+    /// A short connected-account hint from the granted scopes / expiry, e.g.
+    /// "Gmail · Calendar" for Google, or a scope count otherwise. Never shows a
+    /// token. Returns nil when there's nothing useful to say.
+    static func connectedHint(_ status: ConnectorStatus) -> String? {
+        guard status.isConnected else { return nil }
+        let friendly = status.scopes.compactMap(friendlyScope)
+        if !friendly.isEmpty {
+            // De-dupe while preserving order (Gmail + Calendar, not Gmail twice).
+            var seen = Set<String>()
+            let unique = friendly.filter { seen.insert($0).inserted }
+            return unique.joined(separator: " · ")
+        }
+        if !status.scopes.isEmpty {
+            return status.scopes.count == 1 ? "1 permission granted"
+                                            : "\(status.scopes.count) permissions granted"
+        }
+        return "Linked"
+    }
+
+    /// Map a raw OAuth scope string to a short human label, or nil if unknown.
+    static func friendlyScope(_ scope: String) -> String? {
+        let s = scope.lowercased()
+        if s.contains("gmail")    { return "Gmail" }
+        if s.contains("calendar") { return "Calendar" }
+        if s.contains("drive")    { return "Drive" }
+        if s.contains("chat:write") || s.contains("channels") { return "Slack" }
+        if s.contains("users:read") { return "Members" }
+        return nil
+    }
+
+    // MARK: Setup help
+
+    /// The 3–4 step "how do I get a client ID?" guide for a provider.
+    static func setupSteps(for id: ConnectorID) -> [String] {
+        switch id {
+        case .google:
+            return [
+                "Open Google Cloud Console → APIs & Services → Credentials.",
+                "Create an OAuth client ID, application type “Desktop app”.",
+                "Enable the Gmail API and Google Calendar API for the project.",
+                "Copy the Client ID and paste it above (no secret needed — Aria uses PKCE)."
+            ]
+        case .notion:
+            return [
+                "Open notion.so/my-integrations and create a new integration.",
+                "Set the OAuth redirect URI to http://127.0.0.1 (loopback).",
+                "Copy the OAuth client ID and client secret.",
+                "Paste both above, then share the pages you want Aria to reach."
+            ]
+        case .slack:
+            return [
+                "Open api.slack.com/apps and create a new app.",
+                "Under OAuth & Permissions add a redirect URL of http://127.0.0.1.",
+                "Add the channels:read, chat:write and users:read scopes.",
+                "Copy the Client ID and Client Secret and paste both above."
+            ]
+        }
+    }
+
+    /// A one-line label for where to get credentials, used as the link/hint title.
+    static func consoleName(for id: ConnectorID) -> String {
+        switch id {
+        case .google: return "Google Cloud Console"
+        case .notion: return "Notion integrations"
+        case .slack:  return "Slack API dashboard"
+        }
+    }
 }
 
 /// Backing model for the main window. `@MainActor` and an `ObservableObject` so the
