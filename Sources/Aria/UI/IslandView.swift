@@ -25,7 +25,7 @@ struct IslandView: View {
 
     /// The TimelineView (and all work) exists only while something is on screen.
     private var isActive: Bool {
-        presenceMode != .hidden || choreographer.phase.kind != .hidden
+        presenceMode != .hidden || choreographer.kind != .hidden
     }
 
     private var palette: [Color] {
@@ -77,7 +77,7 @@ struct IslandView: View {
             pulse = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.34) { pulse = false }
         }
-        .onChange(of: choreographer.phase.kind) { _, kind in
+        .onChange(of: choreographer.kind) { _, kind in
             // The blob is only draggable when fully settled; the instant she
             // leaves that phase (splash, consolidate-out, dismiss) the panel
             // returns to fully click-through so no stale region swallows clicks.
@@ -89,23 +89,25 @@ struct IslandView: View {
 
     @ViewBuilder
     private func presenceContent(t: Double, size: CGSize) -> some View {
+        let borderIntensity = choreographer.borderIntensity(at: t)
         ZStack {
-            // The screen-edge glow (listening / executing / transitions).
-            if choreographer.borderIntensity > 0.001 {
-                ScreenBorderView(palette: palette,
-                                 intensity: choreographer.borderIntensity,
-                                 sweepPhase: choreographer.borderSweep)
+            // The screen-edge glow (listening / executing / transitions). Shares
+            // the one clock — `t` — so there's no second TimelineView to drift.
+            if borderIntensity > 0.001 {
+                ScreenBorderView(t: t, palette: palette,
+                                 intensity: borderIntensity,
+                                 sweepPhase: choreographer.borderSweep(at: t))
             }
             // The gather: light streaming from the edge into the blob as she pools.
-            if let cp = choreographer.consolidateProgress {
+            if let cp = choreographer.consolidateProgress(at: t) {
                 EdgeGatherView(palette: palette, progress: cp, center: restingCenter(in: size))
             }
             // The blob (thinking / answering / suggestion / pooling / splashing).
             if choreographer.showsBlob {
                 blobBody(t: t)
                     .background(blobFrameReporter(size: size))
-                    .position(blobPosition(in: size))
-                    .allowsHitTesting(choreographer.phase.kind == .blob)
+                    .position(blobPosition(in: size, t: t))
+                    .allowsHitTesting(choreographer.kind == .blob)
                     .gesture(blobDrag(in: size))
             }
         }
@@ -119,7 +121,7 @@ struct IslandView: View {
         let suggesting = viewModel.hasSuggestion && viewModel.state == .idle
         let breathe = suggesting ? (0.5 + 0.5 * sin(t * 1.8)) : 0
         let amp = 0.07 + level * 0.16 + speaking * 0.13 + (thinking ? 0.07 : 0)
-                + breathe * 0.04 + choreographer.blobAmpBoost
+                + breathe * 0.04 + choreographer.blobAmpBoost(at: t)
         // Slower morph = silkier, liquid-glass squirm.
         let speed = thinking ? 1.3 : 0.75
         // A clearer "pull" while she speaks so you can see she's talking.
@@ -128,9 +130,11 @@ struct IslandView: View {
         let c0 = palette.first ?? viewModel.accent
         let c1 = palette.count > 1 ? palette[1] : c0
         // Pre-folded so the modifier chain stays cheap to type-check.
+        let fall = choreographer.blobFall(at: t)
+        let squash = fall > 0.8 ? 1 - (fall - 0.8) / 0.2 * 0.18 : 1
         let dragScale = isDragging ? 1.05 : 1.0
         let pulseScale = pulse ? 1.06 : 1.0
-        let combinedScale = dragScale * choreographer.blobScale * pulseScale * settings.orbScale
+        let combinedScale = dragScale * choreographer.blobScale(at: t) * pulseScale * settings.orbScale
         // Liquid-glass: the specular highlight drifts slowly so light slides over
         // her like a glass bead, and a faint top sheen reads as a refractive edge.
         let gx = 0.38 + 0.05 * sin(t * 0.5)
@@ -150,7 +154,7 @@ struct IslandView: View {
                     .blendMode(.plusLighter)
             )
             .frame(width: 150, height: 150)
-            .scaleEffect(x: envScale, y: envScale * splashSquash)
+            .scaleEffect(x: envScale, y: envScale * squash)
             .scaleEffect(combinedScale)
             .shadow(color: .black.opacity(0.22), radius: 10, y: 7)
             .shadow(color: c0.opacity(0.28 + (suggesting ? 0.25 * breathe : 0)),
@@ -158,12 +162,6 @@ struct IslandView: View {
             .frame(width: 184, height: 184)
             .animation(.spring(response: 0.5, dampingFraction: 0.72), value: pulse)
             .animation(.spring(response: 0.45, dampingFraction: 0.78), value: isDragging)
-    }
-
-    /// Vertical squash in the final stretch of the splash fall (impact gives).
-    private var splashSquash: Double {
-        let f = choreographer.blobFall
-        return f > 0.8 ? 1 - (f - 0.8) / 0.2 * 0.18 : 1
     }
 
     // MARK: - Positioning
@@ -182,9 +180,9 @@ struct IslandView: View {
     }
 
     /// Live blob center: resting point, plus the splash fall, plus any drag.
-    private func blobPosition(in size: CGSize) -> CGPoint {
+    private func blobPosition(in size: CGSize, t: Double) -> CGPoint {
         let base = restingCenter(in: size)
-        let fall = choreographer.blobFall
+        let fall = choreographer.blobFall(at: t)
         let eased = fall * fall                       // ease-in
         let bottomY = size.height - 40
         let y = base.y + (bottomY - base.y) * eased
@@ -195,7 +193,7 @@ struct IslandView: View {
         GeometryReader { g -> Color in
             let f = g.frame(in: .global)
             DispatchQueue.main.async {
-                if choreographer.phase.kind == .blob { onBlobFrameChange?(f) }
+                if choreographer.kind == .blob { onBlobFrameChange?(f) }
             }
             return Color.clear
         }
@@ -204,7 +202,7 @@ struct IslandView: View {
     private func blobDrag(in size: CGSize) -> some Gesture {
         DragGesture(minimumDistance: 4)
             .onChanged { v in
-                guard choreographer.phase.kind == .blob else { return }
+                guard choreographer.kind == .blob else { return }
                 isDragging = true
                 dragOffset = v.translation
             }

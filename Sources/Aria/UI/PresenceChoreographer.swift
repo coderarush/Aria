@@ -1,55 +1,24 @@
 import SwiftUI
 
-/// Drives the timed transitions between Aria's presence modes. It is fed the
-/// target `PresenceMode` (derived from the island state) plus the TimelineView
-/// clock, and walks through the choreography:
+/// Drives the timed transitions between Aria's presence modes:
 ///
 ///   hidden → (borderIn) → border
 ///   border → (consolidating) → blob          // water pooling into a droplet
 ///   blob   → (splashing → igniting) → border // droplet falls, rim ignites
 ///   *      → (dismissing) → hidden
 ///
-/// Sequencing math is timestamp-injected so it can be unit-tested without a
-/// render loop. Transitions always run to their settled phase before reconciling
-/// toward a newer target — they're sub-second, so no mid-flight reversal needed.
+/// SMOOTHNESS CONTRACT: only the discrete phase `kind` is `@Published` — it
+/// changes a handful of times per interaction (at phase boundaries), so SwiftUI
+/// invalidates rarely. The continuous 0…1 `progress` and every render parameter
+/// are computed PURELY from the TimelineView clock (`at:`), never stored and
+/// never published. That removes the per-frame state write that made the motion
+/// stutter; the only per-frame work is the TimelineView redraw itself.
 @MainActor
 final class PresenceChoreographer: ObservableObject {
 
     enum Kind { case hidden, borderIn, border, consolidating, blob, splashing, igniting, dismissing }
 
-    enum Phase: Equatable {
-        case hidden
-        case borderIn(Double)       // 0→1
-        case border
-        case consolidating(Double)  // 0→1  border drains, blob pools
-        case blob
-        case splashing(Double)      // 0→1  blob falls to the bottom edge
-        case igniting(Double)       // 0→1  rim lights from bottom-center outward
-        case dismissing(Double)     // 0→1
-
-        var kind: Kind {
-            switch self {
-            case .hidden: return .hidden
-            case .borderIn: return .borderIn
-            case .border: return .border
-            case .consolidating: return .consolidating
-            case .blob: return .blob
-            case .splashing: return .splashing
-            case .igniting: return .igniting
-            case .dismissing: return .dismissing
-            }
-        }
-        /// 0…1 progress of a timed phase (settled phases report 0).
-        var progress: Double {
-            switch self {
-            case let .borderIn(p), let .consolidating(p), let .splashing(p),
-                 let .igniting(p), let .dismissing(p): return p
-            case .hidden, .border, .blob: return 0
-            }
-        }
-    }
-
-    @Published private(set) var phase: Phase = .hidden
+    @Published private(set) var kind: Kind = .hidden
 
     static let dBorderIn = 0.6
     static let dConsolidate = 1.1
@@ -58,43 +27,48 @@ final class PresenceChoreographer: ObservableObject {
     static let dDismiss = 0.45
 
     private var target: PresenceMode = .hidden
-    private var start: Double = 0   // timestamp the current timed phase began
+    private var start: Double = 0          // timestamp the current phase began
+    private var phaseWasBorder = false
+
+    // MARK: - Driving (called once per frame from the TimelineView)
 
     /// React to a new desired mode. No-op while a transition toward the same
-    /// target is already in flight.
+    /// target is already in flight. Publishes `kind` only on an actual change.
     func setMode(_ mode: PresenceMode, now: Double) {
         guard mode != target else { return }
         if mode == .hidden {
-            // Remember whether we're fading out of a lit rim so the dismiss fades it.
-            phaseWasBorder = [.border, .borderIn, .igniting].contains(phase.kind)
+            phaseWasBorder = [.border, .borderIn, .igniting].contains(kind)
         }
         target = mode
         reconcile(now: now)
     }
 
-    /// Advance timed phases on each clock tick; chain/settle when one completes.
+    /// Settle the current timed phase if its duration has elapsed (and chain into
+    /// the next). Does nothing — and publishes nothing — mid-phase.
     func advance(now: Double) {
-        let dur = duration(of: phase.kind)
+        let dur = duration(of: kind)
         guard dur > 0 else { reconcile(now: now); return }
-        let elapsed = now - start
-        if elapsed >= dur - 1e-9 {     // epsilon: settle robustly on the boundary tick
-            settle(now: now)
-        } else {
-            phase = withProgress(phase.kind, min(1, max(0, elapsed / dur)))
-        }
+        if now - start >= dur - 1e-9 { settle(now: now) }
     }
 
-    // MARK: - Transition logic (pure-ish; drives the table above)
+    /// 0…1 progress of the current phase at `now` (settled phases report 0).
+    func progress(at now: Double) -> Double {
+        let dur = duration(of: kind)
+        guard dur > 0 else { return 0 }
+        return min(1, max(0, (now - start) / dur))
+    }
+
+    // MARK: - Transition logic
 
     private func reconcile(now: Double) {
-        switch phase.kind {
+        switch kind {
         case .borderIn, .consolidating, .splashing, .igniting, .dismissing:
             return  // a transition owns the timeline until it settles
         case .hidden:
             switch target {
             case .hidden: break
             case .border: begin(.borderIn, now)
-            case .blob:   phase = .blob          // pop in directly (suggestion / instant blob)
+            case .blob:   begin(.blob, now)        // pop in directly (suggestion / instant blob)
             }
         case .border:
             switch target {
@@ -111,25 +85,24 @@ final class PresenceChoreographer: ObservableObject {
         }
     }
 
-    /// Called when a timed phase reaches 1.0.
     private func settle(now: Double) {
-        switch phase.kind {
-        case .borderIn:      phase = .border;            reconcile(now: now)
-        case .consolidating: phase = .blob;              reconcile(now: now)
-        case .splashing:     begin(.igniting, now)       // splash always chains into ignite
-        case .igniting:      phase = .border;            reconcile(now: now)
-        case .dismissing:    phase = .hidden;            reconcile(now: now)
+        switch kind {
+        case .borderIn:      begin(.border, now);   reconcile(now: now)
+        case .consolidating: begin(.blob, now);     reconcile(now: now)
+        case .splashing:     begin(.igniting, now)            // splash always chains into ignite
+        case .igniting:      begin(.border, now);   reconcile(now: now)
+        case .dismissing:    begin(.hidden, now);   reconcile(now: now)
         case .hidden, .border, .blob: break
         }
     }
 
-    private func begin(_ kind: Kind, _ now: Double) {
+    private func begin(_ k: Kind, _ now: Double) {
         start = now
-        phase = withProgress(kind, 0)
+        if kind != k { kind = k }      // publish only on real change
     }
 
-    private func duration(of kind: Kind) -> Double {
-        switch kind {
+    private func duration(of k: Kind) -> Double {
+        switch k {
         case .borderIn: return Self.dBorderIn
         case .consolidating: return Self.dConsolidate
         case .splashing: return Self.dSplash
@@ -139,84 +112,59 @@ final class PresenceChoreographer: ObservableObject {
         }
     }
 
-    private func withProgress(_ kind: Kind, _ p: Double) -> Phase {
-        switch kind {
-        case .hidden: return .hidden
-        case .borderIn: return .borderIn(p)
-        case .border: return .border
-        case .consolidating: return .consolidating(p)
-        case .blob: return .blob
-        case .splashing: return .splashing(p)
-        case .igniting: return .igniting(p)
-        case .dismissing: return .dismissing(p)
-        }
-    }
-
-    // MARK: - Render params derived from the current phase
+    // MARK: - Render parameters (pure functions of the clock)
 
     /// Smoothstep so every fade eases in/out (silky, no linear ramp).
     private func ease(_ p: Double) -> Double { p * p * (3 - 2 * p) }
 
     /// Master opacity for the screen border (0 when no border showing).
-    var borderIntensity: Double {
-        switch phase {
-        case .borderIn(let p): return ease(p)
-        case .border: return 1
-        case .consolidating(let p): return 1 - ease(p)   // drains as the blob pools
-        case .splashing: return 0                          // rim dark until impact
-        case .igniting(let p): return ease(p)
-        case .dismissing(let p): return phaseWasBorder ? 1 - ease(p) : 0
+    func borderIntensity(at now: Double) -> Double {
+        let p = progress(at: now)
+        switch kind {
+        case .borderIn:      return ease(p)
+        case .border:        return 1
+        case .consolidating: return 1 - ease(p)              // drains as the blob pools
+        case .splashing:     return 0                         // rim dark until impact
+        case .igniting:      return ease(p)
+        case .dismissing:    return phaseWasBorder ? 1 - ease(p) : 0
         case .hidden, .blob: return 0
         }
     }
 
     /// Splash-ignition gate for `ScreenBorderView.sweepPhase`. nil = full ring.
-    var borderSweep: Double? {
-        if case .igniting(let p) = phase { return p }
-        return nil
+    func borderSweep(at now: Double) -> Double? {
+        kind == .igniting ? progress(at: now) : nil
     }
 
     /// Progress of the edge-gather (border collapsing into the blob); nil unless
     /// currently consolidating. Drives `EdgeGatherView`.
-    var consolidateProgress: Double? {
-        if case .consolidating(let p) = phase { return p }
-        return nil
+    func consolidateProgress(at now: Double) -> Double? {
+        kind == .consolidating ? progress(at: now) : nil
     }
 
     /// Whether the blob should be drawn at all in the current phase.
     var showsBlob: Bool {
-        switch phase.kind {
+        switch kind {
         case .blob, .consolidating, .splashing: return true
         default: return false
         }
     }
 
-    /// Blob scale envelope: pops to 1.12 as it pools, squashes as it falls.
-    var blobScale: Double {
-        switch phase {
-        case .consolidating(let p):
-            // Stay tiny early, then form from the arriving light with a late
-            // overshoot — so the droplet looks fed by the gather, not popped in.
-            let e = p * p
-            return e < 0.8 ? (e / 0.8) * 1.12 : 1.12 - ((e - 0.8) / 0.2) * 0.12
-        case .blob: return 1
-        case .splashing: return 1
-        default: return 1
-        }
+    /// Blob scale envelope: forms late while pooling, holds at 1 otherwise.
+    func blobScale(at now: Double) -> Double {
+        guard kind == .consolidating else { return 1 }
+        // Stay tiny early, then form from the arriving light with a late overshoot.
+        let e = progress(at: now) * progress(at: now)
+        return e < 0.8 ? (e / 0.8) * 1.12 : 1.12 - ((e - 0.8) / 0.2) * 0.12
     }
 
-    /// Extra wobble amplitude (liquid look) layered onto the blob during pooling.
-    var blobAmpBoost: Double {
-        if case .consolidating(let p) = phase { return 0.18 * (1 - p) }
-        return 0
+    /// Extra wobble amplitude (liquid look) layered onto the blob while pooling.
+    func blobAmpBoost(at now: Double) -> Double {
+        kind == .consolidating ? 0.18 * (1 - progress(at: now)) : 0
     }
 
     /// 0…1 fall progress while splashing (blob travels to the bottom edge).
-    var blobFall: Double {
-        if case .splashing(let p) = phase { return p }
-        return 0
+    func blobFall(at now: Double) -> Double {
+        kind == .splashing ? progress(at: now) : 0
     }
-
-    // Track whether the dismiss began from a border (for fade direction).
-    private var phaseWasBorder = false
 }

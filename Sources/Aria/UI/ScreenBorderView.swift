@@ -8,6 +8,10 @@ import SwiftUI
 /// All geometry comes from `BorderMath`; this view only paints. It is purely
 /// decorative and click-through — it never intercepts mouse events.
 struct ScreenBorderView: View {
+    /// Shared animation clock, fed from IslandView's single TimelineView — there
+    /// is deliberately no TimelineView here, so the whole presence runs off one
+    /// clock and can't drift or double-invalidate.
+    var t: Double
     /// Brand palette (hues are derived from the first colors).
     var palette: [Color]
     /// Master opacity 0…1 — the choreographer drains this during consolidate and
@@ -21,14 +25,12 @@ struct ScreenBorderView: View {
     private let cornerRadius: CGFloat = 28
 
     var body: some View {
-        TimelineView(.animation) { tl in
-            let t = tl.date.timeIntervalSinceReferenceDate
-            GeometryReader { geo in
-                if intensity > 0.001 {
-                    glow(t: t, size: geo.size)
-                        .opacity(intensity)
-                        .mask(revealMask(size: geo.size))
-                }
+        GeometryReader { geo in
+            if intensity > 0.001 {
+                glow(t: t, size: geo.size)
+                    .opacity(intensity)
+                    .mask(revealMask(size: geo.size))
+                    .drawingGroup()                 // GPU-composite the blurs → no stutter
             }
         }
         .allowsHitTesting(false)
@@ -42,9 +44,9 @@ struct ScreenBorderView: View {
         let rect = CGRect(origin: .zero, size: size).insetBy(dx: inset, dy: inset)
         return ZStack {
             // 1. Primary conic band — slow clockwise drift (~50s / rev).
-            conicBand(colors: cyclic(h), angle: t * 7, lineWidth: 96, blur: 50, opacity: 0.34)
+            conicBand(colors: cyclic(h), angle: t * 7, lineWidth: 96, blur: 52, opacity: 0.22)
             // 2. Counter-rotating band — different hue order, softer, for shimmer/depth.
-            conicBand(colors: cyclic(h.reversed()), angle: -t * 5, lineWidth: 70, blur: 66, opacity: 0.22)
+            conicBand(colors: cyclic(h.reversed()), angle: -t * 5, lineWidth: 70, blur: 68, opacity: 0.13)
             // 3. Drifting light-pools riding the rim — the moving "energy".
             ForEach(0..<4, id: \.self) { i in
                 lightPool(hue: h[i % h.count], u: pool_u(i, t), rect: rect)
@@ -70,11 +72,11 @@ struct ScreenBorderView: View {
     /// A big soft radial glow positioned on the perimeter at parameter `u`.
     private func lightPool(hue: Color, u: Double, rect: CGRect) -> some View {
         let p = BorderMath.point(u: u, in: rect, cornerRadius: cornerRadius).point
-        return RadialGradient(gradient: Gradient(colors: [hue.opacity(0.7), hue.opacity(0)]),
+        return RadialGradient(gradient: Gradient(colors: [hue.opacity(0.6), hue.opacity(0)]),
                               center: .center, startRadius: 2, endRadius: 150)
             .frame(width: 300, height: 300)
-            .blur(radius: 44)
-            .opacity(0.3)
+            .blur(radius: 46)
+            .opacity(0.17)
             .position(p)
     }
 
