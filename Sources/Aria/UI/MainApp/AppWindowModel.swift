@@ -56,7 +56,9 @@ struct ActivityDayGroup: Identifiable, Equatable, Sendable {
 /// this worktree, so every connector ships as a beautiful, disabled placeholder.
 struct ConnectorInfo: Identifiable, Equatable, Sendable {
     enum Status: Equatable, Sendable {
-        case comingSoon
+        case comingSoon        // no backend (Apple Mail / iCloud, for now)
+        case notConfigured     // OAuth-backed, but no client ID yet
+        case available         // configured — ready to connect
         case connected
     }
     let id: String
@@ -64,6 +66,8 @@ struct ConnectorInfo: Identifiable, Equatable, Sendable {
     let blurb: String
     let icon: String          // SF Symbol
     let tint: Color
+    /// The OAuth backend this card drives, if any. nil = non-OAuth placeholder.
+    var connectorID: ConnectorID? = nil
     var status: Status = .comingSoon
 }
 
@@ -208,16 +212,20 @@ final class AppWindowModel: ObservableObject {
     static let connectorCatalog: [ConnectorInfo] = [
         ConnectorInfo(id: "gmail", name: "Gmail",
                       blurb: "Triage, draft and send mail by voice.",
-                      icon: "envelope.fill", tint: Color(red: 0.92, green: 0.27, blue: 0.21)),
+                      icon: "envelope.fill", tint: Color(red: 0.92, green: 0.27, blue: 0.21),
+                      connectorID: .google),
         ConnectorInfo(id: "gcal", name: "Google Calendar",
                       blurb: "See your day, schedule and reschedule.",
-                      icon: "calendar", tint: Color(red: 0.26, green: 0.52, blue: 0.96)),
+                      icon: "calendar", tint: Color(red: 0.26, green: 0.52, blue: 0.96),
+                      connectorID: .google),
         ConnectorInfo(id: "notion", name: "Notion",
                       blurb: "Capture notes and update pages hands-free.",
-                      icon: "doc.text.fill", tint: Color(red: 0.13, green: 0.13, blue: 0.15)),
+                      icon: "doc.text.fill", tint: Color(red: 0.13, green: 0.13, blue: 0.15),
+                      connectorID: .notion),
         ConnectorInfo(id: "slack", name: "Slack",
                       blurb: "Catch up and reply across your channels.",
-                      icon: "number.square.fill", tint: Color(red: 0.36, green: 0.16, blue: 0.55)),
+                      icon: "number.square.fill", tint: Color(red: 0.36, green: 0.16, blue: 0.55),
+                      connectorID: .slack),
         ConnectorInfo(id: "applemail", name: "Apple Mail",
                       blurb: "Work your inbox without lifting a finger.",
                       icon: "envelope.badge.fill", tint: Color(red: 0.20, green: 0.56, blue: 0.99)),

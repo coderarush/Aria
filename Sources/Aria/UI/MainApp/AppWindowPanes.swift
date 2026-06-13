@@ -425,6 +425,8 @@ private struct ActivityRowView: View {
 
 @MainActor
 struct ConnectorsPane: View {
+    @State private var statuses: [ConnectorID: ConnectorStatus] = [:]
+
     var body: some View {
         // Eager rows of cards — deliberately NOT LazyVGrid/Grid, to stay in the
         // same crash-safe family as the rest of the window (no lazy row stacks).
@@ -432,12 +434,14 @@ struct ConnectorsPane: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 PaneHeader(title: "Connectors",
-                           subtitle: "Give Aria a way into the apps you live in. More arriving soon.")
+                           subtitle: "Give Aria a way into the apps you live in. OAuth-backed ones connect once you add a client ID in Settings.")
                 VStack(spacing: 16) {
                     ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                         HStack(alignment: .top, spacing: 16) {
                             ForEach(row) { info in
-                                ConnectorCard(info: info)
+                                ConnectorCard(info: info,
+                                              live: info.connectorID.flatMap { statuses[$0] },
+                                              onChange: { Task { await reload() } })
                             }
                             // Pad short final rows so cards keep their column width.
                             if row.count < 3 {
@@ -454,6 +458,12 @@ struct ConnectorsPane: View {
             .frame(maxWidth: 980, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .task { await reload() }
+    }
+
+    private func reload() async {
+        let list = await ConnectorStore.shared.connectors()
+        statuses = Dictionary(list.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
     }
 }
 
@@ -469,7 +479,51 @@ private extension Array {
 
 private struct ConnectorCard: View {
     let info: ConnectorInfo
+    var live: ConnectorStatus?
+    var onChange: () -> Void = {}
     @State private var hovering = false
+    @State private var busy = false
+
+    /// Resolve the display status from the live backend snapshot.
+    private var status: ConnectorInfo.Status {
+        guard info.connectorID != nil, let live else { return .comingSoon }
+        if live.isConnected { return .connected }
+        return live.isConfigured ? .available : .notConfigured
+    }
+
+    private var buttonLabel: String {
+        switch status {
+        case .connected: return busy ? "Disconnecting…" : "Disconnect"
+        case .available: return busy ? "Connecting…" : "Connect"
+        case .notConfigured, .comingSoon: return "Connect"
+        }
+    }
+
+    private var buttonEnabled: Bool {
+        !busy && (status == .available || status == .connected)
+    }
+
+    private var helpText: String {
+        switch status {
+        case .notConfigured: return "Add a \(info.name) OAuth client ID in Settings → API Keys"
+        case .comingSoon: return "Coming soon"
+        default: return ""
+        }
+    }
+
+    private func handleTap() {
+        guard let id = info.connectorID else { return }
+        busy = true
+        Task {
+            if status == .connected {
+                await ConnectorStore.shared.disconnect(id)
+            } else {
+                try? await ConnectorStore.shared.connect(id)
+            }
+            busy = false
+            onChange()
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -492,18 +546,18 @@ private struct ConnectorCard: View {
                     .font(.system(size: 12.5)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Button {} label: {
-                Text(info.status == .connected ? "Manage" : "Connect")
+            Button { handleTap() } label: {
+                Text(buttonLabel)
                     .font(.system(size: 13, weight: .semibold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 9)
-                    .background(Color.primary.opacity(0.06),
+                    .background(status == .connected ? info.tint.opacity(0.16) : Color.primary.opacity(0.06),
                                 in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
             .buttonStyle(.plain)
-            .disabled(info.status != .connected)
-            .opacity(info.status == .connected ? 1 : 0.55)
-            .help(info.status == .connected ? "" : "Coming soon")
+            .disabled(!buttonEnabled)
+            .opacity(buttonEnabled ? 1 : 0.55)
+            .help(helpText)
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -519,9 +573,13 @@ private struct ConnectorCard: View {
     }
 
     @ViewBuilder private var statusPill: some View {
-        switch info.status {
+        switch status {
         case .connected:
             pill(text: "Connected", color: Color(red: 0.25, green: 0.78, blue: 0.45), filled: true)
+        case .available:
+            pill(text: "Ready", color: Color(red: 0.26, green: 0.52, blue: 0.96), filled: false)
+        case .notConfigured:
+            pill(text: "Setup needed", color: Color(red: 0.93, green: 0.62, blue: 0.16), filled: false)
         case .comingSoon:
             pill(text: "Coming soon", color: .secondary, filled: false)
         }
