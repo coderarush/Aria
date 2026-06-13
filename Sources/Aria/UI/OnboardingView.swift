@@ -18,18 +18,19 @@ struct OnboardingView: View {
     @State private var briefingText = ""
     @State private var briefingRunning = false
 
-    // Steps: 0=Welcome 1=Mic 2=Screen 3=LocalModel 4=APIKey 5=Persona 6=Briefing 7=Done
-    private let totalSteps = 8
+    // Steps: 0=Welcome 1=Mic 2=Screen 3=MeetAria 4=LocalModel 5=APIKey 6=Persona 7=Briefing 8=Done
+    private let totalSteps = 9
 
     private var stepIcon: String {
         switch step {
         case 0: return "hand.wave.fill"
         case 1: return "mic.fill"
         case 2: return "rectangle.dashed.badge.record"
-        case 3: return "cpu"
-        case 4: return "key.fill"
-        case 5: return "person.crop.circle.badge.checkmark"
-        case 6: return "sun.max.fill"
+        case 3: return "sparkles"
+        case 4: return "cpu"
+        case 5: return "key.fill"
+        case 6: return "person.crop.circle.badge.checkmark"
+        case 7: return "sun.max.fill"
         default: return "checkmark.seal.fill"
         }
     }
@@ -68,14 +69,16 @@ struct OnboardingView: View {
                 }
                 .padding(.bottom, 28)
 
-                // Step icon
-                Image(systemName: stepIcon)
-                    .font(.system(size: 42, weight: .medium))
-                    .foregroundStyle(settings.accentColor)
-                    .padding(.bottom, 16)
-                    .transition(.scale.combined(with: .opacity))
-                    .id("icon-\(step)")
-                    .animation(.spring(response: 0.4, dampingFraction: 0.75), value: step)
+                // Step icon — hidden on Meet Aria (step 3), which shows its own hero blob.
+                if step != 3 {
+                    Image(systemName: stepIcon)
+                        .font(.system(size: 42, weight: .medium))
+                        .foregroundStyle(settings.accentColor)
+                        .padding(.bottom, 16)
+                        .transition(.scale.combined(with: .opacity))
+                        .id("icon-\(step)")
+                        .animation(.spring(response: 0.4, dampingFraction: 0.75), value: step)
+                }
 
                 // Step content
                 Group {
@@ -83,10 +86,11 @@ struct OnboardingView: View {
                     case 0: welcome
                     case 1: micStep
                     case 2: screenStep
-                    case 3: localModelStep
-                    case 4: apiStep
-                    case 5: personaStep
-                    case 6: briefingStep
+                    case 3: meetAriaStep
+                    case 4: localModelStep
+                    case 5: apiStep
+                    case 6: personaStep
+                    case 7: briefingStep
                     default: doneStep
                     }
                 }
@@ -101,36 +105,41 @@ struct OnboardingView: View {
 
                 Spacer(minLength: 20)
 
-                // Navigation buttons
-                HStack(spacing: 12) {
-                    if step > 0 && step < totalSteps - 1 {
-                        Button {
-                            withAnimation { step -= 1 }
-                        } label: {
-                            Text("Back")
-                                .frame(minWidth: 72)
+                // Navigation buttons. Meet Aria (step 3) carries its own forward
+                // CTA inside the card, so the shared bar steps aside there.
+                if step != 3 {
+                    HStack(spacing: 12) {
+                        if step > 0 && step < totalSteps - 1 {
+                            Button {
+                                withAnimation { step -= 1 }
+                            } label: {
+                                Text("Back")
+                                    .frame(minWidth: 72)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.large)
                         }
-                        .buttonStyle(.bordered)
+
+                        Spacer()
+
+                        Button {
+                            withAnimation { advance() }
+                        } label: {
+                            Text(step == totalSteps - 1 ? "Finish" : "Continue")
+                                .fontWeight(.semibold)
+                                .frame(minWidth: 110)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(settings.accentColor)
                         .controlSize(.large)
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(step == 1 && !micGranted)
                     }
-
-                    Spacer()
-
-                    Button {
-                        withAnimation { advance() }
-                    } label: {
-                        Text(step == totalSteps - 1 ? "Finish" : "Continue")
-                            .fontWeight(.semibold)
-                            .frame(minWidth: 110)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(settings.accentColor)
-                    .controlSize(.large)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(step == 1 && !micGranted)
+                    .padding(.horizontal, 40)
+                    .padding(.bottom, 32)
+                } else {
+                    Color.clear.frame(height: 32)
                 }
-                .padding(.horizontal, 40)
-                .padding(.bottom, 32)
             }
         }
         .frame(width: 560, height: 500)
@@ -220,6 +229,15 @@ struct OnboardingView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    /// The 60-second "wow": Aria composes a live "here's your day" card before
+    /// the user configures anything. Self-contained in OnboardingMeetAria.swift;
+    /// it carries its own forward CTA (so the shared nav bar hides for this step).
+    private var meetAriaStep: some View {
+        MeetAriaStep(accent: settings.accentColor) {
+            withAnimation { advance() }
         }
     }
 
@@ -344,14 +362,14 @@ struct OnboardingView: View {
     // MARK: Navigation
 
     private func advance() {
-        // Save API key when leaving API step
-        if step == 4, !apiKey.trimmingCharacters(in: .whitespaces).isEmpty {
+        // Save API key when leaving API step (now step 5 after Meet Aria insert).
+        if step == 5, !apiKey.trimmingCharacters(in: .whitespaces).isEmpty {
             try? KeychainManager.save(apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
                                       account: KeychainKey.geminiAPIKey)
             apiStatus = "Saved."
         }
-        // Leaving the persona step installs the matching workflow pack.
-        if step == 5, !persona.isEmpty, let pack = WorkflowPack.forPersona(persona) {
+        // Leaving the persona step (now step 6) installs the matching workflow pack.
+        if step == 6, !persona.isEmpty, let pack = WorkflowPack.forPersona(persona) {
             settings.personaChoice = persona
             Task {
                 await PackInstaller.install(pack)
