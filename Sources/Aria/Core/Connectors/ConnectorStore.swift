@@ -1,0 +1,116 @@
+import Foundation
+
+/// The user-facing connection state of one provider. `Sendable` so it crosses
+/// the actor boundary into the (future) UI cleanly.
+struct ConnectorStatus: Sendable, Equatable, Identifiable {
+    let id: ConnectorID
+    let displayName: String
+    /// The user has supplied an OAuth client ID for this provider.
+    let isConfigured: Bool
+    /// A valid token bundle is stored.
+    let isConnected: Bool
+    /// The granted scopes, when connected.
+    let scopes: [String]
+    /// Access-token expiry, when connected.
+    let expiry: Date?
+}
+
+/// Errors surfaced to the UI from connection attempts.
+enum ConnectorError: Error, Equatable {
+    /// The user hasn't supplied an OAuth client ID for this provider yet.
+    case notConfigured(ConnectorID)
+}
+
+/// The single entry point the UI uses to inspect and manage connections.
+///
+/// An `actor` so concurrent UI taps and background refreshes serialize against
+/// one token store. The live OAuth flow (`connect`) opens the browser and runs
+/// a loopback listener; everything else is local Keychain bookkeeping.
+actor ConnectorStore {
+    static let shared = ConnectorStore()
+
+    private let tokenStore: ConnectorTokenStore
+    private let session: URLSession
+    /// Injectable so tests can avoid the real network/browser.
+    private let authorizeImpl: @Sendable (OAuth2.AuthConfig, URLSession) async throws -> OAuth2.TokenResponse
+
+    init(tokenStore: ConnectorTokenStore = .keychain,
+         session: URLSession = .shared,
+         authorize: @escaping @Sendable (OAuth2.AuthConfig, URLSession) async throws -> OAuth2.TokenResponse =
+            { config, session in try await OAuth2.authorize(config: config, session: session) }) {
+        self.tokenStore = tokenStore
+        self.session = session
+        self.authorizeImpl = authorize
+    }
+
+    /// Snapshot of every known provider's status (config + connection).
+    func connectors() -> [ConnectorStatus] {
+        Connectors.all.map { provider in
+            let tokens = tokenStore.load(provider.id)
+            return ConnectorStatus(
+                id: provider.id,
+                displayName: provider.displayName,
+                isConfigured: provider.isConfigured,
+                isConnected: tokens != nil,
+                scopes: tokens?.scopes ?? [],
+                expiry: tokens?.expiry
+            )
+        }
+    }
+
+    func status(_ id: ConnectorID) -> ConnectorStatus {
+        let provider = Connectors.provider(for: id)
+        let tokens = tokenStore.load(id)
+        return ConnectorStatus(
+            id: id,
+            displayName: provider.displayName,
+            isConfigured: provider.isConfigured,
+            isConnected: tokens != nil,
+            scopes: tokens?.scopes ?? [],
+            expiry: tokens?.expiry
+        )
+    }
+
+    func isConnected(_ id: ConnectorID) -> Bool {
+        tokenStore.isConnected(id)
+    }
+
+    /// Run the interactive OAuth flow for a provider and store the result.
+    /// Throws `.notConfigured` (cleanly) when no client ID is set.
+    func connect(_ id: ConnectorID) async throws {
+        let provider = Connectors.provider(for: id)
+        guard let clientID = provider.resolvedClientID() else {
+            throw ConnectorError.notConfigured(id)
+        }
+        let response = try await authorizeImpl(provider.authConfig(clientID: clientID), session)
+        let tokens = ConnectorTokens(from: response)
+        try tokenStore.save(tokens, for: id)
+    }
+
+    /// Forget a provider's tokens. Idempotent.
+    func disconnect(_ id: ConnectorID) {
+        tokenStore.delete(id)
+    }
+
+    /// Return a valid access token for `id`, refreshing if expired. Returns nil
+    /// when not connected, not configured, or the refresh fails. Persists a
+    /// refreshed token so the next call is cheap.
+    func validAccessToken(_ id: ConnectorID) async -> String? {
+        guard var tokens = tokenStore.load(id) else { return nil }
+        guard tokens.isExpired() else { return tokens.accessToken }
+        guard let refreshToken = tokens.refreshToken else { return nil }
+        let provider = Connectors.provider(for: id)
+        guard let clientID = provider.resolvedClientID() else { return nil }
+        do {
+            let response = try await OAuth2.refresh(refreshToken: refreshToken,
+                                                    config: provider.authConfig(clientID: clientID),
+                                                    session: session)
+            tokens = ConnectorTokens(from: response, previousRefreshToken: refreshToken)
+            try? tokenStore.save(tokens, for: id)
+            return tokens.accessToken
+        } catch {
+            Log.trace("connector \(id.rawValue): token refresh failed (\(error))")
+            return nil
+        }
+    }
+}
