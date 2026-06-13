@@ -513,6 +513,7 @@ struct ProactiveSettingsTab: View {
 
 struct KnowledgeSettingsTab: View {
     @State private var s = KnowledgeSettings.load()
+    @StateObject private var app = AppSettings.shared
     @State private var docCount = 0
     @State private var indexing = false
     @State private var status = ""
@@ -523,6 +524,12 @@ struct KnowledgeSettingsTab: View {
             SSection {
                 Toggle("Let Aria search my files", isOn: $s.enabled)
                 Text("Strictly local. Files are read and indexed on this Mac only — content never leaves the machine. Ask things like “what did the investor say about pricing?”")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            SSection("Personal context") {
+                Toggle("Let Aria see my recent files & schedule", isOn: $app.personalContextEnabled)
+                Text("On-device awareness of your world — recently downloaded files, Desktop files, and upcoming calendar events — so she can answer “what was that file I just got?” or “what’s next today?”. Local-only; nothing leaves your Mac.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 

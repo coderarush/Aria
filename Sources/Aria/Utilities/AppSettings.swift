@@ -105,6 +105,12 @@ final class AppSettings: ObservableObject {
     /// Forget the dragged anchor and return to the `orbPosition` default.
     func clearOrbAnchor() { orbAnchor = nil }
 
+    /// V11.0.1: opt-in Mac-wide personal context (recent files + upcoming events).
+    /// Same UserDefaults key the PersonalContextEngine reads, so they stay in sync.
+    @Published var personalContextEnabled: Bool {
+        didSet { defaults.set(personalContextEnabled, forKey: K.personalContextEnabled) }
+    }
+
     var accentChoice: AccentChoice {
         get { Theme.decodeChoice(accentChoiceRaw) }
         set { accentChoiceRaw = Theme.encode(newValue) }
@@ -146,6 +152,7 @@ final class AppSettings: ObservableObject {
         orbAnchor = (defaults.object(forKey: K.orbAnchorX) as? Double).flatMap { x in
             (defaults.object(forKey: K.orbAnchorY) as? Double).map { CGPoint(x: x, y: $0) }
         }
+        personalContextEnabled = defaults.bool(forKey: K.personalContextEnabled)
     }
 
     /// Register/unregister the app as a login item (SMAppService, macOS 13+).
@@ -189,5 +196,6 @@ final class AppSettings: ObservableObject {
         static let personaChoice = "app.personaChoice"
         static let orbAnchorX = "app.orbAnchorX"
         static let orbAnchorY = "app.orbAnchorY"
+        static let personalContextEnabled = "app.personalContextEnabled"
     }
 }

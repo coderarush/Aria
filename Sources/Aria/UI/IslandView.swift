@@ -131,13 +131,23 @@ struct IslandView: View {
         let dragScale = isDragging ? 1.05 : 1.0
         let pulseScale = pulse ? 1.06 : 1.0
         let combinedScale = dragScale * choreographer.blobScale * pulseScale * settings.orbScale
+        // Liquid-glass: the specular highlight drifts slowly so light slides over
+        // her like a glass bead, and a faint top sheen reads as a refractive edge.
+        let gx = 0.38 + 0.05 * sin(t * 0.5)
+        let gy = 0.30 + 0.04 * cos(t * 0.42)
 
         return BlobShape(radii: radii)
             .fill(LinearGradient(colors: [c0, c1], startPoint: .topLeading, endPoint: .bottomTrailing))
             .overlay(
                 BlobShape(radii: radii)
                     .fill(RadialGradient(colors: [.white.opacity(0.55), .white.opacity(0)],
-                                         center: .init(x: 0.38, y: 0.30), startRadius: 1, endRadius: 62))
+                                         center: .init(x: gx, y: gy), startRadius: 1, endRadius: 62))
+            )
+            .overlay(
+                BlobShape(radii: radii)
+                    .fill(LinearGradient(colors: [.white.opacity(0.22), .clear],
+                                         startPoint: .top, endPoint: .center))
+                    .blendMode(.plusLighter)
             )
             .frame(width: 150, height: 150)
             .scaleEffect(x: envScale, y: envScale * splashSquash)
