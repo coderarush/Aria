@@ -142,7 +142,9 @@ final class AppSettings: ObservableObject {
         localModelEnabled = defaults.bool(forKey: K.localModelEnabled)
         localModelName = defaults.string(forKey: K.localModelName) ?? "qwen3:8b"
         localFirstEnabled = defaults.object(forKey: K.localFirstEnabled) as? Bool ?? true   // local is the default (V9)
-        localChatEnabled = defaults.bool(forKey: K.localChatEnabled)
+        // Local-first voice ON by default: only actually routes local when a local
+        // model server is alive (else it transparently falls back to fast cloud).
+        localChatEnabled = defaults.object(forKey: K.localChatEnabled) as? Bool ?? true
         spokenStepNarration = defaults.object(forKey: K.spokenStepNarration) as? Bool ?? true
         uiSoundsEnabled = defaults.object(forKey: K.uiSoundsEnabled) as? Bool ?? true
         orbScale = defaults.object(forKey: K.orbScale) as? Double ?? 1.0

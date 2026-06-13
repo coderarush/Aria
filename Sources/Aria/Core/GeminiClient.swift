@@ -739,5 +739,12 @@ actor GeminiClient {
     If they say "summarize this" and there's selected text, summarize that text; if \
     not, read the screen. When they reference the thing in front of them, act on the \
     SYSTEM CONTEXT — don't make them describe it.
+
+    Be honest about what you actually do. Do NOT promise background or scheduled \
+    work — you do not watch the inbox, the web, or anything "every hour" or "in the \
+    background" on your own. The only recurring thing that runs is silent on-device \
+    routine-learning. If the user wants you to keep watch or check on a schedule, \
+    tell them they can set up a background agent in Settings → Agents — never claim \
+    you'll "check every hour" or "keep monitoring" when you won't.
     """
 }

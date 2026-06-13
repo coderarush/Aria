@@ -51,7 +51,10 @@ struct LocalFirstRouter {
     /// runs minutes. Planner/agents/knowledge calls (short prompts) stay
     /// local by default — flip this on when running a faster instruct model.
     func chatGoesLocal() async -> Bool {
-        guard enabled, defaults.bool(forKey: Self.chatToggleKey) else { return false }
+        // Local-first voice is ON by default; the availability probe below means it
+        // only wins when a local server is actually alive, else cloud takes over.
+        let chatOn = defaults.object(forKey: Self.chatToggleKey) as? Bool ?? true
+        guard enabled, chatOn else { return false }
         Self.probeLock.lock()
         if let p = Self.lastProbe, Date().timeIntervalSince(p.at) < 30 {
             Self.probeLock.unlock()
