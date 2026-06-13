@@ -76,8 +76,11 @@ struct IslandView: View {
             pulse = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.34) { pulse = false }
         }
-        .onChange(of: choreographer.showsBlob) { _, shows in
-            if !shows { onBlobFrameChange?(nil) }
+        .onChange(of: choreographer.phase.kind) { _, kind in
+            // The blob is only draggable when fully settled; the instant she
+            // leaves that phase (splash, consolidate-out, dismiss) the panel
+            // returns to fully click-through so no stale region swallows clicks.
+            if kind != .blob { onBlobFrameChange?(nil) }
         }
     }
 
@@ -117,6 +120,10 @@ struct IslandView: View {
         let radii = BlobMath.radii(t: t, n: 11, amp: amp, speed: speed)
         let c0 = palette.first ?? viewModel.accent
         let c1 = palette.count > 1 ? palette[1] : c0
+        // Pre-folded so the modifier chain stays cheap to type-check.
+        let dragScale = isDragging ? 1.05 : 1.0
+        let pulseScale = pulse ? 1.06 : 1.0
+        let combinedScale = dragScale * choreographer.blobScale * pulseScale * settings.orbScale
 
         return BlobShape(radii: radii)
             .fill(LinearGradient(colors: [c0, c1], startPoint: .topLeading, endPoint: .bottomTrailing))
@@ -127,10 +134,7 @@ struct IslandView: View {
             )
             .frame(width: 150, height: 150)
             .scaleEffect(x: envScale, y: envScale * splashSquash)
-            .scaleEffect((isDragging ? 1.05 : 1.0)
-                         * choreographer.blobScale
-                         * (pulse ? 1.06 : 1.0)
-                         * settings.orbScale)
+            .scaleEffect(combinedScale)
             .shadow(color: .black.opacity(0.22), radius: 10, y: 7)
             .shadow(color: c0.opacity(0.28 + (suggesting ? 0.25 * breathe : 0)),
                     radius: 16 + (suggesting ? 10 * breathe : 0))

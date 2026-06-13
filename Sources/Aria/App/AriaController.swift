@@ -604,6 +604,18 @@ final class AriaController {
         panel.contentView = host
         self.panel = panel
 
+        // Keep the overlay (and its screen-edge border) fitted to the active
+        // display if the screen arrangement changes mid-session.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let panel = self.panel, panel.isVisible else { return }
+                panel.reposition()
+            }
+        }
+
         islandViewModel.onVisibilityChange = { [weak self] visible in
             guard let self else { return }
             self.setPanelVisible(visible)
