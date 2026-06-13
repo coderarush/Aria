@@ -205,6 +205,25 @@ actor GeminiClient {
                             for try await ev in stream { continuation.yield(ev) }
                             continuation.finish()
                         } catch { continuation.finish(throwing: error) }
+                    } else if let fast = await self.fastChatProvider() {
+                        // FAST CLOUD: snappier first-token than Gemini. Gemini stays
+                        // the fallback via the same first-token watchdog, so a stalled
+                        // or failing fast provider degrades cleanly — never a freeze.
+                        await RoutingLog.shared.record(RoutingDecision(
+                            taskClass: .simpleChat, tier: .cloud, reason: "fast cloud chat"))
+                        Log.trace("chat: fast cloud primary")
+                        let stream = Self.streamWithFallback(
+                            primary: await fast.streamChat(transcript: transcript, history: history,
+                                                           system: ProviderConfig.chatSystemPrompt, specs: specs),
+                            fallback: {
+                                Log.trace("chat: fast cloud failed before output — Gemini fallback")
+                                return cloud()
+                            },
+                            firstTokenTimeout: 6)
+                        do {
+                            for try await ev in stream { continuation.yield(ev) }
+                            continuation.finish()
+                        } catch { continuation.finish(throwing: error) }
                     } else {
                         do {
                             for try await ev in cloud() { continuation.yield(ev) }
@@ -216,6 +235,13 @@ actor GeminiClient {
             }
         }
         return cloud()
+    }
+
+    /// The fastest configured cloud chat provider (Cerebras → Groq), or nil if the
+    /// user hasn't added a key for either. When present it fronts Gemini for chat.
+    private func fastChatProvider() async -> OpenAICompatibleClient? {
+        for c in ProviderConfig.fastChatClients() where await c.hasCredentials() { return c }
+        return nil
     }
 
     /// Core everyday tools for local-model chat (kept small on purpose — see
