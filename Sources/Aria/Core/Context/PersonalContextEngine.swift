@@ -1,5 +1,6 @@
 import Foundation
 import EventKit
+import AppKit
 
 /// "Aria knows your world." The Personal Context Engine aggregates lightweight,
 /// Mac-wide signals into a small set of `ContextCard`s — recent files in
@@ -53,8 +54,12 @@ actor PersonalContextEngine {
         built.append(contentsOf: Self.recentFileCards(in: "~/Downloads", limit: 30))
         built.append(contentsOf: Self.recentFileCards(in: "~/Desktop", limit: 30))
         built.append(contentsOf: Self.upcomingEventCards(daysAhead: 7))
-        // Mail is intentionally skipped in v1 — there is no trivially-available
-        // synchronous mail accessor, and we won't block context on it.
+        // v2 signals. Apps are read on the main actor (NSWorkspace). Messages runs
+        // off the actor with a hard timeout so a slow/locked DB never stalls us.
+        built.append(contentsOf: await MainActor.run { Self.appCards(limit: 12) })
+        built.append(contentsOf: await Task.detached { Self.messageCards(limit: 15) }.value)
+        // Mail still deferred — Apple Mail needs an automation-permission prompt we
+        // won't trigger silently; revisit once connectors land a Gmail path.
         cards = built
         save()
     }
@@ -132,6 +137,73 @@ actor PersonalContextEngine {
                                    snippet: "\(when) — \(title)",
                                    timestamp: event.startDate)
             }
+    }
+
+    /// Apps open right now, frontmost first — cheap, no permission. Lets Aria
+    /// answer "what am I working in?" / "switch back to my editor".
+    @MainActor
+    private static func appCards(limit: Int) -> [ContextCard] {
+        let ws = NSWorkspace.shared
+        let frontPID = ws.frontmostApplication?.processIdentifier
+        let now = Date()
+        return ws.runningApplications
+            .filter { $0.activationPolicy == .regular && ($0.localizedName?.isEmpty == false) }
+            .prefix(limit)
+            .map { app in
+                let name = app.localizedName ?? "App"
+                let active = app.processIdentifier == frontPID
+                return ContextCard(id: "app:\(app.bundleIdentifier ?? name)",
+                                   source: .app,
+                                   title: name,
+                                   snippet: active ? "Active right now" : "Open right now",
+                                   timestamp: now)
+            }
+    }
+
+    /// Recent message previews via a READ-ONLY sqlite3 query on chat.db. Requires
+    /// Full Disk Access; silently returns [] without it. Hard-bounded by a short
+    /// timeout so a locked/slow DB can never stall a refresh. Never copies the DB.
+    nonisolated private static func messageCards(limit: Int) -> [ContextCard] {
+        let path = ("~/Library/Messages/chat.db" as NSString).expandingTildeInPath
+        guard FileManager.default.isReadableFile(atPath: path) else { return [] }
+        let sql = "SELECT COALESCE(text,'') FROM message "
+            + "WHERE text IS NOT NULL AND length(text) > 0 "
+            + "ORDER BY date DESC LIMIT \(max(1, limit));"
+        guard let out = runWithTimeout("/usr/bin/sqlite3", ["-readonly", path, sql], seconds: 2.5) else {
+            return []
+        }
+        let now = Date()
+        return out.split(separator: "\n").prefix(limit).enumerated().map { idx, line in
+            let text = String(line).trimmingCharacters(in: .whitespacesAndNewlines)
+            return ContextCard(id: "message:\(idx):\(text.prefix(24))",
+                               source: .message,
+                               title: "Recent message",
+                               snippet: String(text.prefix(160)),
+                               timestamp: now)
+        }
+    }
+
+    /// Run a command, capturing stdout, killed if it exceeds `seconds`. Returns
+    /// nil on launch failure, timeout, or non-zero exit. Output is expected small.
+    nonisolated private static func runWithTimeout(_ launchPath: String, _ args: [String], seconds: Double) -> String? {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: launchPath)
+        proc.arguments = args
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = Pipe()
+        do { try proc.run() } catch { return nil }
+
+        let group = DispatchGroup()
+        group.enter()
+        DispatchQueue.global().async { proc.waitUntilExit(); group.leave() }
+        if group.wait(timeout: .now() + seconds) == .timedOut {
+            proc.terminate()
+            return nil
+        }
+        guard proc.terminationStatus == 0 else { return nil }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        return String(data: data, encoding: .utf8)
     }
 
     // MARK: Persistence

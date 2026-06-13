@@ -118,4 +118,25 @@ final class PersonalContextTests: XCTestCase {
             XCTFail("expected missingInput")
         } catch {}
     }
+
+    // MARK: v2 sources
+
+    func testNewSourcesRankAlongsideFiles() {
+        let cards = [
+            card("app:xcode", .app, "Xcode", "Active right now"),
+            card("message:0", .message, "Recent message", "lunch at noon with sara"),
+            card("file:/x/report.pdf", .file, "report.pdf", "/x/report.pdf"),
+        ]
+        XCTAssertEqual(PersonalContextEngine.rank("lunch", in: cards, limit: 8).first?.source, .message)
+        XCTAssertEqual(PersonalContextEngine.rank("xcode", in: cards, limit: 8).first?.source, .app)
+    }
+
+    func testAllSourcesCodableRoundTrip() throws {
+        for source in [ContextSource.file, .calendar, .mail, .app, .message] {
+            let c = card("id", source, "t", "s")
+            let data = try JSONEncoder().encode(c)
+            let back = try JSONDecoder().decode(ContextCard.self, from: data)
+            XCTAssertEqual(back.source, source)
+        }
+    }
 }

@@ -8,6 +8,7 @@ enum ContextSource: String, Codable, Sendable {
     case calendar
     case mail
     case app
+    case message
 }
 
 /// One lightweight slice of the user's world: a recent file, an upcoming event,
