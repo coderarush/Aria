@@ -1,26 +1,39 @@
 import SwiftUI
 
-/// Aria's presence: a single organic, morphing blob anchored bottom-center — a little
-/// living creature, not a UI chrome element. It squirms gently while idle/listening,
-/// swells with your voice, swirls faster while thinking, and breathes while she speaks.
-/// A caption below shows her reply. The rest of the screen stays transparent + click-through.
+/// Aria's presence. She is three things that flow into one another: a faint glow
+/// rotating around the screen edge (listening / executing), an organic morphing
+/// blob that pools at your chosen corner (thinking / answering), and nothing at
+/// all when idle. The `PresenceChoreographer` runs the water-like transitions
+/// between them; a single gated TimelineView is the only clock, so an idle Aria
+/// does zero rendering work.
 struct IslandView: View {
     @ObservedObject var viewModel: IslandViewModel
-    @State private var pulse = false   // springy "pop" on every state change
+    @StateObject private var choreographer = PresenceChoreographer()
+    @ObservedObject private var settings = AppSettings.shared
+    @State private var pulse = false           // springy pop on state change
+    @State private var dragOffset: CGSize = .zero
+    @State private var isDragging = false
 
-    private var active: Bool { viewModel.isVisible && viewModel.state != .idle }
-    /// Show the orb either when actively engaged OR when a proactive suggestion
-    /// is waiting (a silent breathing glow).
-    private var showBlob: Bool { active || viewModel.hasSuggestion }
+    /// Reported up to the hosting panel so it can make ONLY the blob interactive.
+    var onBlobFrameChange: ((CGRect?) -> Void)?
 
-    /// Blob fill colors (first two of the chosen palette, or the accent).
+    private var presenceMode: PresenceMode {
+        PresenceMode.from(state: viewModel.state,
+                          visible: viewModel.isVisible,
+                          hasSuggestion: viewModel.hasSuggestion)
+    }
+
+    /// The TimelineView (and all work) exists only while something is on screen.
+    private var isActive: Bool {
+        presenceMode != .hidden || choreographer.phase.kind != .hidden
+    }
+
     private var palette: [Color] {
         let c = viewModel.glowColors.isEmpty ? [viewModel.accent, viewModel.accent] : viewModel.glowColors
         return c
     }
 
-    /// A synthetic, irregular "speech" envelope (~0…1) that makes the blob breathe like
-    /// she's talking while she responds. Detuned sines → an organic, non-repeating cadence.
+    /// A synthetic speech envelope (~0…1) so the blob breathes while she talks.
     static func speechEnv(_ t: Double) -> Double {
         let e = 0.55 + 0.45 * (0.55 * sin(t * 8.0) + 0.30 * sin(t * 12.7) + 0.15 * sin(t * 5.3))
         return max(0, min(1, e))
@@ -35,80 +48,159 @@ struct IslandView: View {
         case .idle:      return ""
         }
     }
-    private var showCaption: Bool { active && !captionText.isEmpty }
+    private var showCaption: Bool {
+        viewModel.isVisible && viewModel.state != .idle && !captionText.isEmpty
+    }
 
     var body: some View {
-        ZStack {
-            Color.clear
-            blob
-                .opacity(showBlob ? 1 : 0)
-                .scaleEffect((active ? 1 : (viewModel.hasSuggestion ? 0.82 : 0.4))
-                             * (pulse ? 1.06 : 1.0)
-                             * AppSettings.shared.orbScale)
-                .padding(.bottom, showCaption ? 134 : 64)
-                .padding(.horizontal, 48)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: Self.orbAlignment)
-                .animation(.spring(response: 0.55, dampingFraction: 0.62), value: active)
-                .animation(.spring(response: 0.6, dampingFraction: 0.7), value: viewModel.hasSuggestion)
-                .animation(.spring(response: 0.5, dampingFraction: 0.72), value: showCaption)
-                .animation(.spring(response: 0.35, dampingFraction: 0.5), value: pulse)
-                .allowsHitTesting(false)
+        GeometryReader { geo in
+            ZStack {
+                Color.clear
+                if isActive {
+                    TimelineView(.animation) { tl in
+                        let t = tl.date.timeIntervalSinceReferenceDate
+                        presenceContent(t: t, size: geo.size)
+                            .onChange(of: t) { _, now in
+                                // Single clock: keep the choreographer's target in
+                                // sync with the live mode, then advance the phase.
+                                choreographer.setMode(presenceMode, now: now)
+                                choreographer.advance(now: now)
+                            }
+                    }
+                }
+            }
+            .overlay(alignment: .bottom) { caption }
         }
-        .overlay(alignment: .bottom) { caption }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onChange(of: viewModel.state) { _, _ in
-            // A lively springy pop whenever she changes state (wake, think, answer).
             pulse = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.34) { pulse = false }
         }
-    }
-
-    /// The morphing blob. A continuous Canvas-like TimelineView feeds fresh vertex radii
-    /// each frame so the outline squirms organically; reaction comes from how much it
-    /// wobbles (amp) and how fast (speed).
-    private var blob: some View {
-        TimelineView(.animation) { tl in
-            let t = tl.date.timeIntervalSinceReferenceDate
-            let level = viewModel.state == .listening ? Double(min(max(viewModel.audioLevel, 0), 1)) : 0
-            let speaking = viewModel.state == .responding ? Self.speechEnv(t) : 0
-            let thinking = viewModel.state == .thinking
-            // A waiting proactive suggestion: a slow, calm breathing while idle.
-            let suggesting = viewModel.hasSuggestion && viewModel.state == .idle
-            let breathe = suggesting ? (0.5 + 0.5 * sin(t * 1.8)) : 0
-            // Calm + nearly round when idle (top-left look); amoeba-wobbly when busy.
-            let amp = 0.07 + level * 0.16 + speaking * 0.12 + (thinking ? 0.07 : 0) + breathe * 0.04
-            let speed = thinking ? 1.8 : 1.0
-            let envScale = 1 + level * 0.12 + speaking * 0.10 + breathe * 0.06
-            let radii = BlobMath.radii(t: t, n: 11, amp: amp, speed: speed)
-            let c0 = palette.first ?? viewModel.accent
-            let c1 = palette.count > 1 ? palette[1] : c0
-
-            BlobShape(radii: radii)
-                .fill(LinearGradient(colors: [c0, c1], startPoint: .topLeading, endPoint: .bottomTrailing))
-                .overlay(
-                    // Soft inner highlight so it reads as a rounded, gel-like body.
-                    BlobShape(radii: radii)
-                        .fill(RadialGradient(colors: [.white.opacity(0.55), .white.opacity(0)],
-                                             center: .init(x: 0.38, y: 0.30), startRadius: 1, endRadius: 62))
-                )
-                .frame(width: 150, height: 150)
-                .scaleEffect(envScale)
-                // Solid, gel-like body — just a soft depth shadow + a faint color halo,
-                // not the big glow from before.
-                .shadow(color: .black.opacity(0.22), radius: 10, y: 7)
-                .shadow(color: c0.opacity(0.28 + (suggesting ? 0.25 * breathe : 0)),
-                        radius: 16 + (suggesting ? 10 * breathe : 0))
-        }
-        .frame(width: 184, height: 184)
-    }
-
-    /// User-chosen home for the orb along the bottom edge.
-    static var orbAlignment: Alignment {
-        switch AppSettings.shared.orbPosition {
-        case .bottomRight: return .bottomTrailing
-        default:           return .bottom
+        .onChange(of: choreographer.showsBlob) { _, shows in
+            if !shows { onBlobFrameChange?(nil) }
         }
     }
+
+    // MARK: - Composited presence
+
+    @ViewBuilder
+    private func presenceContent(t: Double, size: CGSize) -> some View {
+        ZStack {
+            // The screen-edge glow (listening / executing / transitions).
+            if choreographer.borderIntensity > 0.001 {
+                ScreenBorderView(palette: palette,
+                                 intensity: choreographer.borderIntensity,
+                                 sweepPhase: choreographer.borderSweep)
+            }
+            // The blob (thinking / answering / suggestion / pooling / splashing).
+            if choreographer.showsBlob {
+                blobBody(t: t)
+                    .background(blobFrameReporter(size: size))
+                    .position(blobPosition(in: size))
+                    .allowsHitTesting(choreographer.phase.kind == .blob)
+                    .gesture(blobDrag(in: size))
+            }
+        }
+    }
+
+    /// The morphing blob, fed `t` from the shared clock (no nested TimelineView).
+    private func blobBody(t: Double) -> some View {
+        let level = viewModel.state == .listening ? Double(min(max(viewModel.audioLevel, 0), 1)) : 0
+        let speaking = viewModel.state == .responding ? Self.speechEnv(t) : 0
+        let thinking = viewModel.state == .thinking
+        let suggesting = viewModel.hasSuggestion && viewModel.state == .idle
+        let breathe = suggesting ? (0.5 + 0.5 * sin(t * 1.8)) : 0
+        let amp = 0.07 + level * 0.16 + speaking * 0.12 + (thinking ? 0.07 : 0)
+                + breathe * 0.04 + choreographer.blobAmpBoost
+        let speed = thinking ? 1.8 : 1.0
+        let envScale = 1 + level * 0.12 + speaking * 0.10 + breathe * 0.06
+        let radii = BlobMath.radii(t: t, n: 11, amp: amp, speed: speed)
+        let c0 = palette.first ?? viewModel.accent
+        let c1 = palette.count > 1 ? palette[1] : c0
+
+        return BlobShape(radii: radii)
+            .fill(LinearGradient(colors: [c0, c1], startPoint: .topLeading, endPoint: .bottomTrailing))
+            .overlay(
+                BlobShape(radii: radii)
+                    .fill(RadialGradient(colors: [.white.opacity(0.55), .white.opacity(0)],
+                                         center: .init(x: 0.38, y: 0.30), startRadius: 1, endRadius: 62))
+            )
+            .frame(width: 150, height: 150)
+            .scaleEffect(x: envScale, y: envScale * splashSquash)
+            .scaleEffect((isDragging ? 1.05 : 1.0)
+                         * choreographer.blobScale
+                         * (pulse ? 1.06 : 1.0)
+                         * settings.orbScale)
+            .shadow(color: .black.opacity(0.22), radius: 10, y: 7)
+            .shadow(color: c0.opacity(0.28 + (suggesting ? 0.25 * breathe : 0)),
+                    radius: 16 + (suggesting ? 10 * breathe : 0))
+            .frame(width: 184, height: 184)
+            .animation(.spring(response: 0.35, dampingFraction: 0.5), value: pulse)
+            .animation(.spring(response: 0.4, dampingFraction: 0.7), value: isDragging)
+    }
+
+    /// Vertical squash in the final stretch of the splash fall (impact gives).
+    private var splashSquash: Double {
+        let f = choreographer.blobFall
+        return f > 0.8 ? 1 - (f - 0.8) / 0.2 * 0.18 : 1
+    }
+
+    // MARK: - Positioning
+
+    /// Resting screen-space center of the blob (anchor if dragged, else the
+    /// legacy `orbPosition` corner). Caption stays bottom-anchored regardless.
+    private func restingCenter(in size: CGSize) -> CGPoint {
+        if let a = settings.orbAnchor {
+            return CGPoint(x: a.x * size.width, y: a.y * size.height)
+        }
+        let bottomY = size.height - 120
+        switch settings.orbPosition {
+        case .bottomRight: return CGPoint(x: size.width - 120, y: bottomY)
+        default:           return CGPoint(x: size.width / 2, y: bottomY)
+        }
+    }
+
+    /// Live blob center: resting point, plus the splash fall, plus any drag.
+    private func blobPosition(in size: CGSize) -> CGPoint {
+        let base = restingCenter(in: size)
+        let fall = choreographer.blobFall
+        let eased = fall * fall                       // ease-in
+        let bottomY = size.height - 40
+        let y = base.y + (bottomY - base.y) * eased
+        return CGPoint(x: base.x + dragOffset.width, y: y + dragOffset.height)
+    }
+
+    private func blobFrameReporter(size: CGSize) -> some View {
+        GeometryReader { g -> Color in
+            let f = g.frame(in: .global)
+            DispatchQueue.main.async {
+                if choreographer.phase.kind == .blob { onBlobFrameChange?(f) }
+            }
+            return Color.clear
+        }
+    }
+
+    private func blobDrag(in size: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 4)
+            .onChanged { v in
+                guard choreographer.phase.kind == .blob else { return }
+                isDragging = true
+                dragOffset = v.translation
+            }
+            .onEnded { v in
+                guard isDragging else { return }
+                isDragging = false
+                let base = restingCenter(in: size)
+                let cx = base.x + v.translation.width
+                let cy = base.y + v.translation.height
+                let nx = min(max(cx / size.width, 0.06), 0.94)
+                let ny = min(max(cy / size.height, 0.06), 0.94)
+                settings.orbAnchor = CGPoint(x: nx, y: ny)
+                dragOffset = .zero
+            }
+    }
+
+    // MARK: - Caption
 
     private var caption: some View {
         Group {
@@ -125,6 +217,7 @@ struct IslandView: View {
                     .frame(maxWidth: 720)
                     .padding(.bottom, 96)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .allowsHitTesting(false)
             }
         }
         .animation(.spring(response: 0.5, dampingFraction: 0.62), value: showCaption)
