@@ -52,7 +52,7 @@ final class PresenceChoreographer: ObservableObject {
     @Published private(set) var phase: Phase = .hidden
 
     static let dBorderIn = 0.45
-    static let dConsolidate = 0.7
+    static let dConsolidate = 0.9
     static let dSplash = 0.35
     static let dIgnite = 0.5
     static let dDismiss = 0.3
@@ -76,11 +76,11 @@ final class PresenceChoreographer: ObservableObject {
     func advance(now: Double) {
         let dur = duration(of: phase.kind)
         guard dur > 0 else { reconcile(now: now); return }
-        let p = min(1, max(0, (now - start) / dur))
-        if p >= 1 {
+        let elapsed = now - start
+        if elapsed >= dur - 1e-9 {     // epsilon: settle robustly on the boundary tick
             settle(now: now)
         } else {
-            phase = withProgress(phase.kind, p)
+            phase = withProgress(phase.kind, min(1, max(0, elapsed / dur)))
         }
     }
 
@@ -173,6 +173,13 @@ final class PresenceChoreographer: ObservableObject {
         return nil
     }
 
+    /// Progress of the edge-gather (border collapsing into the blob); nil unless
+    /// currently consolidating. Drives `EdgeGatherView`.
+    var consolidateProgress: Double? {
+        if case .consolidating(let p) = phase { return p }
+        return nil
+    }
+
     /// Whether the blob should be drawn at all in the current phase.
     var showsBlob: Bool {
         switch phase.kind {
@@ -185,9 +192,10 @@ final class PresenceChoreographer: ObservableObject {
     var blobScale: Double {
         switch phase {
         case .consolidating(let p):
-            // 0 → 1.12 → 1.0 overshoot
-            let s = p < 0.7 ? (p / 0.7) * 1.12 : 1.12 - ((p - 0.7) / 0.3) * 0.12
-            return s
+            // Stay tiny early, then form from the arriving light with a late
+            // overshoot — so the droplet looks fed by the gather, not popped in.
+            let e = p * p
+            return e < 0.8 ? (e / 0.8) * 1.12 : 1.12 - ((e - 0.8) / 0.2) * 0.12
         case .blob: return 1
         case .splashing: return 1
         default: return 1

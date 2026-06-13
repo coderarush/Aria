@@ -95,6 +95,10 @@ struct IslandView: View {
                                  intensity: choreographer.borderIntensity,
                                  sweepPhase: choreographer.borderSweep)
             }
+            // The gather: light streaming from the edge into the blob as she pools.
+            if let cp = choreographer.consolidateProgress {
+                EdgeGatherView(palette: palette, progress: cp, center: restingCenter(in: size))
+            }
             // The blob (thinking / answering / suggestion / pooling / splashing).
             if choreographer.showsBlob {
                 blobBody(t: t)
