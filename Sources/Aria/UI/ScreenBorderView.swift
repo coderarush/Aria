@@ -1,65 +1,134 @@
 import SwiftUI
 
-/// Aria living on the screen's edge: a faint, organic perimeter glow in the same
-/// brand language as the blob (gradient palette, gooey, alive), with a brighter
-/// "comet" of light drifting slowly around the rim. This is what she becomes
-/// while listening and while executing a multi-step task.
+/// Aria living on the screen's edge as a Siri-style soft glow: layered, heavily
+/// blurred bands of her palette that slowly rotate around the perimeter, with a
+/// few brighter light-pools drifting along the rim. Luminous and ambient — not a
+/// crisp ring, not beads. While listening and while executing a task, this is her.
 ///
 /// All geometry comes from `BorderMath`; this view only paints. It is purely
 /// decorative and click-through — it never intercepts mouse events.
 struct ScreenBorderView: View {
-    /// Blob palette (first two colors used for the gradient sweep).
+    /// Brand palette (hues are derived from the first colors).
     var palette: [Color]
     /// Master opacity 0…1 — the choreographer drains this during consolidate and
-    /// raises it during wake/ignite.
+    /// ramps it on wake / splash-ignite.
     var intensity: Double
-    /// Splash-ignition gate. `nil` = full ring lit. Otherwise only the arc within
-    /// `phase·0.5` of bottom-center (u = 0.5) is lit, spreading both ways as it
-    /// rises 0 → 1.
+    /// Splash-ignition gate. `nil` = full ring. Otherwise only the arc within
+    /// `phase·0.5` of bottom-center (u = 0.5) is revealed, spreading both ways 0→1.
     var sweepPhase: Double?
 
-    private let inset: CGFloat = 7
-    private let cornerRadius: CGFloat = 26
-    private let samples = 200
+    private let inset: CGFloat = 6
+    private let cornerRadius: CGFloat = 28
 
     var body: some View {
         TimelineView(.animation) { tl in
             let t = tl.date.timeIntervalSinceReferenceDate
-            // ~12s per lap — calm, ambient, never busy.
-            let head = (t * 0.083).truncatingRemainder(dividingBy: 1)
-            Canvas { ctx, size in
-                guard intensity > 0.001 else { return }
-                let rect = CGRect(origin: .zero, size: size).insetBy(dx: inset, dy: inset)
-                let c0 = palette.first ?? .accentColor
-                let c1 = palette.count > 1 ? palette[1] : c0
-                let tail = 0.18
-
-                for i in 0..<samples {
-                    let u = Double(i) / Double(samples)
-                    if let phase = sweepPhase, abs(u - 0.5) > max(0, phase) * 0.5 { continue }
-
-                    let (p, _) = BorderMath.point(u: u, in: rect, cornerRadius: cornerRadius)
-                    // Organic width/brightness wobble so the rim breathes like the blob.
-                    let wob = 0.5 + 0.5 * sin(t * 1.3 + u * 18)
-                    let comet = BorderMath.cometIntensity(u: u, head: head, tail: tail)
-
-                    let base = 0.16 + 0.06 * wob           // faint ambient ring
-                    let alpha = (base + comet * 0.7) * intensity
-                    let r = (3.0 + 2.2 * wob + comet * 7.0) // comet swells the dot
-
-                    let col = blend(c0, c1, u)
-                    let dot = Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2))
-                    ctx.fill(dot, with: .color(col.opacity(min(1, alpha))))
+            GeometryReader { geo in
+                if intensity > 0.001 {
+                    glow(t: t, size: geo.size)
+                        .opacity(intensity)
+                        .mask(revealMask(size: geo.size))
                 }
             }
-            // Soft bloom so the dots read as a continuous gel rim, not beads.
-            .blur(radius: 5)
         }
         .allowsHitTesting(false)
         .ignoresSafeArea()
     }
 
-    /// Linear color blend; SwiftUI has no built-in, so interpolate components.
+    // MARK: - The composited glow
+
+    private func glow(t: Double, size: CGSize) -> some View {
+        let h = hues()
+        let rect = CGRect(origin: .zero, size: size).insetBy(dx: inset, dy: inset)
+        return ZStack {
+            // 1. Primary conic band — slow clockwise drift (~33s / rev).
+            conicBand(colors: cyclic(h), angle: t * 11, lineWidth: 96, blur: 46, opacity: 0.55)
+            // 2. Counter-rotating band — different hue order, softer, for shimmer/depth.
+            conicBand(colors: cyclic(h.reversed()), angle: -t * 8, lineWidth: 70, blur: 62, opacity: 0.38)
+            // 3. Drifting light-pools riding the rim — the moving "energy".
+            ForEach(0..<4, id: \.self) { i in
+                lightPool(hue: h[i % h.count], u: pool_u(i, t), rect: rect)
+            }
+        }
+        .compositingGroup()
+        .blendMode(.plusLighter)
+    }
+
+    /// An inset rounded-rect drawn as a thick, heavily-blurred conic-gradient band.
+    private func conicBand(colors: [Color], angle: Double, lineWidth: CGFloat,
+                           blur: CGFloat, opacity: Double) -> some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .inset(by: inset)
+            .strokeBorder(
+                AngularGradient(gradient: Gradient(colors: colors), center: .center,
+                                angle: .degrees(angle)),
+                lineWidth: lineWidth)
+            .blur(radius: blur)
+            .opacity(opacity)
+    }
+
+    /// A big soft radial glow positioned on the perimeter at parameter `u`.
+    private func lightPool(hue: Color, u: Double, rect: CGRect) -> some View {
+        let p = BorderMath.point(u: u, in: rect, cornerRadius: cornerRadius).point
+        return RadialGradient(gradient: Gradient(colors: [hue.opacity(0.85), hue.opacity(0)]),
+                              center: .center, startRadius: 2, endRadius: 150)
+            .frame(width: 300, height: 300)
+            .blur(radius: 40)
+            .opacity(0.5)
+            .position(p)
+    }
+
+    /// Each pool advances around the rim at its own slow pace from its own start.
+    private func pool_u(_ i: Int, _ t: Double) -> Double {
+        let base = Double(i) / 4.0
+        let speed = 0.018 + 0.006 * Double(i)        // 0.018…0.036 laps/sec (~28–55s/lap)
+        let u = base + t * speed
+        return u - floor(u)
+    }
+
+    // MARK: - Splash-ignite reveal
+
+    /// Full white = whole ring visible. During ignite, a thick perimeter arc grows
+    /// from bottom-center (u = 0.5) outward, revealing the glow as it spreads.
+    @ViewBuilder
+    private func revealMask(size: CGSize) -> some View {
+        if let phase = sweepPhase {
+            let rect = CGRect(origin: .zero, size: size).insetBy(dx: inset, dy: inset)
+            ArcRevealShape(rect: rect, cornerRadius: cornerRadius, halfWidthU: max(0, phase) * 0.5)
+                .stroke(Color.white, style: StrokeStyle(lineWidth: 320, lineCap: .round, lineJoin: .round))
+                .blur(radius: 24)
+        } else {
+            Rectangle().fill(Color.white)
+        }
+    }
+
+    // MARK: - Palette helpers
+
+    /// Up to three brand hues; if the palette is monochrome, fan it out a little so
+    /// the conic gradient still has flow.
+    private func hues() -> [Color] {
+        let base = palette.isEmpty ? [Color.accentColor] : palette
+        if base.count >= 3 { return Array(base.prefix(3)) }
+        if base.count == 2 { return [base[0], blend(base[0], base[1], 0.5), base[1]] }
+        let c = base[0]
+        return [shift(c, brightness: 0.12), c, shift(c, brightness: -0.12)]
+    }
+
+    /// Close the loop so the conic gradient wraps seamlessly (0° == 360°).
+    private func cyclic(_ c: [Color]) -> [Color] { c + [c.first ?? .accentColor] }
+
+    private func shift(_ c: Color, brightness db: CGFloat) -> Color {
+        #if canImport(AppKit)
+        let n = (NSColor(c).usingColorSpace(.deviceRGB)) ?? .white
+        var hh: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        n.getHue(&hh, saturation: &s, brightness: &b, alpha: &a)
+        return Color(hue: Double(hh), saturation: Double(s),
+                     brightness: Double(min(1, max(0, b + db))), opacity: Double(a))
+        #else
+        return c
+        #endif
+    }
+
     private func blend(_ a: Color, _ b: Color, _ t: Double) -> Color {
         #if canImport(AppKit)
         let na = NSColor(a).usingColorSpace(.sRGB) ?? .white
@@ -71,5 +140,26 @@ struct ScreenBorderView: View {
         #else
         return t < 0.5 ? a : b
         #endif
+    }
+}
+
+/// A perimeter arc centered on bottom-center (u = 0.5), spanning ±`halfWidthU` in
+/// perimeter-parameter units. Used as the growing reveal mask during splash-ignite.
+private struct ArcRevealShape: Shape {
+    let rect: CGRect
+    let cornerRadius: CGFloat
+    let halfWidthU: Double
+
+    func path(in _: CGRect) -> Path {
+        var path = Path()
+        guard halfWidthU > 0 else { return path }
+        let steps = 120
+        let lo = 0.5 - halfWidthU, hi = 0.5 + halfWidthU
+        for i in 0...steps {
+            let u = lo + (hi - lo) * Double(i) / Double(steps)
+            let p = BorderMath.point(u: u, in: rect, cornerRadius: cornerRadius).point
+            if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
+        }
+        return path
     }
 }
