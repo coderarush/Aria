@@ -9,7 +9,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var statusItem: NSStatusItem?
     private let controller = AriaController()
-    private let appWindow = AppWindowController()   // full app window (conversations, activity, connectors)
     private var onboardingWindow: NSWindow?
     private var didStart = false   // controller.start() must run exactly once
 
@@ -172,7 +171,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Open (or front) the full Aria app window.
     @objc private func openAppWindow() {
-        appWindow.show()
+        AppWindowController.shared.show()
     }
 
     private var settingsWindow: NSWindow?

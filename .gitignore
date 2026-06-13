@@ -26,3 +26,6 @@ site/dist/
 video/node_modules/
 video/out/
 .vercel/
+
+# Local agent worktrees / tooling
+.claude/
