@@ -1009,6 +1009,9 @@ final class AriaController {
                     case .planReady(let plan):
                         self.taskViewModel.show(plan)
                     case .stepStarted(let i):
+                        // First real step → she splashes to the bottom and becomes
+                        // the working border. Simple chat answers never reach here.
+                        if i == 0 { self.islandViewModel.beginExecuting() }
                         self.taskViewModel.markRunning(i)
                         // Spoken play-by-play: a short "Searching the web…" as each step
                         // begins. The plan-start narrate already gave the overview, so skip
@@ -1021,10 +1024,18 @@ final class AriaController {
                     case .stepFinished(let i, let ok, let result):
                         self.taskViewModel.markFinished(i, ok: ok, result: result)
                     case .narrate(let line):
-                        self.islandViewModel.appendResponse(line + " ")
+                        // While executing she stays the screen-edge border and just
+                        // speaks the play-by-play; appending text would consolidate her
+                        // back into the blob mid-task. Outside execution, stream as before.
+                        if self.islandViewModel.state != .executing {
+                            self.islandViewModel.appendResponse(line + " ")
+                        }
                         self.streamVoice.enqueue(line)
                     case .finished(let ok, let summary):
                         self.taskActive = false   // now the next queue-drain re-arms wake
+                        // She consolidates from the border back into the blob and
+                        // explains what she did (then the existing drain re-arms / dismisses).
+                        self.islandViewModel.showResponse(summary)
                         self.playChime(ok ? .done : .error)
                         // Project memory: every finished task is recallable later.
                         Task { await WorkJournal.shared.record(kind: .task, title: goal,
