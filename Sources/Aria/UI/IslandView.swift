@@ -35,7 +35,8 @@ struct IslandView: View {
 
     /// A synthetic speech envelope (~0…1) so the blob breathes while she talks.
     static func speechEnv(_ t: Double) -> Double {
-        let e = 0.55 + 0.45 * (0.55 * sin(t * 8.0) + 0.30 * sin(t * 12.7) + 0.15 * sin(t * 5.3))
+        // Slower, detuned cadence → a smooth, silky "she's talking" pull (not jitter).
+        let e = 0.55 + 0.45 * (0.55 * sin(t * 5.2) + 0.30 * sin(t * 8.1) + 0.15 * sin(t * 3.3))
         return max(0, min(1, e))
     }
 
@@ -117,10 +118,12 @@ struct IslandView: View {
         let thinking = viewModel.state == .thinking
         let suggesting = viewModel.hasSuggestion && viewModel.state == .idle
         let breathe = suggesting ? (0.5 + 0.5 * sin(t * 1.8)) : 0
-        let amp = 0.07 + level * 0.16 + speaking * 0.12 + (thinking ? 0.07 : 0)
+        let amp = 0.07 + level * 0.16 + speaking * 0.13 + (thinking ? 0.07 : 0)
                 + breathe * 0.04 + choreographer.blobAmpBoost
-        let speed = thinking ? 1.8 : 1.0
-        let envScale = 1 + level * 0.12 + speaking * 0.10 + breathe * 0.06
+        // Slower morph = silkier, liquid-glass squirm.
+        let speed = thinking ? 1.3 : 0.75
+        // A clearer "pull" while she speaks so you can see she's talking.
+        let envScale = 1 + level * 0.12 + speaking * 0.16 + breathe * 0.06
         let radii = BlobMath.radii(t: t, n: 11, amp: amp, speed: speed)
         let c0 = palette.first ?? viewModel.accent
         let c1 = palette.count > 1 ? palette[1] : c0
@@ -143,8 +146,8 @@ struct IslandView: View {
             .shadow(color: c0.opacity(0.28 + (suggesting ? 0.25 * breathe : 0)),
                     radius: 16 + (suggesting ? 10 * breathe : 0))
             .frame(width: 184, height: 184)
-            .animation(.spring(response: 0.35, dampingFraction: 0.5), value: pulse)
-            .animation(.spring(response: 0.4, dampingFraction: 0.7), value: isDragging)
+            .animation(.spring(response: 0.5, dampingFraction: 0.72), value: pulse)
+            .animation(.spring(response: 0.45, dampingFraction: 0.78), value: isDragging)
     }
 
     /// Vertical squash in the final stretch of the splash fall (impact gives).

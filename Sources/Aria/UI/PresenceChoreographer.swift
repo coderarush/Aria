@@ -51,11 +51,11 @@ final class PresenceChoreographer: ObservableObject {
 
     @Published private(set) var phase: Phase = .hidden
 
-    static let dBorderIn = 0.45
-    static let dConsolidate = 0.9
-    static let dSplash = 0.35
-    static let dIgnite = 0.5
-    static let dDismiss = 0.3
+    static let dBorderIn = 0.6
+    static let dConsolidate = 1.1
+    static let dSplash = 0.45
+    static let dIgnite = 0.65
+    static let dDismiss = 0.45
 
     private var target: PresenceMode = .hidden
     private var start: Double = 0   // timestamp the current timed phase began
@@ -154,15 +154,18 @@ final class PresenceChoreographer: ObservableObject {
 
     // MARK: - Render params derived from the current phase
 
+    /// Smoothstep so every fade eases in/out (silky, no linear ramp).
+    private func ease(_ p: Double) -> Double { p * p * (3 - 2 * p) }
+
     /// Master opacity for the screen border (0 when no border showing).
     var borderIntensity: Double {
         switch phase {
-        case .borderIn(let p): return p
+        case .borderIn(let p): return ease(p)
         case .border: return 1
-        case .consolidating(let p): return 1 - p     // drains as the blob pools
-        case .splashing: return 0                     // rim dark until impact
-        case .igniting(let p): return p
-        case .dismissing(let p): return phaseWasBorder ? 1 - p : 0
+        case .consolidating(let p): return 1 - ease(p)   // drains as the blob pools
+        case .splashing: return 0                          // rim dark until impact
+        case .igniting(let p): return ease(p)
+        case .dismissing(let p): return phaseWasBorder ? 1 - ease(p) : 0
         case .hidden, .blob: return 0
         }
     }
