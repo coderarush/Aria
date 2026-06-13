@@ -61,6 +61,7 @@ actor ToolRegistry {
             ConnectorStatusTool(),
             RecallWorkTool(),
             TimelineTool(),
+            RecallTool(),
             BriefingTool(),
             NotesReadTool(),
             TabContentTool(),
