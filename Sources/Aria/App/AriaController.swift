@@ -596,7 +596,9 @@ final class AriaController {
 
     private func setupPanel() {
         let panel = IslandPanel()
-        let host = NSHostingView(rootView: IslandView(viewModel: islandViewModel))
+        let island = IslandView(viewModel: islandViewModel,
+                                onBlobFrameChange: { [weak panel] rect in panel?.setBlobFrame(rect) })
+        let host = NSHostingView(rootView: island)
         host.frame = panel.contentLayoutRect
         host.autoresizingMask = [.width, .height]
         panel.contentView = host
