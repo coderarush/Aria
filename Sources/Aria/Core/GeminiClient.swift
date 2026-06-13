@@ -187,7 +187,7 @@ actor GeminiClient {
                         await RoutingLog.shared.record(RoutingDecision(
                             taskClass: .simpleChat, tier: .local, reason: "conversation on local model"))
                         Log.trace("chat: local model")
-                        let local = OllamaProvider(model: router.localModelName)
+                        let local = OllamaProvider(model: router.localChatModelName)
                         // Trimmed tool catalog: prompt-eval cost on a small local
                         // model scales with spec bytes — the full 25-tool catalog
                         // costs ~3x the first-token time of this core set. Tools
