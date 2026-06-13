@@ -87,6 +87,23 @@ final class AppSettings: ObservableObject {
     /// V11 FRE: the persona picked at first run ("Student"/"Developer"/"Founder").
     /// Informs the installed pack and the default focus-mode preset.
     @Published var personaChoice: String { didSet { defaults.set(personaChoice, forKey: K.personaChoice) } }
+    /// V11.0.1: where the blob consolidates, as a normalized screen point
+    /// (0…1, origin top-left). `nil` = fall back to `orbPosition` alignment.
+    /// Set by dragging the blob; she reappears here next time she speaks.
+    @Published var orbAnchor: CGPoint? {
+        didSet {
+            if let a = orbAnchor {
+                defaults.set(Double(a.x), forKey: K.orbAnchorX)
+                defaults.set(Double(a.y), forKey: K.orbAnchorY)
+            } else {
+                defaults.removeObject(forKey: K.orbAnchorX)
+                defaults.removeObject(forKey: K.orbAnchorY)
+            }
+        }
+    }
+
+    /// Forget the dragged anchor and return to the `orbPosition` default.
+    func clearOrbAnchor() { orbAnchor = nil }
 
     var accentChoice: AccentChoice {
         get { Theme.decodeChoice(accentChoiceRaw) }
@@ -126,6 +143,9 @@ final class AppSettings: ObservableObject {
         personaStyle = defaults.string(forKey: PersonaStyle.key) ?? "balanced"
         briefingSpoken = defaults.bool(forKey: K.briefingSpoken)
         personaChoice = defaults.string(forKey: K.personaChoice) ?? ""
+        orbAnchor = (defaults.object(forKey: K.orbAnchorX) as? Double).flatMap { x in
+            (defaults.object(forKey: K.orbAnchorY) as? Double).map { CGPoint(x: x, y: $0) }
+        }
     }
 
     /// Register/unregister the app as a login item (SMAppService, macOS 13+).
@@ -167,5 +187,7 @@ final class AppSettings: ObservableObject {
         static let orbScale = "app.orbScale"
         static let briefingSpoken = "app.briefingSpoken"
         static let personaChoice = "app.personaChoice"
+        static let orbAnchorX = "app.orbAnchorX"
+        static let orbAnchorY = "app.orbAnchorY"
     }
 }

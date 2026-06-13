@@ -7,7 +7,7 @@ import Combine
 @MainActor
 final class IslandViewModel: ObservableObject {
 
-    enum State: Equatable { case idle, listening, thinking, responding, error }
+    enum State: Equatable { case idle, listening, thinking, executing, responding, error }
 
     @Published private(set) var state: State = .idle
     @Published var responseText: String = ""
@@ -34,6 +34,11 @@ final class IslandViewModel: ObservableObject {
     }
 
     func beginThinking() { cancelDismiss(); setState(.thinking) }
+
+    /// Enter multi-step execution: she splashes to the screen edge and works as
+    /// the rotating border. Only the autonomy (plan→execute) path calls this —
+    /// simple conversational answers never splash.
+    func beginExecuting() { cancelDismiss(); setState(.executing) }
 
     func showResponse(_ text: String) {
         responseText = text

@@ -30,6 +30,7 @@ struct IslandView: View {
         switch viewModel.state {
         case .listening: return "Listening…"
         case .thinking:  return "Thinking…"
+        case .executing: return "Working…"
         case .responding, .error: return viewModel.responseText
         case .idle:      return ""
         }
