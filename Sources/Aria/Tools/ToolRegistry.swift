@@ -57,6 +57,7 @@ actor ToolRegistry {
             WebSearchTool(),
             WebFetchTool(),
             KnowledgeSearchTool(),
+            PersonalContextTool(),
             RecallWorkTool(),
             TimelineTool(),
             BriefingTool(),
