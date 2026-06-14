@@ -148,20 +148,31 @@ when opted out.
 - **The frozen voice stack** stays frozen except the latency tuning, which is
   additive (provider/model selection, already in motion).
 
-## Open questions for the user (decide before building)
+## Decisions (locked 2026-06-13)
 
-1. **Hosted OAuth relay?** Building one lets non-technical users connect Gmail
-   without a Google Cloud project, but it means running infrastructure and holding
-   a relationship to their tokens. Ship connectors "bring-your-own-client-ID" only,
-   or invest in a relay? (Affects Pillar 2 + business model.)
-2. **How autonomous should "anticipation that acts" be?** Draft-only-then-approve,
-   or let fully-reversible actions execute with an undo receipt? (Trust vs. magic.)
-3. **iPhone companion in 11.1.1 or 11.1.x?** It's a big lift; including it widens
-   scope a lot.
-4. **Privacy posture for style/entity learning** — fully on-device only (slower,
-   private) or allow opt-in cloud for better personalization?
-5. **What's the launch-defining demo?** Pick the one task that, done flawlessly on
-   stage, sells the release — it should anchor the Operator task suite.
+1. **Hosted OAuth relay — YES.** Build a relay so a non-technical user connects
+   Gmail/Calendar/etc. without creating their own Google Cloud project. (New infra
+   work, scoped into a connectors phase; keep BYO-client-ID as the fallback/dev
+   path. Tokens transit the relay only for the exchange — design for minimal trust.)
+2. **Highly autonomous.** She acts without asking by default. Permission is gated
+   ONLY for "extremely important" actions — concretely: irreversible + high-stakes
+   (send money/payments, delete data with no undo, external communications that
+   leave the machine, anything touching credentials/security). Everything
+   reversible runs free, with a receipt + one-click undo. This is WHY Phase A
+   (receipts + universal undo) comes first: autonomy is only safe once reversible.
+3. **No iPhone companion.** Pillar 5 (Continuity) is CUT from v11.1.1. Reallocate
+   that effort to making the Operator (Pillar 1) bulletproof.
+4. **Personalization: hybrid — cloud-preferred, on-device fallback.** Use cloud for
+   style/entity learning when it won't rate-limit; fall back to on-device when it
+   would. Router decides per-call (reuse the local-first routing machinery + a
+   rate-budget check). Privacy note surfaced; opt-out stays on-device.
+5. **Launch demo: universal capability.** The bar is "there is no task she can't
+   handle." The Operator task suite is open-ended, not a fixed 20 — the demo is
+   handing her an arbitrary real job live and watching it complete with receipts.
+   This raises Pillar 1's generality bar: any-app computer-use + tool synthesis for
+   gaps, not a hardcoded skill list.
+
+(Original open questions preserved in git history.)
 
 ## Recommended first move
 
