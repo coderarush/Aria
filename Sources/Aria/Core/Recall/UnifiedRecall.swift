@@ -34,16 +34,20 @@ actor UnifiedRecall {
     /// the caller) so the actor stays self-contained and testable without UI/UserDefaults.
     private let knowledgeEnabled: Bool
 
+    private let ambient: PersonalContextEngine?
+
     init(conversation: ConversationMemory? = nil,
          knowledge: KnowledgeIndex? = .shared,
          context: LongTermMemory? = .shared,
          work: WorkJournal? = .shared,
+         ambient: PersonalContextEngine? = .shared,
          knowledgeEnabled: Bool = KnowledgeSettings.load().enabled,
          perSourceLimit: Int = 6) {
         self.conversation = conversation
         self.knowledge = knowledge
         self.context = context
         self.work = work
+        self.ambient = ambient
         self.knowledgeEnabled = knowledgeEnabled
         self.perSourceLimit = max(1, perSourceLimit)
     }
@@ -58,10 +62,23 @@ actor UnifiedRecall {
         async let docHits  = documentHits(q)
         async let ctxHits  = contextHits(q)
         async let workHits = workHits(q)
+        async let ambHits  = ambientHits(q)
 
         // Order here defines the source tie-break order in the fuser.
-        let perSource = await [convHits, docHits, ctxHits, workHits]
+        let perSource = await [convHits, docHits, ctxHits, workHits, ambHits]
         return RecallRanker.fuse(perSource, limit: limit)
+    }
+
+    /// Ambient personal context — recent files, open apps, messages, calendar.
+    /// Opt-in (skipped when disabled) and searches already-loaded cards (no
+    /// refresh) so recall stays fast.
+    private func ambientHits(_ query: String) async -> [RecallHit] {
+        guard let ambient, await ambient.isEnabled else { return [] }
+        let cards = await ambient.search(query, limit: perSourceLimit)
+        return cards.enumerated().map { idx, card in
+            RecallHit(source: .ambient, title: card.title, snippet: card.snippet,
+                      timestamp: card.timestamp, score: Double(perSourceLimit - idx))
+        }
     }
 
     // MARK: Per-source adapters (each normalizes into [RecallHit], best-first)

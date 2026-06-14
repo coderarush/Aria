@@ -13,6 +13,7 @@ struct RecallHit: Sendable, Codable, Equatable, Identifiable {
         case document
         case context
         case work
+        case ambient        // PersonalContextEngine: recent files, apps, messages, calendar
 
         /// The bracketed tag shown to the model/user, e.g. "[doc]".
         var tag: String {
@@ -21,6 +22,7 @@ struct RecallHit: Sendable, Codable, Equatable, Identifiable {
             case .document:     return "[doc]"
             case .context:      return "[context]"
             case .work:         return "[work]"
+            case .ambient:      return "[world]"
             }
         }
     }
