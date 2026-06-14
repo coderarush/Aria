@@ -311,7 +311,10 @@ actor AgentOrchestrator {
         async let historyLoad = memory.recentContext()
         async let contextLoad = systemContext(privacyMode: privacyMode, command: command)
         async let specsLoad = registry.specs()
-        async let recalledLoad = longTerm.recall(for: command, limit: 4)   // relevant long-term facts
+        // Unified recall: relevant hits from across ALL of memory (long-term facts,
+        // past conversations, indexed docs, work history, ambient context) — not
+        // just long-term facts — injected so she "knows" without being asked to look.
+        async let recalledLoad = UnifiedRecall(conversation: memory).recall(command, limit: 4)
 
         Log.trace("turn: setup begin")
         let screenshot = await screenshotLoad;  Log.trace("turn: screenshot ok")
@@ -321,8 +324,8 @@ actor AgentOrchestrator {
         let recalled = await recalledLoad;      Log.trace("turn: recall ok")
         var transcript = command
         if !recalled.isEmpty {
-            let known = recalled.map { "- \($0.text)" }.joined(separator: "\n")
-            transcript = "(Relevant things you remember about me:\n\(known)\n)\n\n\(command)"
+            let known = recalled.map { "\($0.source.tag) \($0.title): \($0.snippet)" }.joined(separator: "\n")
+            transcript = "(Relevant context from your history:\n\(known)\n)\n\n\(command)"
         }
         var turnScreenshot = screenshot
         // V11 P10/P11: "explain this" with nothing selected — the deixis can
