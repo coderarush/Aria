@@ -45,12 +45,13 @@ actor ConnectorStore {
 
     /// Snapshot of every known provider's status (config + connection).
     func connectors() -> [ConnectorStatus] {
-        Connectors.all.map { provider in
+        let mode = ConnectorMode.current()
+        return Connectors.all.map { provider in
             let tokens = tokenStore.load(provider.id)
             return ConnectorStatus(
                 id: provider.id,
                 displayName: provider.displayName,
-                isConfigured: provider.isConfigured,
+                isConfigured: provider.isConfigured(mode: mode),
                 isConnected: tokens != nil,
                 scopes: tokens?.scopes ?? [],
                 expiry: tokens?.expiry
@@ -64,7 +65,7 @@ actor ConnectorStore {
         return ConnectorStatus(
             id: id,
             displayName: provider.displayName,
-            isConfigured: provider.isConfigured,
+            isConfigured: provider.isConfigured(mode: ConnectorMode.current()),
             isConnected: tokens != nil,
             scopes: tokens?.scopes ?? [],
             expiry: tokens?.expiry
@@ -79,10 +80,22 @@ actor ConnectorStore {
     /// Throws `.notConfigured` (cleanly) when no client ID is set.
     func connect(_ id: ConnectorID) async throws {
         let provider = Connectors.provider(for: id)
-        guard let clientID = provider.resolvedClientID() else {
-            throw ConnectorError.notConfigured(id)
+        let mode = ConnectorMode.current()
+        // `.relay`: the relay supplies the client, so no user client ID is needed.
+        //           `clientID` is ignored by the relay config builder.
+        // `.bringYourOwn`: a user client ID is required (today's behavior).
+        let clientID: String
+        switch mode {
+        case .relay:
+            clientID = provider.resolvedClientID() ?? ""
+        case .bringYourOwn:
+            guard let resolved = provider.resolvedClientID() else {
+                throw ConnectorError.notConfigured(id)
+            }
+            clientID = resolved
         }
-        let response = try await authorizeImpl(provider.authConfig(clientID: clientID), session)
+        let config = provider.authConfig(clientID: clientID, mode: mode)
+        let response = try await authorizeImpl(config, session)
         let tokens = ConnectorTokens(from: response)
         try tokenStore.save(tokens, for: id)
     }
@@ -100,10 +113,20 @@ actor ConnectorStore {
         guard tokens.isExpired() else { return tokens.accessToken }
         guard let refreshToken = tokens.refreshToken else { return nil }
         let provider = Connectors.provider(for: id)
-        guard let clientID = provider.resolvedClientID() else { return nil }
+        let mode = ConnectorMode.current()
+        // `.bringYourOwn` refreshes need the user client ID; `.relay` refreshes go
+        // through the relay (which holds the client) and need no user client ID.
+        let clientID: String
+        switch mode {
+        case .relay:
+            clientID = provider.resolvedClientID() ?? ""
+        case .bringYourOwn:
+            guard let resolved = provider.resolvedClientID() else { return nil }
+            clientID = resolved
+        }
         do {
             let response = try await OAuth2.refresh(refreshToken: refreshToken,
-                                                    config: provider.authConfig(clientID: clientID),
+                                                    config: provider.authConfig(clientID: clientID, mode: mode),
                                                     session: session)
             tokens = ConnectorTokens(from: response, previousRefreshToken: refreshToken)
             try? tokenStore.save(tokens, for: id)

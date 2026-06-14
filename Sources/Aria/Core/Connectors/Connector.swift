@@ -74,11 +74,32 @@ extension ConnectorProvider {
         return s
     }
 
-    var isConfigured: Bool { resolvedClientID() != nil }
+    /// Whether a connection can be started without further user setup.
+    ///
+    /// - `.bringYourOwn`: needs a user-supplied client ID (today's behavior).
+    /// - `.relay`: always configured — the relay supplies the client, so no user
+    ///   client ID is required and the UI can show "Connect" directly.
+    func isConfigured(mode: ConnectorMode = .current(),
+                      keychainRead: (String) -> String? = { KeychainManager.read(account: $0) },
+                      defaults: UserDefaults = .standard) -> Bool {
+        switch mode {
+        case .relay:
+            return true
+        case .bringYourOwn:
+            return resolvedClientID(keychainRead: keychainRead, defaults: defaults) != nil
+        }
+    }
+
+    /// Convenience: `isConfigured` for the mode currently in `UserDefaults.standard`.
+    var isConfigured: Bool { isConfigured(mode: .current()) }
 
     /// Build an `OAuth2.AuthConfig` from this provider + a resolved client ID,
     /// threading the stored client secret for confidential providers (nil for
     /// Google's PKCE-only flow, so it is never sent on the wire).
+    ///
+    /// This is the `.bringYourOwn` shape — provider endpoints, user client ID, and
+    /// (for confidential providers) the Keychain secret. Preserved byte-identical;
+    /// `authConfig(clientID:mode:)` routes here for `.bringYourOwn`.
     func authConfig(clientID: String) -> OAuth2.AuthConfig {
         OAuth2.AuthConfig(clientID: clientID,
                           clientSecret: resolvedClientSecret(),
@@ -86,6 +107,34 @@ extension ConnectorProvider {
                           tokenEndpoint: tokenEndpoint,
                           scopes: scopes,
                           extraAuthParameters: extraAuthParameters)
+    }
+
+    /// Build an `OAuth2.AuthConfig` for the given mode.
+    ///
+    /// - `.bringYourOwn`: identical to `authConfig(clientID:)` — provider endpoints,
+    ///   the user's client ID, and the Keychain secret for confidential providers.
+    /// - `.relay`: endpoints point at the hosted relay; NO client secret is sent
+    ///   (the relay owns it); the relay needs no user client ID. We pass the provider
+    ///   id as the `client_id` value so the relay can map it to its registered client
+    ///   (the design's `provider=` selector), and forward the provider's scopes +
+    ///   extra auth params unchanged. The app still generates the PKCE verifier and
+    ///   stores tokens in the Keychain exactly as today — only endpoints + secret
+    ///   handling differ.
+    func authConfig(clientID: String,
+                    mode: ConnectorMode,
+                    defaults: UserDefaults = .standard) -> OAuth2.AuthConfig {
+        switch mode {
+        case .bringYourOwn:
+            return authConfig(clientID: clientID)
+        case .relay:
+            return OAuth2.AuthConfig(
+                clientID: id.rawValue,            // relay maps this to its registered client
+                clientSecret: nil,                // relay owns the secret; never sent from the app
+                authEndpoint: RelayConfig.authorizeEndpoint(defaults: defaults),
+                tokenEndpoint: RelayConfig.tokenEndpoint(defaults: defaults),
+                scopes: scopes,
+                extraAuthParameters: extraAuthParameters)
+        }
     }
 }
 

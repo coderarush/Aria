@@ -338,6 +338,15 @@ final class GoogleResponseParseTests: XCTestCase {
 final class ConnectorStoreActorTests: XCTestCase {
 
     func testConnectThrowsNotConfigured() async {
+        // The "no client ID ⇒ .notConfigured" contract is specific to bring-your-own
+        // mode; in the default relay mode the relay supplies the client and connect
+        // proceeds without a user client ID. Pin BYO for this contract test.
+        let prior = UserDefaults.standard.string(forKey: ConnectorMode.defaultsKey)
+        UserDefaults.standard.set(ConnectorMode.bringYourOwn.rawValue, forKey: ConnectorMode.defaultsKey)
+        defer {
+            if let prior { UserDefaults.standard.set(prior, forKey: ConnectorMode.defaultsKey) }
+            else { UserDefaults.standard.removeObject(forKey: ConnectorMode.defaultsKey) }
+        }
         let store = ConnectorStore(
             tokenStore: ConnectorTokenStore(read: { _ in nil }, write: { _, _ in }, remove: { _ in }),
             authorize: { _, _ in
