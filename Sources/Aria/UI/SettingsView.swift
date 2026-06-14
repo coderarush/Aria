@@ -330,7 +330,7 @@ struct GeneralSettingsTab: View {
 
             SSection("Connectors") {
                 Picker("Sign-in method", selection: $settings.connectorMode) {
-                    Text("Bring your own client ID").tag("byo")
+                    Text("Bring your own client ID").tag("bringYourOwn")
                     Text("Hosted relay (no setup)").tag("relay")
                 }
                 Text("“Bring your own” connects with an OAuth client ID you paste per service (works today). “Hosted relay” needs no setup — available once Aria's relay is live.")

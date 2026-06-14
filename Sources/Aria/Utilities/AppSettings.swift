@@ -190,11 +190,12 @@ final class AppSettings: ObservableObject {
         dictationAICleanup = defaults.bool(forKey: K.dictationAICleanup)
         autonomousActions = defaults.bool(forKey: K.autonomousActions)
         personalizationEnabled = defaults.bool(forKey: K.personalizationEnabled)
-        connectorMode = defaults.string(forKey: K.connectorMode) ?? "byo"
+        // Raw values MUST match Core/Connectors ConnectorMode (.bringYourOwn/.relay).
+        connectorMode = defaults.string(forKey: K.connectorMode) ?? "bringYourOwn"
         // Pin the working default so the connector layer reads a concrete mode
-        // (relay isn't deployed yet — byo is what actually connects today).
+        // (relay isn't deployed yet — bring-your-own is what actually connects today).
         if defaults.string(forKey: K.connectorMode) == nil {
-            defaults.set("byo", forKey: K.connectorMode)
+            defaults.set("bringYourOwn", forKey: K.connectorMode)
         }
     }
 
