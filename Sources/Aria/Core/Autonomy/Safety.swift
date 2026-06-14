@@ -11,7 +11,14 @@ enum Safety {
                                                  // Reading/drafting email isn't destructive — don't let the
                                                  // "email" danger word trip on these tool names. (send_mail
                                                  // is in dangerTools, which is checked first, so it stays gated.)
-                                                 "email_recent", "email_search", "email_draft"]
+                                                 "email_recent", "email_search", "email_draft",
+                                                 // Connected-Google reads + the reversible-ish writes: a draft
+                                                 // isn't sent and a calendar event can be deleted, so neither
+                                                 // gates. (gmail_send is the external-comms one — it lives in
+                                                 // importantTools below and stays gated.) Listed here so a
+                                                 // draft body / event title containing a danger word ("send
+                                                 // the report") can't trip the content gate.
+                                                 "gmail_recent", "gcal_upcoming", "gmail_draft", "gcal_create"]
     private static let dangerWords = ["rm ", "rm -", "delete", "remove", "send", "email", "post",
                                       "submit", "overwrite", "drop ", "kill", "shutdown", "format",
                                       "purchase", "pay"]
@@ -35,7 +42,9 @@ enum Safety {
     /// Extremely-important irreversible tools — the only class that gates approval
     /// under high autonomy (money, deletes with no undo, external comms, raw shell).
     static let importantTools: Set<String> = ["send_mail", "send_message", "send",
-                                              "delete_file", "shell", "applescript"]
+                                              "delete_file", "shell", "applescript",
+                                              // Connected-Gmail send is external comms → gate it.
+                                              "gmail_send"]
 
     /// Classify an action's consequence (v11.1.1 high-autonomy gate). Routine and
     /// reversible actions run free + receipted; only `.importantIrreversible` pauses.

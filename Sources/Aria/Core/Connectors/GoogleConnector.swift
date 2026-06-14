@@ -102,6 +102,135 @@ struct GoogleConnector: ConnectorProvider {
         return Self.parseCalendarEvents(data)
     }
 
+    // MARK: - Authorized writes (thin)
+
+    /// The outcome of a Gmail write (send or draft) — the server-assigned id so
+    /// callers can confirm or follow up. `kind` distinguishes a sent message
+    /// from a created (unsent) draft.
+    struct GmailWriteResult: Sendable, Equatable {
+        enum Kind: String, Sendable { case message, draft }
+        let kind: Kind
+        let id: String
+    }
+
+    /// Send an email through the connected Gmail account (`messages.send` with a
+    /// base64url RFC822 `raw` body). EXTERNAL COMMS — the tool that calls this is
+    /// gated under high autonomy. Returns the sent message's id.
+    func sendGmail(to: String, subject: String, body: String,
+                   accessToken: String,
+                   session: URLSession = .shared) async throws -> GmailWriteResult {
+        let url = URL(string: "https://gmail.googleapis.com/gmail/v1/users/me/messages/send")!
+        let payload = Self.gmailSendBody(to: to, subject: subject, body: body)
+        let data = try await authorizedJSON(url, method: "POST", body: payload,
+                                            accessToken: accessToken, session: session)
+        guard let id = Self.parseGmailWriteID(data) else {
+            throw OAuth2.OAuth2Error.malformedTokenResponse
+        }
+        return GmailWriteResult(kind: .message, id: id)
+    }
+
+    /// Create a Gmail draft (does NOT send). Reversible — the tool that calls
+    /// this does not gate. Returns the created draft's id.
+    func createDraft(to: String, subject: String, body: String,
+                     accessToken: String,
+                     session: URLSession = .shared) async throws -> GmailWriteResult {
+        let url = URL(string: "https://gmail.googleapis.com/gmail/v1/users/me/drafts")!
+        let payload = Self.gmailDraftBody(to: to, subject: subject, body: body)
+        let data = try await authorizedJSON(url, method: "POST", body: payload,
+                                            accessToken: accessToken, session: session)
+        guard let id = Self.parseDraftID(data) else {
+            throw OAuth2.OAuth2Error.malformedTokenResponse
+        }
+        return GmailWriteResult(kind: .draft, id: id)
+    }
+
+    /// Create an event on the primary Calendar. Reversible (an event can be
+    /// deleted) — the tool that calls this does not gate. `start`/`end` are
+    /// RFC3339 timestamps (e.g. "2026-06-20T15:00:00Z"). Returns the new
+    /// event id.
+    func createEvent(title: String, start: String, end: String,
+                     accessToken: String,
+                     session: URLSession = .shared) async throws -> String {
+        let url = URL(string: "https://www.googleapis.com/calendar/v3/calendars/primary/events")!
+        let payload = Self.calendarEventBody(title: title, start: start, end: end)
+        let data = try await authorizedJSON(url, method: "POST", body: payload,
+                                            accessToken: accessToken, session: session)
+        guard let id = Self.parseCalendarEventID(data) else {
+            throw OAuth2.OAuth2Error.malformedTokenResponse
+        }
+        return id
+    }
+
+    // MARK: - Pure request-body builders (testable)
+
+    /// Encode an address/subject/body as a base64url RFC822 message (no padding),
+    /// the exact `raw` shape Gmail's `messages.send` / `drafts.create` require.
+    static func gmailRawMessage(to: String, subject: String, body: String) -> String {
+        // RFC822 headers + blank line + body. CRLF line endings per the spec.
+        let mime = [
+            "To: \(to)",
+            "Subject: \(subject)",
+            "Content-Type: text/plain; charset=\"UTF-8\"",
+            "MIME-Version: 1.0",
+            "",
+            body
+        ].joined(separator: "\r\n")
+        return base64url(Data(mime.utf8))
+    }
+
+    /// The JSON body for `messages.send`: `{"raw": "<base64url RFC822>"}`.
+    static func gmailSendBody(to: String, subject: String, body: String) -> [String: Any] {
+        ["raw": gmailRawMessage(to: to, subject: subject, body: body)]
+    }
+
+    /// The JSON body for `drafts.create`: `{"message": {"raw": "…"}}`.
+    static func gmailDraftBody(to: String, subject: String, body: String) -> [String: Any] {
+        ["message": ["raw": gmailRawMessage(to: to, subject: subject, body: body)]]
+    }
+
+    /// The JSON body for Calendar `events.insert` — timed event on the primary
+    /// calendar, start/end as RFC3339 `dateTime`s.
+    static func calendarEventBody(title: String, start: String, end: String) -> [String: Any] {
+        [
+            "summary": title,
+            "start": ["dateTime": start],
+            "end": ["dateTime": end]
+        ]
+    }
+
+    /// base64url with no `=` padding (RFC 4648 §5) — Gmail rejects standard
+    /// base64 here.
+    static func base64url(_ data: Data) -> String {
+        data.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
+    // MARK: - Pure write-response parsers (testable)
+
+    /// A sent/inserted Gmail message returns `{"id": "...", ...}`.
+    static func parseGmailWriteID(_ data: Data) -> String? {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return obj["id"] as? String
+    }
+
+    /// A created draft returns `{"id": "...", "message": {...}}` — the draft id is
+    /// the top-level `id`.
+    static func parseDraftID(_ data: Data) -> String? {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return obj["id"] as? String
+    }
+
+    /// An inserted Calendar event returns `{"id": "...", ...}`.
+    static func parseCalendarEventID(_ data: Data) -> String? {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return obj["id"] as? String
+    }
+
     // MARK: - Pure response parsers (testable)
 
     static func parseGmailMessage(_ data: Data) -> GmailMessageSummary? {
@@ -170,6 +299,27 @@ struct GoogleConnector: ConnectorProvider {
         let (data, resp) = try await session.data(for: req)
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         guard status == 200 else { throw OAuth2.OAuth2Error.tokenExchangeFailed(status) }
+        return data
+    }
+
+    /// Authorized POST/PATCH with a JSON body and bearer token. Accepts 200 and
+    /// 201 (Gmail send/draft return 200; Calendar insert returns 200, drafts may
+    /// return 200/201 across API versions). The body is built purely by the
+    /// `*Body` builders above so it stays testable.
+    private func authorizedJSON(_ url: URL, method: String, body: [String: Any],
+                                accessToken: String,
+                                session: URLSession) async throws -> Data {
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        req.timeoutInterval = 30
+        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, resp) = try await session.data(for: req)
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200 || status == 201 else {
+            throw OAuth2.OAuth2Error.tokenExchangeFailed(status)
+        }
         return data
     }
 }
