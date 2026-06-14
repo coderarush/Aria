@@ -144,9 +144,6 @@ actor AutonomyEngine {
             // synthesize across the whole workflow ("research A, research B, combine"),
             // not just the immediately-previous result.
             let material = Self.material(from: completed)
-            // Snapshot the undo depth so we can attach any reversible the step
-            // records (file/clipboard) to its receipt — making it undoable by id.
-            let undoDepthBefore = await UndoStack.shared.depth()
             var result = await execute(step, lastOutput: lastOutput, material: material)
             // Retry once, but only for failures a blind retry might fix — not a user
             // decline and not a missing-input error (those won't change). A short
@@ -172,16 +169,9 @@ actor AutonomyEngine {
             plan.steps[i].status = result.success ? .done : .failed
             plan.steps[i].result = result.output
             emit(.stepFinished(i, ok: result.success, result: result.output))
-            // Receipt: a transparent record of what Aria did (trust core — every
-            // executed step is visible, and reversible ones can be undone later).
-            let toolName: String = { if case .tool(let t) = step.executor { return t }
-                                     if case .agent(let a) = step.executor { return a }; return "step" }()
-            let reversible: ReversibleAction? = (await UndoStack.shared.depth()) > undoDepthBefore
-                ? await UndoStack.shared.lastRecorded() : nil
-            await ActionLedger.shared.record(ActionReceipt(
-                summary: step.summary, tool: toolName,
-                importance: Safety.importance(tool: toolName, input: step.input, summary: step.summary),
-                reversible: reversible, at: Date()))
+            // (Receipts are recorded at the universal tool chokepoint in
+            // AgentOrchestrator.execute, so every caller — not just plan steps — is
+            // covered without double-recording.)
             if result.success, !result.output.isEmpty {
                 lastOutput = result.output
                 completed.append((summary: step.summary, output: result.output))

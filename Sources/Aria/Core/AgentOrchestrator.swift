@@ -159,13 +159,13 @@ actor AgentOrchestrator {
 
         // Native static tool wins if registered.
         if let tool = await registry.tool(named: action.tool) {
-            // Universal safety gate: confirm anything destructive — whether the tool
-            // declares itself destructive OR its name/input trips the Safety
-            // heuristic (e.g. `shell` running `rm`, `applescript` that sends mail).
-            // This covers EVERY caller — chat function-calls, the autonomy loop,
-            // recovery/alternative actions, and agent-internal tool use — since they
-            // all run through here.
-            if tool.isDestructive || Safety.isDestructive(tool: action.tool, input: action.input) {
+            // High-autonomy gate (v11.1.1): she acts freely and EVERYTHING is
+            // receipted (see ActionLedger), so we pause ONLY for the extremely
+            // important + irreversible — money, deletes with no undo, external
+            // comms, raw shell/applescript. Reversible + routine tools run without
+            // a prompt. Covers every caller (chat, autonomy loop, recovery, agents).
+            if Safety.importance(tool: action.tool, input: action.input,
+                                 summary: describe(action)).requiresApproval {
                 let approved = await (confirmationHandler?(
                     "Run \(action.tool) with \(action.input)?") ?? false)
                 guard approved else {
@@ -174,11 +174,25 @@ actor AgentOrchestrator {
                     return declined
                 }
             }
+            // Snapshot undo depth so any reversible the tool records rides along on
+            // the receipt (making this exact action undoable by id).
+            let undoBefore = await UndoStack.shared.depth()
             let result: ToolResult
             do { result = try await tool.run(input: action.input) }
             catch ToolError.missingInput(let key) { result = .fail("Missing input '\(key)' for \(action.tool).") }
             catch { result = .fail("\(action.tool) failed: \(error.localizedDescription)") }
             await ActivityLog.shared.record(tool: action.tool, detail: describe(action), result: result)
+            // Receipt: every state-changing action Aria takes is recorded here (the
+            // one chokepoint all callers pass through), so high autonomy stays
+            // transparent and reversible ones are undoable. Routine reads are skipped.
+            let importance = Safety.importance(tool: action.tool, input: action.input, summary: describe(action))
+            if result.success, importance != .routine {
+                let rev: ReversibleAction? = (await UndoStack.shared.depth()) > undoBefore
+                    ? await UndoStack.shared.lastRecorded() : nil
+                await ActionLedger.shared.record(ActionReceipt(
+                    summary: describe(action), tool: action.tool, importance: importance,
+                    reversible: rev, at: Date()))
+            }
             return result
         }
 
