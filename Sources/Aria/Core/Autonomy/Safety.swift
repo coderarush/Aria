@@ -18,7 +18,13 @@ enum Safety {
                                                  // importantTools below and stays gated.) Listed here so a
                                                  // draft body / event title containing a danger word ("send
                                                  // the report") can't trip the content gate.
-                                                 "gmail_recent", "gcal_upcoming", "gmail_draft", "gcal_create"]
+                                                 "gmail_recent", "gcal_upcoming", "gmail_draft", "gcal_create",
+                                                 // Notion + Slack reads + the reversible-ish Notion page append
+                                                 // (a block can be deleted) don't gate. (slack_send is external
+                                                 // comms — it lives in importantTools below and stays gated.)
+                                                 // Listed here so an appended note / search query containing a
+                                                 // danger word ("post the update") can't trip the content gate.
+                                                 "notion_search", "notion_append", "slack_recent"]
     private static let dangerWords = ["rm ", "rm -", "delete", "remove", "send", "email", "post",
                                       "submit", "overwrite", "drop ", "kill", "shutdown", "format",
                                       "purchase", "pay"]
@@ -44,7 +50,9 @@ enum Safety {
     static let importantTools: Set<String> = ["send_mail", "send_message", "send",
                                               "delete_file", "shell", "applescript",
                                               // Connected-Gmail send is external comms → gate it.
-                                              "gmail_send"]
+                                              "gmail_send",
+                                              // Slack message send is external comms → gate it too.
+                                              "slack_send"]
 
     /// Classify an action's consequence (v11.1.1 high-autonomy gate). Routine and
     /// reversible actions run free + receipted; only `.importantIrreversible` pauses.
