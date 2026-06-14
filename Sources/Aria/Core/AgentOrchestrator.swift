@@ -341,6 +341,13 @@ actor AgentOrchestrator {
             let known = recalled.map { "\($0.source.tag) \($0.title): \($0.snippet)" }.joined(separator: "\n")
             transcript = "(Relevant context from your history:\n\(known)\n)\n\n\(command)"
         }
+        // Personalization (opt-in): learn the user's voice from this turn and, once
+        // there's a profile, prepend a draft-style instruction so drafts sound like
+        // them. nil when off / nothing learned → the prompt is unchanged.
+        await StyleLearner.shared.observe(command)
+        if let style = await StyleLearner.shared.draftStyleInstruction() {
+            transcript = "(\(style))\n\n\(transcript)"
+        }
         var turnScreenshot = screenshot
         // V11 P10/P11: "explain this" with nothing selected — the deixis can
         // only mean what's visible, so attach a late screenshot for this turn.

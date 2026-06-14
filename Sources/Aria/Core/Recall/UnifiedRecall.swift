@@ -35,12 +35,14 @@ actor UnifiedRecall {
     private let knowledgeEnabled: Bool
 
     private let ambient: PersonalContextEngine?
+    private let entities: EntityStore?
 
     init(conversation: ConversationMemory? = nil,
          knowledge: KnowledgeIndex? = .shared,
          context: LongTermMemory? = .shared,
          work: WorkJournal? = .shared,
          ambient: PersonalContextEngine? = .shared,
+         entities: EntityStore? = .shared,
          knowledgeEnabled: Bool = KnowledgeSettings.load().enabled,
          perSourceLimit: Int = 6) {
         self.conversation = conversation
@@ -48,6 +50,7 @@ actor UnifiedRecall {
         self.context = context
         self.work = work
         self.ambient = ambient
+        self.entities = entities
         self.knowledgeEnabled = knowledgeEnabled
         self.perSourceLimit = max(1, perSourceLimit)
     }
@@ -63,10 +66,23 @@ actor UnifiedRecall {
         async let ctxHits  = contextHits(q)
         async let workHits = workHits(q)
         async let ambHits  = ambientHits(q)
+        async let entHits  = entityHits(q)
 
         // Order here defines the source tie-break order in the fuser.
-        let perSource = await [convHits, docHits, ctxHits, workHits, ambHits]
+        let perSource = await [convHits, docHits, ctxHits, workHits, ambHits, entHits]
         return RecallRanker.fuse(perSource, limit: limit)
+    }
+
+    /// People/projects the user has told Aria about (opt-in personalization), so a
+    /// reference like "Sara" or "the launch deck" resolves to what Aria knows.
+    private func entityHits(_ query: String) async -> [RecallHit] {
+        guard let entities, await entities.isEnabled else { return [] }
+        let found = await entities.search(query, limit: perSourceLimit)
+        return found.enumerated().map { idx, e in
+            RecallHit(source: .entity, title: e.name,
+                      snippet: e.notes.isEmpty ? e.kind.rawValue : e.notes,
+                      timestamp: nil, score: Double(perSourceLimit - idx))
+        }
     }
 
     /// Ambient personal context — recent files, open apps, messages, calendar.
