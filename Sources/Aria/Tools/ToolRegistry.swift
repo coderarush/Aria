@@ -67,6 +67,8 @@ actor ToolRegistry {
             RecallWorkTool(),
             TimelineTool(),
             RecallTool(),
+            RememberEntityTool(),
+            WhoIsTool(),
             BriefingTool(),
             NotesReadTool(),
             TabContentTool(),
