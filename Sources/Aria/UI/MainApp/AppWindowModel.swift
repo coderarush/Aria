@@ -8,6 +8,7 @@ enum AppSection: String, CaseIterable, Identifiable, Sendable {
     case home          = "Home"
     case conversations = "Conversations"
     case activity      = "Activity"
+    case insights      = "Insights"
     case connectors    = "Connectors"
     case settings      = "Settings"
 
@@ -18,6 +19,7 @@ enum AppSection: String, CaseIterable, Identifiable, Sendable {
         case .home:          return "house"
         case .conversations: return "bubble.left.and.bubble.right"
         case .activity:      return "list.bullet.rectangle"
+        case .insights:      return "sparkles"
         case .connectors:    return "puzzlepiece.extension"
         case .settings:      return "gearshape"
         }

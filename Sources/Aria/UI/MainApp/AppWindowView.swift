@@ -87,6 +87,7 @@ struct AppWindowView: View {
         case .home:          HomePane(model: model)
         case .conversations: ConversationsPane(model: model)
         case .activity:      ActivityPane(model: model)
+        case .insights:      InsightsPane()
         case .connectors:    ConnectorsPane()
         case .settings:      HomePane(model: model)   // settings opens its own window
         }
