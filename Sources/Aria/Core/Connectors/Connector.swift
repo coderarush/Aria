@@ -27,12 +27,21 @@ protocol ConnectorProvider: Sendable {
     var clientIDKeychainAccount: String { get }
     /// The UserDefaults key checked if the Keychain has no client ID.
     var clientIDDefaultsKey: String { get }
+    /// Whether this provider is a confidential client that signs token requests
+    /// with a client secret (Notion, Slack). Google's native installed-app PKCE
+    /// flow sends no secret, so this is `false` for Google.
+    var usesClientSecret: Bool { get }
+    /// The Keychain account key under which the user's client secret is stored.
+    var clientSecretKeychainAccount: String { get }
 }
 
 extension ConnectorProvider {
     var extraAuthParameters: [String: String] { [:] }
     var clientIDKeychainAccount: String { "connector_\(id.rawValue)_client_id" }
     var clientIDDefaultsKey: String { "connector.\(id.rawValue).clientID" }
+    /// Default: PKCE-only, no secret. Confidential providers override to `true`.
+    var usesClientSecret: Bool { false }
+    var clientSecretKeychainAccount: String { "connector_\(id.rawValue)_client_secret" }
 
     /// Resolve the user-supplied OAuth client ID, or nil if not configured.
     /// Keychain wins; UserDefaults is the fallback for non-secret IDs that a
@@ -52,11 +61,27 @@ extension ConnectorProvider {
         return nil
     }
 
+    /// Resolve the user-supplied OAuth client secret, or nil. Secrets live ONLY
+    /// in the Keychain (never UserDefaults) and only for confidential providers;
+    /// PKCE-only providers (Google) always resolve to nil so no secret is sent.
+    /// Never throws, never crashes, never logged.
+    func resolvedClientSecret(
+        keychainRead: (String) -> String? = { KeychainManager.read(account: $0) }
+    ) -> String? {
+        guard usesClientSecret else { return nil }
+        guard let s = keychainRead(clientSecretKeychainAccount),
+              !s.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        return s
+    }
+
     var isConfigured: Bool { resolvedClientID() != nil }
 
-    /// Build an `OAuth2.AuthConfig` from this provider + a resolved client ID.
+    /// Build an `OAuth2.AuthConfig` from this provider + a resolved client ID,
+    /// threading the stored client secret for confidential providers (nil for
+    /// Google's PKCE-only flow, so it is never sent on the wire).
     func authConfig(clientID: String) -> OAuth2.AuthConfig {
         OAuth2.AuthConfig(clientID: clientID,
+                          clientSecret: resolvedClientSecret(),
                           authEndpoint: authEndpoint,
                           tokenEndpoint: tokenEndpoint,
                           scopes: scopes,
@@ -88,6 +113,8 @@ struct NotionConnector: ConnectorProvider {
     let authEndpoint = "https://api.notion.com/v1/oauth/authorize"
     let tokenEndpoint = "https://api.notion.com/v1/oauth/token"
     var extraAuthParameters: [String: String] { ["owner": "user"] }
+    /// Notion is a confidential client — its token endpoint requires the secret.
+    let usesClientSecret = true
 }
 
 /// Slack endpoints (OAuth v2). Read-oriented default scopes.
@@ -97,4 +124,6 @@ struct SlackConnector: ConnectorProvider {
     let scopes = ["channels:read", "chat:write", "users:read"]
     let authEndpoint = "https://slack.com/oauth/v2/authorize"
     let tokenEndpoint = "https://slack.com/api/oauth.v2.access"
+    /// Slack's `oauth.v2.access` requires the client secret on the exchange.
+    let usesClientSecret = true
 }

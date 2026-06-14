@@ -42,12 +42,19 @@ struct GoogleConnector: ConnectorProvider {
     }
 
     /// Fetch recent Gmail message metadata (From/Subject + snippet). Lists IDs,
-    /// then fetches each in `metadata` format. `accessToken` must be valid.
+    /// then fetches each in `metadata` format. `accessToken` must be valid. An
+    /// optional `query` is passed straight to Gmail's `q` search operator (e.g.
+    /// "from:boss is:unread"); nil/empty means "most recent".
     func recentGmail(accessToken: String, maxResults: Int = 5,
+                     query: String? = nil,
                      session: URLSession = .shared) async throws -> [GmailMessageSummary] {
         var listComps = URLComponents(
             string: "https://gmail.googleapis.com/gmail/v1/users/me/messages")!
-        listComps.queryItems = [URLQueryItem(name: "maxResults", value: String(maxResults))]
+        var listItems = [URLQueryItem(name: "maxResults", value: String(maxResults))]
+        if let q = query?.trimmingCharacters(in: .whitespacesAndNewlines), !q.isEmpty {
+            listItems.append(URLQueryItem(name: "q", value: q))
+        }
+        listComps.queryItems = listItems
         let listData = try await authorizedGET(listComps.url!, accessToken: accessToken,
                                                session: session)
         guard let listObj = try? JSONSerialization.jsonObject(with: listData) as? [String: Any],
@@ -70,19 +77,26 @@ struct GoogleConnector: ConnectorProvider {
         return out
     }
 
-    /// Fetch upcoming Calendar events from the primary calendar.
+    /// Fetch upcoming Calendar events from the primary calendar. An optional
+    /// `within` window bounds the search with `timeMax` (e.g. 7 days out); nil
+    /// means unbounded-forward (the original behavior).
     func upcomingEvents(accessToken: String, maxResults: Int = 5,
-                        now: Date = Date(),
+                        now: Date = Date(), within: TimeInterval? = nil,
                         session: URLSession = .shared) async throws -> [CalendarEvent] {
         var comps = URLComponents(
             string: "https://www.googleapis.com/calendar/v3/calendars/primary/events")!
-        let iso = ISO8601DateFormatter().string(from: now)
-        comps.queryItems = [
-            URLQueryItem(name: "timeMin", value: iso),
+        let formatter = ISO8601DateFormatter()
+        var items = [
+            URLQueryItem(name: "timeMin", value: formatter.string(from: now)),
             URLQueryItem(name: "maxResults", value: String(maxResults)),
             URLQueryItem(name: "singleEvents", value: "true"),
             URLQueryItem(name: "orderBy", value: "startTime")
         ]
+        if let within {
+            items.append(URLQueryItem(name: "timeMax",
+                                      value: formatter.string(from: now.addingTimeInterval(within))))
+        }
+        comps.queryItems = items
         let data = try await authorizedGET(comps.url!, accessToken: accessToken,
                                           session: session)
         return Self.parseCalendarEvents(data)
@@ -116,6 +130,33 @@ struct GoogleConnector: ConnectorProvider {
             let when = (start?["dateTime"] as? String) ?? (start?["date"] as? String) ?? ""
             return CalendarEvent(summary: summary, start: when)
         }
+    }
+
+    // MARK: - Display formatting (pure / testable)
+
+    /// Render Gmail summaries into the user-facing text block a tool returns.
+    /// Empty input yields a clean "no messages" line rather than an empty body.
+    static func formatGmail(_ messages: [GmailMessageSummary]) -> String {
+        guard !messages.isEmpty else { return "No recent Gmail messages found." }
+        let lines = messages.map { m -> String in
+            let from = m.from.isEmpty ? "(unknown sender)" : m.from
+            let subject = m.subject.isEmpty ? "(no subject)" : m.subject
+            var line = "• \(subject) — from \(from)"
+            let snippet = m.snippet.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !snippet.isEmpty { line += "\n  \(snippet)" }
+            return line
+        }
+        return "Recent Gmail:\n\(lines.joined(separator: "\n"))"
+    }
+
+    /// Render upcoming Calendar events into the user-facing text block.
+    static func formatEvents(_ events: [CalendarEvent]) -> String {
+        guard !events.isEmpty else { return "No upcoming Google Calendar events." }
+        let lines = events.map { e -> String in
+            let when = e.start.isEmpty ? "(no time)" : e.start
+            return "• \(when) — \(e.summary)"
+        }
+        return "Upcoming Google Calendar events:\n\(lines.joined(separator: "\n"))"
     }
 
     // MARK: - Transport (thin)

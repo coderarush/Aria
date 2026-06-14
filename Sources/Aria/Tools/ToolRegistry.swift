@@ -59,6 +59,8 @@ actor ToolRegistry {
             KnowledgeSearchTool(),
             PersonalContextTool(),
             ConnectorStatusTool(),
+            GmailRecentTool(),
+            GcalUpcomingTool(),
             RecallWorkTool(),
             TimelineTool(),
             RecallTool(),

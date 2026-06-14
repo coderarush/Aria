@@ -166,25 +166,41 @@ enum OAuth2 {
     }
 
     /// Build the form body for the authorization-code → token exchange.
+    ///
+    /// `clientSecret` is optional: confidential providers (Notion, Slack) require
+    /// it, while native PKCE-only providers (Google's installed-app flow) must NOT
+    /// send one. When nil or empty it is omitted entirely so the Google path is
+    /// byte-identical to before.
     static func tokenExchangeBody(
-        code: String, clientID: String, redirectURI: String, verifier: String
+        code: String, clientID: String, redirectURI: String, verifier: String,
+        clientSecret: String? = nil
     ) -> String {
-        formEncode([
+        var params = [
             "grant_type": "authorization_code",
             "code": code,
             "client_id": clientID,
             "redirect_uri": redirectURI,
             "code_verifier": verifier
-        ])
+        ]
+        if let secret = clientSecret, !secret.isEmpty {
+            params["client_secret"] = secret
+        }
+        return formEncode(params)
     }
 
-    /// Build the form body for a refresh-token grant.
-    static func refreshBody(refreshToken: String, clientID: String) -> String {
-        formEncode([
+    /// Build the form body for a refresh-token grant. `clientSecret` is included
+    /// only when supplied (confidential providers), omitted for PKCE-only Google.
+    static func refreshBody(refreshToken: String, clientID: String,
+                            clientSecret: String? = nil) -> String {
+        var params = [
             "grant_type": "refresh_token",
             "refresh_token": refreshToken,
             "client_id": clientID
-        ])
+        ]
+        if let secret = clientSecret, !secret.isEmpty {
+            params["client_secret"] = secret
+        }
+        return formEncode(params)
     }
 
     static func formEncode(_ params: [String: String]) -> String {
@@ -209,12 +225,26 @@ enum OAuth2 {
     /// Configuration for one authorization run.
     struct AuthConfig: Sendable {
         let clientID: String
+        /// The OAuth client secret for confidential providers (Notion, Slack).
+        /// nil for native PKCE-only providers (Google) — never sent when nil.
+        let clientSecret: String?
         let authEndpoint: String
         let tokenEndpoint: String
         let scopes: [String]
         /// Extra auth-request params (Google needs `access_type=offline` &
         /// `prompt=consent` to reliably return a refresh_token).
         let extraAuthParameters: [String: String]
+
+        init(clientID: String, clientSecret: String? = nil,
+             authEndpoint: String, tokenEndpoint: String,
+             scopes: [String], extraAuthParameters: [String: String]) {
+            self.clientID = clientID
+            self.clientSecret = clientSecret
+            self.authEndpoint = authEndpoint
+            self.tokenEndpoint = tokenEndpoint
+            self.scopes = scopes
+            self.extraAuthParameters = extraAuthParameters
+        }
     }
 
     /// Run the full interactive PKCE flow: start a loopback listener, open the
@@ -272,7 +302,8 @@ enum OAuth2 {
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         req.httpBody = Data(tokenExchangeBody(code: code, clientID: config.clientID,
                                               redirectURI: redirectURI,
-                                              verifier: verifier).utf8)
+                                              verifier: verifier,
+                                              clientSecret: config.clientSecret).utf8)
         let (data, resp) = try await session.data(for: req)
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         guard status == 200 else { throw OAuth2Error.tokenExchangeFailed(status) }
@@ -294,7 +325,8 @@ enum OAuth2 {
         req.timeoutInterval = 30
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         req.httpBody = Data(refreshBody(refreshToken: refreshToken,
-                                        clientID: config.clientID).utf8)
+                                        clientID: config.clientID,
+                                        clientSecret: config.clientSecret).utf8)
         let (data, resp) = try await session.data(for: req)
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         guard status == 200 else { throw OAuth2Error.tokenExchangeFailed(status) }
