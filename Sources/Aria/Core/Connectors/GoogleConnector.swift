@@ -164,6 +164,41 @@ struct GoogleConnector: ConnectorProvider {
         return id
     }
 
+    // MARK: - Authorized deletes (undo support, thin)
+
+    /// Delete a Gmail draft by id (`drafts.delete`) — the inverse of
+    /// `createDraft`, used by Undo. Throws on a non-success status so the undo
+    /// path can report a clean failure.
+    func deleteDraft(id: String, accessToken: String,
+                     session: URLSession = .shared) async throws {
+        try await authorizedDELETE(Self.draftDeleteURL(id: id),
+                                   accessToken: accessToken, session: session)
+    }
+
+    /// Delete a Calendar event by id from the primary calendar
+    /// (`events.delete`) — the inverse of `createEvent`, used by Undo.
+    func deleteEvent(id: String, accessToken: String,
+                     session: URLSession = .shared) async throws {
+        try await authorizedDELETE(Self.eventDeleteURL(id: id),
+                                   accessToken: accessToken, session: session)
+    }
+
+    // MARK: - Pure DELETE-URL builders (testable)
+
+    /// `DELETE …/users/me/drafts/{id}` — the draft id is path-percent-encoded so
+    /// an unusual id can't break the URL.
+    static func draftDeleteURL(id: String) -> URL {
+        let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        return URL(string: "https://gmail.googleapis.com/gmail/v1/users/me/drafts/\(encoded)")!
+    }
+
+    /// `DELETE …/calendars/primary/events/{id}` — the event id is
+    /// path-percent-encoded.
+    static func eventDeleteURL(id: String) -> URL {
+        let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        return URL(string: "https://www.googleapis.com/calendar/v3/calendars/primary/events/\(encoded)")!
+    }
+
     // MARK: - Pure request-body builders (testable)
 
     /// Encode an address/subject/body as a base64url RFC822 message (no padding),
@@ -324,5 +359,22 @@ struct GoogleConnector: ConnectorProvider {
             throw OAuth2.OAuth2Error.tokenExchangeFailed(status)
         }
         return data
+    }
+
+    /// Authorized DELETE with a bearer token and no body. Gmail `drafts.delete`
+    /// and Calendar `events.delete` return 204 No Content on success (200 is
+    /// tolerated across API versions); any other status throws so the undo path
+    /// reports a clean failure.
+    private func authorizedDELETE(_ url: URL, accessToken: String,
+                                  session: URLSession) async throws {
+        var req = URLRequest(url: url)
+        req.httpMethod = "DELETE"
+        req.timeoutInterval = 30
+        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        let (_, resp) = try await session.data(for: req)
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 204 || status == 200 else {
+            throw OAuth2.OAuth2Error.tokenExchangeFailed(status)
+        }
     }
 }

@@ -10,6 +10,12 @@ enum ReversibleAction: Sendable, Equatable, Codable {
     case fileWrite(path: String, previousContent: String?)
     /// A clipboard write; undo restores the prior string (nil = was empty).
     case clipboardWrite(previous: String?)
+    /// A Gmail draft was created in the connected Google account; undo deletes
+    /// the draft. `id` is the server-assigned draft id.
+    case gmailDraftCreated(id: String)
+    /// A Google Calendar event was created on the primary calendar; undo deletes
+    /// the event. `id` is the server-assigned event id.
+    case calendarEventCreated(id: String)
 
     /// Short human label for narration / an activity view.
     var label: String {
@@ -19,6 +25,10 @@ enum ReversibleAction: Sendable, Equatable, Codable {
             return previous == nil ? "creating \(name)" : "overwriting \(name)"
         case .clipboardWrite:
             return "changing the clipboard"
+        case .gmailDraftCreated:
+            return "creating the Gmail draft"
+        case .calendarEventCreated:
+            return "adding the calendar event"
         }
     }
 }
@@ -50,9 +60,18 @@ actor UndoStack {
         return await UndoStack.revert(action)
     }
 
-    /// Perform the inverse of an action. Pure-ish (filesystem / pasteboard only) so
-    /// it's unit-testable in isolation.
-    static func revert(_ action: ReversibleAction) async -> ToolResult {
+    /// Resolves a valid Google access token for the connector-backed reverts.
+    /// Defaults to the shared ConnectorStore; tests inject a stub so the no-token
+    /// path can be exercised without touching the Keychain or the network.
+    typealias GoogleTokenProvider = @Sendable () async -> String?
+
+    /// Perform the inverse of an action. The filesystem / pasteboard cases are
+    /// fully self-contained; the connector-backed cases (Gmail draft / Calendar
+    /// event) resolve a token via `googleToken` — injectable for tests.
+    static func revert(
+        _ action: ReversibleAction,
+        googleToken: GoogleTokenProvider = { await ConnectorStore.shared.validAccessToken(.google) }
+    ) async -> ToolResult {
         switch action {
         case .fileWrite(let path, let previous):
             let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
@@ -76,6 +95,28 @@ actor UndoStack {
                 pb.clearContents()
                 if let previous { pb.setString(previous, forType: .string) }
                 return .ok("Restored the previous clipboard contents.")
+            }
+
+        case .gmailDraftCreated(let id):
+            guard let token = await googleToken() else {
+                return .fail("Couldn't undo the Gmail draft — reconnect Google in Settings → Connectors → Google, then try again.")
+            }
+            do {
+                try await GoogleConnector().deleteDraft(id: id, accessToken: token)
+                return .ok("Deleted the Gmail draft.")
+            } catch {
+                return .fail("Couldn't delete the Gmail draft — your Google connection may need to be re-authorized in Settings → Connectors → Google.")
+            }
+
+        case .calendarEventCreated(let id):
+            guard let token = await googleToken() else {
+                return .fail("Couldn't undo the calendar event — reconnect Google in Settings → Connectors → Google, then try again.")
+            }
+            do {
+                try await GoogleConnector().deleteEvent(id: id, accessToken: token)
+                return .ok("Removed the Google Calendar event.")
+            } catch {
+                return .fail("Couldn't delete the calendar event — your Google connection may need to be re-authorized in Settings → Connectors → Google.")
             }
         }
     }

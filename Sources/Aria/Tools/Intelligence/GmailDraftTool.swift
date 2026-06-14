@@ -33,6 +33,9 @@ struct GmailDraftTool: AriaTool {
         do {
             let result = try await connector.createDraft(
                 to: to, subject: subject, body: body, accessToken: token)
+            // Make this receipt undoable: the chokepoint snapshots UndoStack depth
+            // around the call and attaches this action so "undo" deletes the draft.
+            await UndoStack.shared.record(.gmailDraftCreated(id: result.id))
             let suffix = to.isEmpty ? "" : " to \(to)"
             return .ok("Drafted the email in Gmail\(suffix) — review and send when you're ready.",
                        diagnostics: "gmail draft id \(result.id)")

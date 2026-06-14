@@ -37,6 +37,9 @@ struct GcalCreateTool: AriaTool {
         do {
             let id = try await connector.createEvent(
                 title: title, start: start, end: end, accessToken: token)
+            // Make this receipt undoable: the chokepoint snapshots UndoStack depth
+            // around the call and attaches this action so "undo" deletes the event.
+            await UndoStack.shared.record(.calendarEventCreated(id: id))
             return .ok("Added \"\(title)\" to your Google Calendar (\(start)).",
                        diagnostics: "gcal event id \(id)")
         } catch {
