@@ -114,6 +114,11 @@ final class AppSettings: ObservableObject {
     @Published var dictationEnabled: Bool {
         didSet { defaults.set(dictationEnabled, forKey: K.dictationEnabled) }
     }
+    /// V11.1.1 Phase C: opt-in on-device model of the user (people/projects she
+    /// refers to + writing-style profile). Same key the EntityStore reads.
+    @Published var personalizationEnabled: Bool {
+        didSet { defaults.set(personalizationEnabled, forKey: K.personalizationEnabled) }
+    }
     /// V11.1.1 Phase D: let Aria ACT on her own very-high-confidence, reversible
     /// anticipations (receipted + undoable) instead of only suggesting. Opt-in —
     /// it's the boldest autonomy, so the user turns it on deliberately.
@@ -173,6 +178,7 @@ final class AppSettings: ObservableObject {
         dictationEnabled = defaults.object(forKey: K.dictationEnabled) as? Bool ?? true
         dictationAICleanup = defaults.bool(forKey: K.dictationAICleanup)
         autonomousActions = defaults.bool(forKey: K.autonomousActions)
+        personalizationEnabled = defaults.bool(forKey: K.personalizationEnabled)
     }
 
     /// Register/unregister the app as a login item (SMAppService, macOS 13+).
@@ -220,5 +226,6 @@ final class AppSettings: ObservableObject {
         static let dictationEnabled = "app.dictationEnabled"
         static let dictationAICleanup = "app.dictationAICleanup"
         static let autonomousActions = "app.autonomousActions"
+        static let personalizationEnabled = "app.personalizationEnabled"
     }
 }

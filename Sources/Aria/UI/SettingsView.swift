@@ -549,6 +549,12 @@ struct KnowledgeSettingsTab: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
+            SSection("Personalization") {
+                Toggle("Let Aria learn who & how I write", isOn: $app.personalizationEnabled)
+                Text("Builds an on-device model of the people and projects you refer to (so “email Sara” resolves) and your writing voice (so her drafts sound like you). Local-only; turning it off wipes it.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             if s.enabled {
                 SSection("Indexed folders (\(s.folders.count))") {
                     ForEach(s.folders, id: \.self) { folder in
