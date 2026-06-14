@@ -114,6 +114,12 @@ final class AppSettings: ObservableObject {
     @Published var dictationEnabled: Bool {
         didSet { defaults.set(dictationEnabled, forKey: K.dictationEnabled) }
     }
+    /// V11.1.1 Phase D: let Aria ACT on her own very-high-confidence, reversible
+    /// anticipations (receipted + undoable) instead of only suggesting. Opt-in —
+    /// it's the boldest autonomy, so the user turns it on deliberately.
+    @Published var autonomousActions: Bool {
+        didSet { defaults.set(autonomousActions, forKey: K.autonomousActions) }
+    }
     /// Optional AI cleanup pass on dictated text (fixes punctuation / mis-hears at
     /// the cost of a round-trip). Off by default — heuristic cleanup is instant.
     @Published var dictationAICleanup: Bool {
@@ -166,6 +172,7 @@ final class AppSettings: ObservableObject {
         personalContextEnabled = defaults.bool(forKey: K.personalContextEnabled)
         dictationEnabled = defaults.object(forKey: K.dictationEnabled) as? Bool ?? true
         dictationAICleanup = defaults.bool(forKey: K.dictationAICleanup)
+        autonomousActions = defaults.bool(forKey: K.autonomousActions)
     }
 
     /// Register/unregister the app as a login item (SMAppService, macOS 13+).
@@ -212,5 +219,6 @@ final class AppSettings: ObservableObject {
         static let personalContextEnabled = "app.personalContextEnabled"
         static let dictationEnabled = "app.dictationEnabled"
         static let dictationAICleanup = "app.dictationAICleanup"
+        static let autonomousActions = "app.autonomousActions"
     }
 }

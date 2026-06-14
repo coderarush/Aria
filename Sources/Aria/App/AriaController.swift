@@ -455,6 +455,17 @@ final class AriaController {
         guard let suggestion = await engine.tick(now: Date()) else { return }
         // An await elapsed — re-check we're still idle and nothing else surfaced.
         guard idleForProactive, presenter.pending == nil else { return }
+        // Phase D — anticipation that ACTS: a very-high-confidence, reversible
+        // suggestion runs on its own (receipted + undoable) instead of waiting to
+        // be accepted. Anything important-irreversible still surfaces to ask.
+        if let cmd = AnticipationPolicy.autoActCommand(for: suggestion,
+                                                       enabled: AppSettings.shared.autonomousActions) {
+            Log.trace("proactive: auto-acting on \(suggestion.dedupeKey)")
+            await engine.record(.accepted, for: suggestion, now: Date())
+            Notifier.notify(title: "Aria", body: "\(suggestion.spokenLine) — say “undo” to revert.")
+            runProactiveCommand(cmd)
+            return
+        }
         presenter.present(suggestion)
         scheduleProactiveExpiry(at: suggestion.expiry)
         Log.trace("proactive: surfaced \(suggestion.dedupeKey)")

@@ -321,6 +321,12 @@ struct GeneralSettingsTab: View {
                 Toggle("Privacy mode (disable screen capture)", isOn: $settings.privacyMode)
                 Toggle("Launch at login", isOn: $settings.launchAtLogin)
             }
+
+            SSection("Autonomy") {
+                Toggle("Let Aria act on her own anticipations", isOn: $settings.autonomousActions)
+                Text("When she's very confident and the action is reversible, she'll just do it (e.g. open your standup doc at 9am) and notify you — everything is logged in Receipts and one “undo” away. Important or irreversible things always ask first.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 
