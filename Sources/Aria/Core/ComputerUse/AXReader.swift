@@ -100,11 +100,19 @@ enum AXReader {
 
     /// Find the live AX element best matching a label (+ optional role), by score.
     static func find(role: String?, label: String) -> AXUIElement? {
+        findScored(role: role, label: label)?.el
+    }
+
+    /// Like `find`, but also returns the match score (0…100) of the chosen element, so the
+    /// caller can attach a targeting confidence and decide whether the match is strong
+    /// enough to click. A fresh tree walk every call — used by the retry loop to re-resolve
+    /// a moved element rather than reuse a stale rect.
+    static func findScored(role: String?, label: String) -> (el: AXUIElement, score: Int)? {
         guard hasPermission, let app = frontmostTarget() else { return nil }
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
         var best: (el: AXUIElement, score: Int)?
         findWalk(axApp, role: role, want: label, best: &best, depth: 0)
-        return best?.el
+        return best
     }
 
     // MARK: tree walking
