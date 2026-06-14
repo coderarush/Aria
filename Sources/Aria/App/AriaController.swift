@@ -40,6 +40,10 @@ final class AriaController {
     /// Push-to-talk (⌥Space) and type-to-Aria (⌥⇧Space) global hotkeys.
     private var hotkeyTap: HotkeyTap?
     private var typePanel: CommandInputPanel?
+    private let dictation = DictationController()
+    /// Set by startDictation(); the next captured transcript is inserted as text
+    /// rather than handled as a command. Reset the instant it's consumed.
+    private var dictationPending = false
     private var settingsCancellable: AnyCancellable?
     /// True while Aria is speaking; keeps wake suspended even if the pill
     /// auto-hides mid-utterance, so she can't hear herself and re-trigger.
@@ -112,7 +116,8 @@ final class AriaController {
     private func configureHotkeys() {
         hotkeyTap = HotkeyTap(
             onTalk: { [weak self] in self?.summonAria() },
-            onType: { [weak self] in self?.showTypePanel() })
+            onType: { [weak self] in self?.showTypePanel() },
+            onDictate: { [weak self] in self?.startDictation() })
         if hotkeyTap?.start() != true {
             // Accessibility not granted yet (or granted AFTER launch — taps
             // can't be created retroactively). Keep retrying so the user never
@@ -140,6 +145,16 @@ final class AriaController {
     /// suspended (she's speaking) or already capturing.
     func summonAria() {
         wakeEngine.summon()
+    }
+
+    /// System-wide dictation (⌥⇧D): reuse the exact voice-capture path, but flag
+    /// the next captured transcript to be cleaned and TYPED into the focused app
+    /// instead of routed to the agent (see the divert at the top of handleCommand).
+    func startDictation() {
+        guard AppSettings.shared.dictationEnabled else { return }
+        dictationPending = true
+        playChime(.task)
+        summonAria()
     }
 
     /// Soft interaction chime, AEC-cancelled (played as far-end reference so
@@ -839,6 +854,20 @@ final class AriaController {
     // MARK: Command handling
 
     private func handleCommand(_ command: String) {
+        // Dictation divert: these words are output, not a command — clean them and
+        // type them into whatever the user is focused on, then tear the turn down
+        // cleanly (re-arms wake; never leaves her deaf).
+        if dictationPending {
+            dictationPending = false
+            let text = DictationController.cleanup(command)
+            if !text.isEmpty {
+                dictation.insert(text)
+                playChime(.done)
+            }
+            endConversation()
+            return
+        }
+
         let lower = command.lowercased()
 
         // Answering a plan preview? Affirmative → execute; anything else →

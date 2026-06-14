@@ -110,6 +110,10 @@ final class AppSettings: ObservableObject {
     @Published var personalContextEnabled: Bool {
         didSet { defaults.set(personalContextEnabled, forKey: K.personalContextEnabled) }
     }
+    /// System-wide dictation (⌥⇧D): talk → cleaned text typed into the focused app.
+    @Published var dictationEnabled: Bool {
+        didSet { defaults.set(dictationEnabled, forKey: K.dictationEnabled) }
+    }
 
     var accentChoice: AccentChoice {
         get { Theme.decodeChoice(accentChoiceRaw) }
@@ -155,6 +159,7 @@ final class AppSettings: ObservableObject {
             (defaults.object(forKey: K.orbAnchorY) as? Double).map { CGPoint(x: x, y: $0) }
         }
         personalContextEnabled = defaults.bool(forKey: K.personalContextEnabled)
+        dictationEnabled = defaults.object(forKey: K.dictationEnabled) as? Bool ?? true
     }
 
     /// Register/unregister the app as a login item (SMAppService, macOS 13+).
@@ -199,5 +204,6 @@ final class AppSettings: ObservableObject {
         static let orbAnchorX = "app.orbAnchorX"
         static let orbAnchorY = "app.orbAnchorY"
         static let personalContextEnabled = "app.personalContextEnabled"
+        static let dictationEnabled = "app.dictationEnabled"
     }
 }

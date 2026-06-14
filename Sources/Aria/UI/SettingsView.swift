@@ -392,6 +392,12 @@ struct ConversationSettingsTab: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
+            SSection("Dictation") {
+                Toggle("System-wide dictation (⌥⇧D)", isOn: $settings.dictationEnabled)
+                Text("Press ⌥⇧D anywhere, speak, and Aria types the cleaned-up text into whatever field you're in — email, Slack, code. Your words go in as-is; she doesn't answer them.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             SSection("Notifications") {
                 Toggle("Background agent results", isOn: Binding(
                     get: { UserDefaults.standard.object(forKey: "app.notifyAgentRuns") as? Bool ?? true },
