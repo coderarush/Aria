@@ -125,6 +125,6 @@ final class AppWindowModelTests: XCTestCase {
             XCTAssertFalse(s.icon.isEmpty)
             XCTAssertEqual(s.id, s.rawValue)
         }
-        XCTAssertEqual(AppSection.allCases.count, 6)   // + Insights
+        XCTAssertEqual(AppSection.allCases.count, 7)   // + Insights, Receipts
     }
 }
