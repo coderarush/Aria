@@ -29,4 +29,21 @@ enum Safety {
         let blob = summary.lowercased()
         return dangerWords.contains { blob.contains($0) }
     }
+
+    /// Tools whose effect Aria can cleanly reverse (each records a ReversibleAction).
+    static let reversibleTools: Set<String> = ["file_write", "clipboard", "save_note"]
+    /// Extremely-important irreversible tools — the only class that gates approval
+    /// under high autonomy (money, deletes with no undo, external comms, raw shell).
+    static let importantTools: Set<String> = ["send_mail", "send_message", "send",
+                                              "delete_file", "shell", "applescript"]
+
+    /// Classify an action's consequence (v11.1.1 high-autonomy gate). Routine and
+    /// reversible actions run free + receipted; only `.importantIrreversible` pauses.
+    static func importance(tool: String, input: [String: String], summary: String) -> ActionImportance {
+        if safeTools.contains(tool) { return .routine }
+        if importantTools.contains(tool) || isDestructive(summary: summary) { return .importantIrreversible }
+        if reversibleTools.contains(tool) { return .reversible }
+        if isDestructive(tool: tool, input: input) { return .importantIrreversible }
+        return .routine
+    }
 }
