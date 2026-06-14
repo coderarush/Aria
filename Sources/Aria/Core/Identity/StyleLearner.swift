@@ -43,6 +43,20 @@ actor StyleLearner {
         save()
     }
 
+    /// Pull recent SENT mail as higher-quality style samples — the user's actual
+    /// prose, not just imperative commands. No-op when off or Google isn't
+    /// connected. Best-effort: failures are swallowed (style stays on turn samples).
+    func refreshFromSentMail() async {
+        guard isEnabled else { return }
+        guard let token = await ConnectorStore.shared.validAccessToken(.google) else { return }
+        let sent = (try? await GoogleConnector().recentGmail(
+            accessToken: token, maxResults: 15, query: "in:sent")) ?? []
+        for m in sent {
+            let sample = m.snippet.isEmpty ? m.subject : m.snippet
+            observe(sample)
+        }
+    }
+
     func profile() -> StyleProfile { cached }
 
     /// A draft-scoped style instruction to prepend to a turn, or nil when off /

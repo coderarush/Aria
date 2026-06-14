@@ -327,6 +327,15 @@ struct GeneralSettingsTab: View {
                 Text("When she's very confident and the action is reversible, she'll just do it (e.g. open your standup doc at 9am) and notify you — everything is logged in Receipts and one “undo” away. Important or irreversible things always ask first.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+
+            SSection("Connectors") {
+                Picker("Sign-in method", selection: $settings.connectorMode) {
+                    Text("Bring your own client ID").tag("byo")
+                    Text("Hosted relay (no setup)").tag("relay")
+                }
+                Text("“Bring your own” connects with an OAuth client ID you paste per service (works today). “Hosted relay” needs no setup — available once Aria's relay is live.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 

@@ -117,7 +117,18 @@ final class AppSettings: ObservableObject {
     /// V11.1.1 Phase C: opt-in on-device model of the user (people/projects she
     /// refers to + writing-style profile). Same key the EntityStore reads.
     @Published var personalizationEnabled: Bool {
-        didSet { defaults.set(personalizationEnabled, forKey: K.personalizationEnabled) }
+        didSet {
+            defaults.set(personalizationEnabled, forKey: K.personalizationEnabled)
+            // Seed the writing-style profile from the user's sent mail the moment
+            // they opt in (best-effort; no-op if Google isn't connected).
+            if personalizationEnabled { Task { await StyleLearner.shared.refreshFromSentMail() } }
+        }
+    }
+    /// V11.1.1: how connectors authenticate — "byo" (bring your own OAuth client ID,
+    /// the working default until the hosted relay is deployed) or "relay" (hosted,
+    /// no client ID needed — switch to this once the relay is live). Connector layer reads it.
+    @Published var connectorMode: String {
+        didSet { defaults.set(connectorMode, forKey: K.connectorMode) }
     }
     /// V11.1.1 Phase D: let Aria ACT on her own very-high-confidence, reversible
     /// anticipations (receipted + undoable) instead of only suggesting. Opt-in —
@@ -179,6 +190,12 @@ final class AppSettings: ObservableObject {
         dictationAICleanup = defaults.bool(forKey: K.dictationAICleanup)
         autonomousActions = defaults.bool(forKey: K.autonomousActions)
         personalizationEnabled = defaults.bool(forKey: K.personalizationEnabled)
+        connectorMode = defaults.string(forKey: K.connectorMode) ?? "byo"
+        // Pin the working default so the connector layer reads a concrete mode
+        // (relay isn't deployed yet — byo is what actually connects today).
+        if defaults.string(forKey: K.connectorMode) == nil {
+            defaults.set("byo", forKey: K.connectorMode)
+        }
     }
 
     /// Register/unregister the app as a login item (SMAppService, macOS 13+).
@@ -227,5 +244,6 @@ final class AppSettings: ObservableObject {
         static let dictationAICleanup = "app.dictationAICleanup"
         static let autonomousActions = "app.autonomousActions"
         static let personalizationEnabled = "app.personalizationEnabled"
+        static let connectorMode = "app.connectorMode"
     }
 }
