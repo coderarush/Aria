@@ -13,6 +13,9 @@ struct GoogleConnector: ConnectorProvider {
     let displayName = "Google"
     let scopes = [
         "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.send",        // gmail_send
+        "https://www.googleapis.com/auth/gmail.compose",     // gmail_draft
+        "https://www.googleapis.com/auth/calendar.events",   // gcal_create
         "https://www.googleapis.com/auth/calendar.readonly"
     ]
     let authEndpoint = "https://accounts.google.com/o/oauth2/v2/auth"
