@@ -4,7 +4,7 @@ import AppKit
 /// A reversible action Aria performed, with enough captured state to undo it.
 /// The directive asks for rollback "wherever technically possible" — we record the
 /// few cleanly-reversible built-in actions so the user can say "undo that".
-enum ReversibleAction: Sendable, Equatable {
+enum ReversibleAction: Sendable, Equatable, Codable {
     /// A file_write. `previousContent == nil` means the file did not exist before
     /// (undo deletes it); otherwise undo restores the prior bytes.
     case fileWrite(path: String, previousContent: String?)
