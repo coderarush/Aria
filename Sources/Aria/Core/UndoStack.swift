@@ -41,6 +41,8 @@ actor UndoStack {
     var canUndo: Bool { !actions.isEmpty }
     func peekLabel() -> String? { actions.last?.label }
     func depth() -> Int { actions.count }
+    /// The most recently recorded reversible action (for attaching to a receipt).
+    func lastRecorded() -> ReversibleAction? { actions.last }
 
     /// Undo the most recent reversible action, or report there's nothing to undo.
     func undoLast() async -> ToolResult {
