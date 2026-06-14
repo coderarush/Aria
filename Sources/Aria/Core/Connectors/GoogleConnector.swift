@@ -16,7 +16,9 @@ struct GoogleConnector: ConnectorProvider {
         "https://www.googleapis.com/auth/gmail.send",        // gmail_send
         "https://www.googleapis.com/auth/gmail.compose",     // gmail_draft
         "https://www.googleapis.com/auth/calendar.events",   // gcal_create
-        "https://www.googleapis.com/auth/calendar.readonly"
+        "https://www.googleapis.com/auth/calendar.readonly",
+        "https://www.googleapis.com/auth/drive.readonly",    // drive_search + drive_read
+        "https://www.googleapis.com/auth/drive.file"         // drive_create (files this app touches)
     ]
     let authEndpoint = "https://accounts.google.com/o/oauth2/v2/auth"
     let tokenEndpoint = "https://oauth2.googleapis.com/token"
@@ -42,6 +44,20 @@ struct GoogleConnector: ConnectorProvider {
     struct CalendarEvent: Sendable, Equatable {
         let summary: String
         let start: String
+    }
+
+    /// A compact Drive file match (search result row).
+    struct DriveFile: Sendable, Equatable {
+        let id: String
+        let name: String
+        let mimeType: String
+    }
+
+    /// The outcome of reading a Drive file: either text we could extract, or a
+    /// clean note explaining we can't read this type (binary, image, etc.).
+    enum DriveReadResult: Sendable, Equatable {
+        case text(name: String, content: String)
+        case unreadable(name: String, mimeType: String)
     }
 
     /// Fetch recent Gmail message metadata (From/Subject + snippet). Lists IDs,
@@ -164,6 +180,57 @@ struct GoogleConnector: ConnectorProvider {
         return id
     }
 
+    // MARK: - Authorized Drive (search / read / create, thin)
+
+    /// Search Drive for files matching a free-text term. The user's `query` is
+    /// wrapped into Drive's `name contains '…'` operator and trashed files are
+    /// excluded. Returns up to `maxResults` compact matches; empty on no hits.
+    func searchDriveFiles(query: String, accessToken: String, maxResults: Int = 10,
+                          session: URLSession = .shared) async throws -> [DriveFile] {
+        let data = try await authorizedGET(Self.driveSearchURL(query: query, maxResults: maxResults),
+                                           accessToken: accessToken, session: session)
+        return Self.parseDriveFileList(data)
+    }
+
+    /// Read a Drive file by id. Google-native docs (Docs/Sheets/Slides) are
+    /// exported to `text/plain`; everything else is fetched with `?alt=media`.
+    /// Binary/unknown types come back as `.unreadable` with a clean note rather
+    /// than dumping bytes. We fetch metadata first to learn the name + mimeType.
+    func readDriveFile(id: String, accessToken: String,
+                       session: URLSession = .shared) async throws -> DriveReadResult {
+        let meta = try await authorizedGET(Self.driveMetadataURL(id: id),
+                                           accessToken: accessToken, session: session)
+        let (name, mimeType) = Self.parseDriveFileMeta(meta)
+        // A Google-native doc can't be downloaded directly — it must be exported.
+        if Self.isGoogleNativeTextDoc(mimeType) {
+            let data = try await authorizedGET(Self.driveExportURL(id: id, mimeType: "text/plain"),
+                                               accessToken: accessToken, session: session)
+            return .text(name: name, content: String(decoding: data, as: UTF8.self))
+        }
+        // Plain text-ish files download with alt=media; binary types we decline.
+        guard Self.isReadableMediaType(mimeType) else {
+            return .unreadable(name: name, mimeType: mimeType)
+        }
+        let data = try await authorizedGET(Self.driveMediaURL(id: id),
+                                           accessToken: accessToken, session: session)
+        return .text(name: name, content: String(decoding: data, as: UTF8.self))
+    }
+
+    /// Create a plain-text file in Drive via a multipart "simple upload". Returns
+    /// the new file id. Reversible-ish (the file can be trashed), so the tool that
+    /// calls this does not gate.
+    func createDriveFile(name: String, content: String, accessToken: String,
+                         session: URLSession = .shared) async throws -> String {
+        let (body, contentType) = Self.driveMultipartBody(name: name, content: content)
+        let data = try await authorizedUpload(Self.driveUploadURL(), method: "POST",
+                                              body: body, contentType: contentType,
+                                              accessToken: accessToken, session: session)
+        guard let id = Self.parseDriveFileID(data) else {
+            throw OAuth2.OAuth2Error.malformedTokenResponse
+        }
+        return id
+    }
+
     // MARK: - Authorized deletes (undo support, thin)
 
     /// Delete a Gmail draft by id (`drafts.delete`) — the inverse of
@@ -197,6 +264,159 @@ struct GoogleConnector: ConnectorProvider {
     static func eventDeleteURL(id: String) -> URL {
         let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
         return URL(string: "https://www.googleapis.com/calendar/v3/calendars/primary/events/\(encoded)")!
+    }
+
+    // MARK: - Pure Drive URL builders (testable)
+
+    /// Drive API v3 base.
+    static let driveBase = "https://www.googleapis.com/drive/v3"
+
+    /// `GET /files?q=name contains '<query>' and trashed=false` — the user term is
+    /// single-quote-escaped (Drive's query language doubles a `'` to escape) and
+    /// the whole thing is percent-encoded by URLComponents. We project just the
+    /// fields the parser needs.
+    static func driveSearchURL(query: String, maxResults: Int = 10) -> URL {
+        let escaped = query.replacingOccurrences(of: "'", with: "\\'")
+        var comps = URLComponents(string: "\(driveBase)/files")!
+        comps.queryItems = [
+            URLQueryItem(name: "q", value: "name contains '\(escaped)' and trashed = false"),
+            URLQueryItem(name: "pageSize", value: String(maxResults)),
+            URLQueryItem(name: "fields", value: "files(id,name,mimeType)")
+        ]
+        return comps.url!
+    }
+
+    /// `GET /files/{id}?fields=name,mimeType` — file id is path-percent-encoded so
+    /// an unusual id can't break the URL.
+    static func driveMetadataURL(id: String) -> URL {
+        let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        var comps = URLComponents(string: "\(driveBase)/files/\(encoded)")!
+        comps.queryItems = [URLQueryItem(name: "fields", value: "name,mimeType")]
+        return comps.url!
+    }
+
+    /// `GET /files/{id}/export?mimeType=…` — for Google-native docs (Docs/Sheets/
+    /// Slides) which can't be downloaded directly. id is path-percent-encoded.
+    static func driveExportURL(id: String, mimeType: String) -> URL {
+        let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        var comps = URLComponents(string: "\(driveBase)/files/\(encoded)/export")!
+        comps.queryItems = [URLQueryItem(name: "mimeType", value: mimeType)]
+        return comps.url!
+    }
+
+    /// `GET /files/{id}?alt=media` — raw download for non-native files.
+    static func driveMediaURL(id: String) -> URL {
+        let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        var comps = URLComponents(string: "\(driveBase)/files/\(encoded)")!
+        comps.queryItems = [URLQueryItem(name: "alt", value: "media")]
+        return comps.url!
+    }
+
+    /// `POST …/upload/drive/v3/files?uploadType=multipart` — the multipart simple
+    /// upload endpoint (note the `/upload` path prefix, distinct from the metadata
+    /// API base).
+    static func driveUploadURL() -> URL {
+        var comps = URLComponents(string: "https://www.googleapis.com/upload/drive/v3/files")!
+        comps.queryItems = [URLQueryItem(name: "uploadType", value: "multipart")]
+        return comps.url!
+    }
+
+    // MARK: - Drive MIME-type classification (pure / testable)
+
+    /// Google-native docs we can export to plain text.
+    static func isGoogleNativeTextDoc(_ mimeType: String) -> Bool {
+        [
+            "application/vnd.google-apps.document",
+            "application/vnd.google-apps.spreadsheet",
+            "application/vnd.google-apps.presentation"
+        ].contains(mimeType)
+    }
+
+    /// Non-native types we'll attempt to read as UTF-8 text via alt=media. Other
+    /// google-apps types (folders, forms) and binaries are declined.
+    static func isReadableMediaType(_ mimeType: String) -> Bool {
+        if mimeType.hasPrefix("text/") { return true }
+        return [
+            "application/json",
+            "application/xml",
+            "application/javascript",
+            "application/rtf"
+        ].contains(mimeType)
+    }
+
+    // MARK: - Pure Drive multipart body (testable)
+
+    /// A multipart/related "simple upload" body: a JSON metadata part (the file
+    /// name) + a text/plain media part (the content). Returns the body bytes and
+    /// the `Content-Type` header value carrying the boundary.
+    static func driveMultipartBody(name: String, content: String,
+                                   boundary: String = "aria-drive-boundary") -> (Data, String) {
+        let metadata = (try? JSONSerialization.data(
+            withJSONObject: ["name": name])).flatMap { String(data: $0, encoding: .utf8) }
+            ?? "{\"name\":\"\(name)\"}"
+        let parts = [
+            "--\(boundary)",
+            "Content-Type: application/json; charset=UTF-8",
+            "",
+            metadata,
+            "--\(boundary)",
+            "Content-Type: text/plain; charset=UTF-8",
+            "",
+            content,
+            "--\(boundary)--",
+            ""
+        ].joined(separator: "\r\n")
+        return (Data(parts.utf8), "multipart/related; boundary=\(boundary)")
+    }
+
+    // MARK: - Pure Drive response parsers (testable)
+
+    /// A `files.list` response: `{"files":[{"id","name","mimeType"},…]}`.
+    static func parseDriveFileList(_ data: Data) -> [DriveFile] {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let files = obj["files"] as? [[String: Any]] else { return [] }
+        return files.compactMap { f in
+            guard let id = f["id"] as? String, let name = f["name"] as? String else { return nil }
+            return DriveFile(id: id, name: name, mimeType: (f["mimeType"] as? String) ?? "")
+        }
+    }
+
+    /// A file-metadata response: `{"name":…,"mimeType":…}`. Missing fields fall
+    /// back to safe defaults so a read never crashes.
+    static func parseDriveFileMeta(_ data: Data) -> (name: String, mimeType: String) {
+        let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        return ((obj?["name"] as? String) ?? "(untitled)",
+                (obj?["mimeType"] as? String) ?? "")
+    }
+
+    /// A `files.create` response: top-level `{"id": "..."}` is the new file id.
+    static func parseDriveFileID(_ data: Data) -> String? {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return obj["id"] as? String
+    }
+
+    // MARK: - Drive display formatting (pure / testable)
+
+    /// Render Drive search matches into the user-facing text block a tool returns.
+    static func formatDriveFiles(_ files: [DriveFile]) -> String {
+        guard !files.isEmpty else { return "No matching Google Drive files found." }
+        let lines = files.map { "• \($0.name)  [id: \($0.id)]" }
+        return "Google Drive matches:\n\(lines.joined(separator: "\n"))"
+    }
+
+    /// Render a Drive read result into a user-facing block — the text, or a clean
+    /// "can't read this type" note.
+    static func formatDriveRead(_ result: DriveReadResult) -> String {
+        switch result {
+        case let .text(name, content):
+            let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty
+                ? "\"\(name)\" is empty."
+                : "\(name):\n\(trimmed)"
+        case let .unreadable(name, mimeType):
+            return "I can't read \"\(name)\" as text (type \(mimeType.isEmpty ? "unknown" : mimeType)). I can find and link it, but reading this file type isn't supported yet."
+        }
     }
 
     // MARK: - Pure request-body builders (testable)
@@ -353,6 +573,26 @@ struct GoogleConnector: ConnectorProvider {
         req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, resp) = try await session.data(for: req)
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200 || status == 201 else {
+            throw OAuth2.OAuth2Error.tokenExchangeFailed(status)
+        }
+        return data
+    }
+
+    /// Authorized upload with a raw body + explicit Content-Type (used for Drive's
+    /// multipart simple upload, whose body isn't JSON). Accepts 200 and 201 (Drive
+    /// `files.create` returns 200).
+    private func authorizedUpload(_ url: URL, method: String, body: Data,
+                                  contentType: String, accessToken: String,
+                                  session: URLSession) async throws -> Data {
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        req.timeoutInterval = 30
+        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        req.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        req.httpBody = body
         let (data, resp) = try await session.data(for: req)
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         guard status == 200 || status == 201 else {

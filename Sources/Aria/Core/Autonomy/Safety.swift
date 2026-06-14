@@ -19,6 +19,12 @@ enum Safety {
                                                  // draft body / event title containing a danger word ("send
                                                  // the report") can't trip the content gate.
                                                  "gmail_recent", "gcal_upcoming", "gmail_draft", "gcal_create",
+                                                 // Connected-Drive reads + the reversible-ish file create (a
+                                                 // created file can be trashed from Drive) don't gate, and
+                                                 // drive_create is NOT in importantTools. Listed here so a file
+                                                 // name / content containing a danger word ("send", "delete")
+                                                 // can't trip the content gate.
+                                                 "drive_search", "drive_read", "drive_create",
                                                  // Notion + Slack reads + the reversible-ish Notion page append
                                                  // (a block can be deleted) don't gate. (slack_send is external
                                                  // comms — it lives in importantTools below and stays gated.)
