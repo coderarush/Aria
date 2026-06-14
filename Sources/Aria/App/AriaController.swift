@@ -153,6 +153,7 @@ final class AriaController {
     func startDictation() {
         guard AppSettings.shared.dictationEnabled else { return }
         dictationPending = true
+        islandViewModel.isDictating = true
         playChime(.task)
         summonAria()
     }
@@ -859,12 +860,23 @@ final class AriaController {
         // cleanly (re-arms wake; never leaves her deaf).
         if dictationPending {
             dictationPending = false
-            let text = DictationController.cleanup(command)
-            if !text.isEmpty {
-                dictation.insert(text)
-                playChime(.done)
-            }
+            islandViewModel.isDictating = false
+            let raw = command
+            let useAI = AppSettings.shared.dictationAICleanup
             endConversation()
+            Task { [weak self] in
+                guard let self else { return }
+                // Heuristic clean is instant; the optional AI pass fixes punctuation
+                // and obvious mis-hears but costs a round-trip, so it's opt-in.
+                var text = DictationController.cleanup(raw)
+                if useAI, let polished = await self.dictation.aiCleanup(raw, via: self.orchestrator.geminiClient) {
+                    text = polished
+                }
+                if !text.isEmpty {
+                    self.dictation.insert(text)
+                    self.playChime(.done)
+                }
+            }
             return
         }
 

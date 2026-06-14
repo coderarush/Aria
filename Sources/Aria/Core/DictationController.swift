@@ -28,6 +28,24 @@ final class DictationController {
         return t
     }
 
+    /// Optional AI cleanup: punctuation, capitalization, and obvious mis-hear
+    /// fixes — WITHOUT changing wording or meaning. Returns nil on any failure so
+    /// the caller falls back to the heuristic clean. Kept short for low latency.
+    func aiCleanup(_ raw: String, via client: GeminiClient) async -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let prompt = """
+        Rewrite this dictated text with correct punctuation, capitalization, and \
+        spacing, fixing only obvious speech-to-text errors. Do NOT change the \
+        wording, add content, or answer it — return ONLY the cleaned text.
+
+        \(trimmed)
+        """
+        guard let out = try? await client.generateText(prompt: prompt, temperature: 0) else { return nil }
+        let cleaned = out.trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.isEmpty ? nil : cleaned
+    }
+
     /// Insert text at the cursor in the frontmost app by pasting it (the most
     /// reliable cross-app insertion), restoring the user's prior clipboard right
     /// after so dictation never clobbers what they had copied.

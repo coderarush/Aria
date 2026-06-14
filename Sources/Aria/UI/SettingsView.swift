@@ -396,6 +396,10 @@ struct ConversationSettingsTab: View {
                 Toggle("System-wide dictation (⌥⇧D)", isOn: $settings.dictationEnabled)
                 Text("Press ⌥⇧D anywhere, speak, and Aria types the cleaned-up text into whatever field you're in — email, Slack, code. Your words go in as-is; she doesn't answer them.")
                     .font(.caption).foregroundStyle(.secondary)
+                Toggle("Polish with AI", isOn: $settings.dictationAICleanup)
+                    .disabled(!settings.dictationEnabled)
+                Text("Fix punctuation and obvious mis-hears with a quick AI pass before inserting. Slightly slower; off uses instant local cleanup.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
             SSection("Notifications") {

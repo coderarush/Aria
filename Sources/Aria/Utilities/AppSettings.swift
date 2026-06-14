@@ -114,6 +114,11 @@ final class AppSettings: ObservableObject {
     @Published var dictationEnabled: Bool {
         didSet { defaults.set(dictationEnabled, forKey: K.dictationEnabled) }
     }
+    /// Optional AI cleanup pass on dictated text (fixes punctuation / mis-hears at
+    /// the cost of a round-trip). Off by default — heuristic cleanup is instant.
+    @Published var dictationAICleanup: Bool {
+        didSet { defaults.set(dictationAICleanup, forKey: K.dictationAICleanup) }
+    }
 
     var accentChoice: AccentChoice {
         get { Theme.decodeChoice(accentChoiceRaw) }
@@ -160,6 +165,7 @@ final class AppSettings: ObservableObject {
         }
         personalContextEnabled = defaults.bool(forKey: K.personalContextEnabled)
         dictationEnabled = defaults.object(forKey: K.dictationEnabled) as? Bool ?? true
+        dictationAICleanup = defaults.bool(forKey: K.dictationAICleanup)
     }
 
     /// Register/unregister the app as a login item (SMAppService, macOS 13+).
@@ -205,5 +211,6 @@ final class AppSettings: ObservableObject {
         static let orbAnchorY = "app.orbAnchorY"
         static let personalContextEnabled = "app.personalContextEnabled"
         static let dictationEnabled = "app.dictationEnabled"
+        static let dictationAICleanup = "app.dictationAICleanup"
     }
 }

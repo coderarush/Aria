@@ -41,6 +41,7 @@ struct IslandView: View {
     }
 
     private var captionText: String {
+        if viewModel.isDictating && viewModel.state == .listening { return "Dictating…" }
         switch viewModel.state {
         case .listening: return "Listening…"
         case .thinking:  return "Thinking…"

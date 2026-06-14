@@ -19,6 +19,9 @@ final class IslandViewModel: ObservableObject {
     /// `state` so it can sit on top of any state without disturbing the wake/
     /// listen/think flow. Speaks only when the user reveals it.
     @Published private(set) var hasSuggestion: Bool = false
+    /// System-wide dictation in progress — the caption reads "Dictating…" so the
+    /// user knows their words are being typed, not interpreted as a command.
+    @Published var isDictating: Bool = false
 
     /// Fired when the pill wants the hosting panel to show/hide.
     var onVisibilityChange: ((Bool) -> Void)?
