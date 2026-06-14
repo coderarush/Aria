@@ -253,8 +253,14 @@ struct OnboardingView: View {
             LocalModelSetupView(compact: true)
                 .frame(maxWidth: 380)
                 .padding(.top, 4)
-            Text("You can skip this \u{2014} Aria works with cloud models too.")
+            // Optional one-tap: pull the fast instruct chat model so spoken
+            // voice runs on-device out of the box. Skippable — cloud voice is
+            // already fast — and graceful when Ollama isn't installed.
+            LocalVoiceSetupView()
+                .frame(maxWidth: 380)
+            Text("Private + on-device \u{2014} voice still works through the cloud if you skip.")
                 .font(.caption2).foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
         }
     }
 
