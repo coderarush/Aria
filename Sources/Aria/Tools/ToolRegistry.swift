@@ -87,7 +87,11 @@ actor ToolRegistry {
             ScreenVisionTool(),
             RecipeTeachTool(),
             RecipeListTool(),
-            RecipeDeleteTool()
+            RecipeDeleteTool(),
+            GitHubIssuesTool(),
+            GitHubPRsTool(),
+            LinearIssuesTool(),
+            LinearProjectsTool()
         ]
     }
 }
