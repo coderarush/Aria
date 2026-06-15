@@ -6,6 +6,15 @@ struct UpcomingEvent: Equatable, Sendable {
     let id: String
     let title: String
     let start: Date
+    /// Names or email addresses of invited attendees. Empty for personal/blocked events.
+    let attendees: [String]
+
+    init(id: String, title: String, start: Date, attendees: [String] = []) {
+        self.id = id
+        self.title = title
+        self.start = start
+        self.attendees = attendees
+    }
 }
 
 /// Surfaces a time-critical suggestion shortly before each upcoming calendar
@@ -16,7 +25,7 @@ struct CalendarSignalProvider: SignalProvider {
     let leadWindow: TimeInterval
     let fetch: @Sendable (Date) async -> [UpcomingEvent]
 
-    init(leadWindow: TimeInterval = 300,
+    init(leadWindow: TimeInterval = 900,
          fetch: @escaping @Sendable (Date) async -> [UpcomingEvent]) {
         self.leadWindow = leadWindow
         self.fetch = fetch
@@ -29,10 +38,17 @@ struct CalendarSignalProvider: SignalProvider {
             guard delta > 0, delta <= leadWindow else { return nil }
             let minutes = max(1, Int((delta / 60).rounded()))
             let unit = minutes == 1 ? "minute" : "minutes"
+            let hasMeeting = !event.attendees.isEmpty
+            let spokenLine = hasMeeting
+                ? "\(event.title) starts in \(minutes) \(unit). Want a briefing?"
+                : "\(event.title) starts in \(minutes) \(unit)."
+            let action: SuggestionAction = hasMeeting
+                ? .runCommand("brief me for meeting: \(event.title)")
+                : .acknowledge
             return Suggestion(
                 source: .calendar,
-                spokenLine: "\(event.title) starts in \(minutes) \(unit).",
-                action: .acknowledge,
+                spokenLine: spokenLine,
+                action: action,
                 confidence: 0.9,
                 urgency: .timeCritical,
                 createdAt: now,
