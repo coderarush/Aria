@@ -105,7 +105,9 @@ actor ToolRegistry {
             AutomationListTool(),
             EmailTaskTool(),
             AgendaTool(),
-            FollowUpTool()
+            FollowUpTool(),
+            UIRecordStartTool(),
+            UIRecordStopTool()
         ]
     }
 }
