@@ -13,6 +13,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var didStart = false   // controller.start() must run exactly once
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Expose the shared instance for AppIntents / Shortcuts integration.
+        AriaController.shared = controller
         Log.app.info("Aria launching")
         Log.trace("=== Aria launched ===")
         NSSetUncaughtExceptionHandler { exception in

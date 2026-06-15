@@ -114,7 +114,10 @@ actor ToolRegistry {
             PomodoroStartTool(),
             PomodoroStopTool(),
             PomodoroStatusTool(),
-            ScreenOCRTool()
+            ScreenOCRTool(),
+            DigestTool(),
+            UndoLastNTool(),
+            DraftFeedbackTool()
         ]
     }
 }

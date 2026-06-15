@@ -9,6 +9,12 @@ import Carbon.HIToolbox
 @MainActor
 final class AriaController {
 
+    /// Exposed for `AriaShortcuts` / `RunAriaCommandIntent`. Set once by
+    /// `AppDelegate` when it creates the controller. Unsafe storage is fine here
+    /// because it's written exactly once on the main actor before any shortcut
+    /// can fire, and AppIntents call `perform()` on the main actor.
+    nonisolated(unsafe) static weak var shared: AriaController?
+
     let islandViewModel = IslandViewModel()
     private let audioBus = AudioBus()
     private let wakeEngine = WakeWordEngine()
@@ -395,6 +401,7 @@ final class AriaController {
     private func configureLearning() {
         observeAppEvents()
         configureProactive()
+        configureDailyDigest()
         // Hourly: re-detect patterns + fire approved automations. Suggestions now
         // surface ambiently through the Proactive engine, not a blocking modal.
         learningTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
@@ -1197,6 +1204,48 @@ final class AriaController {
             islandViewModel.dismiss()
         } else {
             islandViewModel.beginListening()
+        }
+    }
+
+    // MARK: Shortcuts integration (Task 7)
+
+    /// Handle a command from macOS Shortcuts / `RunAriaCommandIntent` and return
+    /// the response text. Routes through the orchestrator's non-streaming path so
+    /// AppIntents get a clean string back.
+    func handleCommandForShortcuts(_ command: String) async -> String {
+        let response = await orchestrator.handle(command: command)
+        return response.message
+    }
+
+    // MARK: Daily Digest trigger (Task 5)
+
+    /// Wires a 3600-second repeating timer that fires the daily digest at 6 pm.
+    /// Called once from `configureLearning()`. Uses AppStorage-compatible
+    /// `UserDefaults` to track whether today's digest has already been sent.
+    func configureDailyDigest() {
+        Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.digestTickIfNeeded() }
+        }
+        // Also check shortly after launch in case it's already past 6 pm.
+        Task { @MainActor in await self.digestTickIfNeeded() }
+    }
+
+    private func digestTickIfNeeded() async {
+        let hour = Calendar.current.component(.hour, from: Date())
+        guard hour == 18 else { return }
+        let today = DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .none)
+        let key = "app.lastDigestDate"
+        guard UserDefaults.standard.string(forKey: key) != today else { return }
+        UserDefaults.standard.set(today, forKey: key)
+        // Run digest silently
+        do {
+            let result = try await DigestTool(gemini: GeminiClient()).run(input: [:])
+            if result.success {
+                let preview = String(result.output.prefix(200))
+                await notificationBridge.send(.agentCompleted(name: "Daily digest", summary: preview))
+            }
+        } catch {
+            // Best-effort; never surface errors from a background timer
         }
     }
 }
