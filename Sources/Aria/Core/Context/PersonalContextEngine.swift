@@ -229,7 +229,32 @@ actor PersonalContextEngine {
             parts.append("Clipboard: \(clip.prefix(200))")
         }
 
+        // Screen OCR — read visible text with a 3 s timeout so a slow capture
+        // never blocks context injection. Silently skipped on failure.
+        if let ocr = await withScreenOCRTimeout() {
+            parts.append("Screen: \(ocr)")
+        }
+
         return parts.joined(separator: "\n")
+    }
+
+    // MARK: Screen OCR helper
+
+    /// Attempt to read screen text within a 3 s deadline; returns nil on
+    /// timeout, capture failure, or any recognition error.
+    private func withScreenOCRTimeout() async -> String? {
+        let task = Task<String?, Never> {
+            (try? await ScreenOCR.live.readAndTruncate(maxChars: 500))
+        }
+        // Race the OCR task against a 3-second cancellation.
+        let deadline = Task<String?, Never> {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            task.cancel()
+            return nil
+        }
+        let result = await task.value
+        deadline.cancel()
+        return result
     }
 
     // MARK: Persistence

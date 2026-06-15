@@ -37,8 +37,11 @@ struct GmailSendTool: AriaTool {
             let result = try await connector.sendGmail(
                 to: toRaw, subject: subject, body: body, accessToken: token)
             await FollowUpTracker.shared.track(subject: subject, recipient: toRaw)
-            return .ok("Sent the email to \(toRaw).",
-                       diagnostics: "gmail message id \(result.id)")
+            return .ok(
+                "Sent the email to \(toRaw)." +
+                "\n\n💬 How was that draft? Say 'draft feedback approve' or 'draft feedback reject [what to change]'",
+                diagnostics: "gmail message id \(result.id)"
+            )
         } catch {
             return .ok("Couldn't send through Gmail right now. Your connection may need to be re-authorized in the app (Settings → Connectors → Google).")
         }
