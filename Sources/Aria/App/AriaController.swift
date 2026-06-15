@@ -713,14 +713,35 @@ final class AriaController {
     /// Wire (or unwire) the experimental speaker gate. verifyWake is only set when the
     /// gate is active (enrolling, or enabled + enrolled) so the wake path is untouched
     /// by default — accept() itself always allows when inert.
+    /// Grace period (first 7 days after enrollment): mismatches warn but don't block.
     private func refreshSpeakerGate() {
-        speakerGate.enabled = AppSettings.shared.speakerVerificationEnabled
-        wakeEngine.verifyWake = speakerGate.isActive ? { [weak self] f in self?.speakerGate.accept(f) ?? true } : nil
+        let settings = AppSettings.shared
+        speakerGate.enabled = settings.speakerVerificationEnabled
+        guard speakerGate.isActive else {
+            wakeEngine.verifyWake = nil
+            return
+        }
+        let enrolledDate = settings.speakerVerificationEnrolledDate
+        wakeEngine.verifyWake = { [weak self] features in
+            guard let self else { return true }
+            let passed = self.speakerGate.accept(features)
+            if passed { return true }
+            // Grace period: warn but don't block
+            if SpeakerGracePolicy.shouldBlock(verificationPassed: false, enrolledDate: enrolledDate) {
+                Log.trace("speaker gate: voice mismatch — blocking (grace period elapsed)")
+                return false
+            } else {
+                Log.trace("speaker gate: voice mismatch — grace period active, allowing through")
+                return true
+            }
+        }
     }
 
     /// Capture the next few "Hey Aria" utterances as the owner's voiceprint.
     func enrollOwnerVoice() {
         speakerGate.onEnrollmentComplete = { [weak self] in
+            // Record enrollment timestamp for the grace-period policy.
+            AppSettings.shared.speakerVerificationEnrolledDate = Date().timeIntervalSince1970
             self?.refreshSpeakerGate()
             self?.islandViewModel.beginListening()
         }

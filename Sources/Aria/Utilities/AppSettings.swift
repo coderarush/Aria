@@ -64,6 +64,11 @@ final class AppSettings: ObservableObject {
     @Published var conversationSilenceTimeout: Double { didSet { defaults.set(conversationSilenceTimeout, forKey: K.conversationSilenceTimeout) } }
     /// Experimental: only respond to the enrolled owner's voice.
     @Published var speakerVerificationEnabled: Bool { didSet { defaults.set(speakerVerificationEnabled, forKey: K.speakerVerificationEnabled) } }
+    /// Unix timestamp (timeIntervalSince1970) when the owner's voiceprint enrollment
+    /// completed. 0.0 means never enrolled. Used by SpeakerGracePolicy.
+    @Published var speakerVerificationEnrolledDate: Double {
+        didSet { defaults.set(speakerVerificationEnrolledDate, forKey: K.speakerVerificationEnrolledDate) }
+    }
     /// Use a local Ollama model as a last-resort fallback (offline / all-quota-exhausted).
     @Published var localModelEnabled: Bool { didSet { defaults.set(localModelEnabled, forKey: K.localModelEnabled) } }
     @Published var localModelName: String { didSet { defaults.set(localModelName, forKey: K.localModelName) } }
@@ -170,6 +175,7 @@ final class AppSettings: ObservableObject {
         bargeInSensitivity = defaults.object(forKey: K.bargeInSensitivity) as? Double ?? 0.5
         conversationSilenceTimeout = defaults.object(forKey: K.conversationSilenceTimeout) as? Double ?? 9
         speakerVerificationEnabled = defaults.bool(forKey: K.speakerVerificationEnabled)
+        speakerVerificationEnrolledDate = defaults.object(forKey: K.speakerVerificationEnrolledDate) as? Double ?? 0.0
         localModelEnabled = defaults.bool(forKey: K.localModelEnabled)
         localModelName = defaults.string(forKey: K.localModelName) ?? "qwen3:8b"
         localFirstEnabled = defaults.object(forKey: K.localFirstEnabled) as? Bool ?? true   // local is the default (V9)
@@ -229,6 +235,7 @@ final class AppSettings: ObservableObject {
         static let bargeInSensitivity = "app.bargeInSensitivity"
         static let conversationSilenceTimeout = "app.conversationSilenceTimeout"
         static let speakerVerificationEnabled = "app.speakerVerificationEnabled"
+        static let speakerVerificationEnrolledDate = "app.speakerVerificationEnrolledDate"
         static let localModelEnabled = "app.localModelEnabled"
         static let localModelName = "app.localModelName"
         static let localFirstEnabled = "app.localFirst"

@@ -59,6 +59,13 @@ actor StyleLearner {
 
     func profile() -> StyleProfile { cached }
 
+    /// Record feedback from the user approving or rejecting a draft. Approved drafts
+    /// are added as style samples so future drafts more closely match the user's voice.
+    func recordFeedback(approved: Bool, draftText: String) async {
+        guard approved else { return }
+        observe(draftText)
+    }
+
     /// A draft-scoped style instruction to prepend to a turn, or nil when off /
     /// nothing learned yet (so non-personalized turns are byte-identical).
     func draftStyleInstruction() -> String? {

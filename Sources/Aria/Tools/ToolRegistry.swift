@@ -107,7 +107,9 @@ actor ToolRegistry {
             AgendaTool(),
             FollowUpTool(),
             UIRecordStartTool(),
-            UIRecordStopTool()
+            UIRecordStopTool(),
+            SetToneTool(),
+            ToneStatusTool()
         ]
     }
 }
