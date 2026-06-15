@@ -84,7 +84,15 @@ actor ToolRegistry {
             UITypeTool(),
             UIKeyTool(),
             UIScrollTool(),
-            ScreenVisionTool()
+            ScreenVisionTool(),
+            RecipeTeachTool(),
+            RecipeListTool(),
+            RecipeDeleteTool(),
+            GitHubIssuesTool(),
+            GitHubPRsTool(),
+            LinearIssuesTool(),
+            LinearProjectsTool(),
+            CrossSearchTool()
         ]
     }
 }
