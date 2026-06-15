@@ -1,15 +1,9 @@
 import Foundation
 import AVFoundation
 
-/// Cloud text-to-speech for Aria's spoken responses, using Gemini's natural voice
-/// exclusively (no on-device/Apple voice — it cheapened the premium feel). Strips
-/// markdown so the synthesizer reads clean prose, and notifies start/finish so the
-/// controller can mute wake detection while Aria speaks (preventing self-trigger).
-///
-/// Premium policy: there is NO robotic fallback. If Gemini TTS can't produce audio
-/// (offline, no key, or sustained rate-limit after paced retries), Aria stays
-/// silent — the on-screen caption still conveys the reply — and fires its
-/// completion callbacks so the speech queue and wake re-arm never stall.
+/// Cloud text-to-speech for Aria's spoken responses. Tries Gemini's natural voice
+/// first (3 attempts with 429 pacing). If Gemini is unavailable, falls back to
+/// AVSpeechSynthesizer so Aria always speaks rather than going silent.
 @MainActor
 final class VoiceEngine: NSObject {
     var geminiVoiceName = "Kore"
@@ -30,6 +24,8 @@ final class VoiceEngine: NSObject {
     var onFinish: (() -> Void)?
     /// Fired when a single utterance/chunk finishes (used by StreamingVoice).
     var onChunkFinished: (() -> Void)?
+
+    private let appleSynth = AVSpeechSynthesizer()
 
     /// Speak a full message (fires onStart).
     func speak(_ message: String) {
@@ -67,10 +63,9 @@ final class VoiceEngine: NSObject {
                         try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
                         continue
                     }
-                    // No Apple fallback — stay silent, but keep the pipeline moving.
-                    Log.trace("gemini TTS unavailable (\(error)); staying silent (premium: no robotic fallback)")
-                    self.onFinish?()
-                    self.onChunkFinished?()
+                    // Gemini unavailable — fall back to Apple TTS so Aria always speaks.
+                    Log.trace("gemini TTS unavailable (\(error)); falling back to Apple TTS")
+                    self.speakWithApple(text)
                     return
                 }
             }
@@ -88,6 +83,16 @@ final class VoiceEngine: NSObject {
 
     func stop() {
         audioBus?.stopPlayback()
+        appleSynth.stopSpeaking(at: .immediate)
+    }
+
+    private func speakWithApple(_ text: String) {
+        appleSynth.delegate = self
+        let utt = AVSpeechUtterance(string: text)
+        utt.rate = 0.52          // slightly faster than default (0.5) — feels more natural
+        utt.pitchMultiplier = 1.1
+        utt.voice = AVSpeechSynthesisVoice(language: "en-US")
+        appleSynth.speak(utt)
     }
 
     /// Remove markdown emphasis, code ticks, arrows, and URLs; collapse whitespace.
@@ -148,5 +153,14 @@ final class VoiceEngine: NSObject {
         u32(UInt32(sampleRate)); u32(UInt32(byteRate)); u16(UInt16(blockAlign)); u16(UInt16(bits))
         str("data"); u32(UInt32(pcm.count))
         return h + pcm
+    }
+}
+
+extension VoiceEngine: AVSpeechSynthesizerDelegate {
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        Task { @MainActor [weak self] in
+            self?.onFinish?()
+            self?.onChunkFinished?()
+        }
     }
 }
