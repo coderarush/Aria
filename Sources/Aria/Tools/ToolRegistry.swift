@@ -84,7 +84,10 @@ actor ToolRegistry {
             UITypeTool(),
             UIKeyTool(),
             UIScrollTool(),
-            ScreenVisionTool()
+            ScreenVisionTool(),
+            RecipeTeachTool(),
+            RecipeListTool(),
+            RecipeDeleteTool()
         ]
     }
 }
