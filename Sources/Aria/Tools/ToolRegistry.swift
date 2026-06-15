@@ -91,7 +91,8 @@ actor ToolRegistry {
             GitHubIssuesTool(),
             GitHubPRsTool(),
             LinearIssuesTool(),
-            LinearProjectsTool()
+            LinearProjectsTool(),
+            CrossSearchTool()
         ]
     }
 }

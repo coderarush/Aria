@@ -13,13 +13,17 @@ final class MeetingBriefEngineTests: XCTestCase {
             driveSearch: { _ in "Drive file: Meeting agenda.pdf" }
         )
         let title = "Q3 Planning"
+        var capturedPrompt = ""
         let result = await engine.brief(
             for: title,
             attendees: ["alice@example.com", "bob@example.com"],
             connectorTools: connectors,
-            synthesize: { _ in "Here is your brief about \(title)" }
+            synthesize: { prompt in capturedPrompt = prompt; return "Here is your brief" }
         )
-        XCTAssertTrue(result.contains(title), "Result should contain event title, got: \(result)")
+        XCTAssertTrue(result.contains("brief"), "Result should contain synthesized text, got: \(result)")
+        XCTAssertTrue(capturedPrompt.contains("Q3 budget"), "Prompt must include Gmail snippet, got: \(capturedPrompt)")
+        XCTAssertTrue(capturedPrompt.contains("roadmap"), "Prompt must include Notion snippet, got: \(capturedPrompt)")
+        XCTAssertTrue(capturedPrompt.contains("agenda"), "Prompt must include Drive snippet, got: \(capturedPrompt)")
     }
 
     func testBriefFallbackWhenAllConnectorsEmpty() async {
