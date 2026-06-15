@@ -750,7 +750,7 @@ struct AgentsSettingsTab: View {
         case .daily(let h, let m): return String(format: "Daily at %d:%02d", h, m)
         case .interval(let s): return "Every \(Int(s / 60)) min"
         case .folderChanged(let p): return "When \((p as NSString).abbreviatingWithTildeInPath) changes"
-        case .mailMatched(let q): return "When inbox mail matches «\(q)»"
+        case .mailMatched(let q): return "When inbox mail matches \"\(q)\""
         case .urlChanged(let u): return "When \(u) changes"
         case .calendarEventSoon(let t, let m): return "When \(t) starts within \(m) min"
         }
