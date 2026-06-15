@@ -29,3 +29,4 @@ video/out/
 
 # Local agent worktrees / tooling
 .claude/
+.worktrees/
