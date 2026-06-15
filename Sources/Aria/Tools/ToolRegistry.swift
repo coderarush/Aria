@@ -96,7 +96,11 @@ actor ToolRegistry {
             LectureStartTool(),
             LectureStopTool(),
             MeetingStartTool(),
-            MeetingStopTool()
+            MeetingStopTool(),
+            FlashcardGenerateTool(),
+            ResearchTool(),
+            DocReadTool(),
+            DocSummarizeTool()
         ]
     }
 }
