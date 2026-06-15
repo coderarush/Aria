@@ -109,7 +109,12 @@ actor ToolRegistry {
             UIRecordStartTool(),
             UIRecordStopTool(),
             SetToneTool(),
-            ToneStatusTool()
+            ToneStatusTool(),
+            SmartReplyTool(),
+            PomodoroStartTool(),
+            PomodoroStopTool(),
+            PomodoroStatusTool(),
+            ScreenOCRTool()
         ]
     }
 }

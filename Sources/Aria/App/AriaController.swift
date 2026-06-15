@@ -22,6 +22,8 @@ final class AriaController {
     private let taskViewModel = TaskViewModel()
     private var taskPanel: TaskPanel?
     private var learningTimer: Timer?
+    /// Fires every 60 s to tick the Pomodoro session timer.
+    private var pomodoroTimer: Timer?
     // Proactive Presence (v9): ambient anticipation that surfaces a single
     // suggestion silently on the orb and speaks it only when you wake/glance.
     private var proactiveEngine: ProactiveEngine?
@@ -397,6 +399,12 @@ final class AriaController {
         // surface ambiently through the Proactive engine, not a blocking modal.
         learningTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.runLearningCycle() }
+        }
+        // Pomodoro: tick the focus session timer once per minute.
+        pomodoroTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in
+            Task.detached(priority: .utility) {
+                await PomodoroSession.shared.tick()
+            }
         }
     }
 
