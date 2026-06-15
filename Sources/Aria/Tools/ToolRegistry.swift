@@ -92,7 +92,11 @@ actor ToolRegistry {
             GitHubPRsTool(),
             LinearIssuesTool(),
             LinearProjectsTool(),
-            CrossSearchTool()
+            CrossSearchTool(),
+            LectureStartTool(),
+            LectureStopTool(),
+            MeetingStartTool(),
+            MeetingStopTool()
         ]
     }
 }
