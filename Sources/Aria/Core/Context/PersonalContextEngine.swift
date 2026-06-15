@@ -206,6 +206,32 @@ actor PersonalContextEngine {
         return String(data: data, encoding: .utf8)
     }
 
+    // MARK: Ambient context summary
+
+    /// A short text snippet summarising ambient context (top cards + current
+    /// clipboard). Used by the orchestrator's system-prompt builder to ground
+    /// the model in what the user is doing right now.
+    func contextSummary(query: String = "", limit: Int = 5) async -> String {
+        guard isEnabled else { return "" }
+        var parts: [String] = []
+
+        // Top matching cards (or just the most-recent ones when no query).
+        let matched = query.isEmpty
+            ? Array(cards.prefix(limit))
+            : Self.rank(query, in: cards, limit: limit)
+        if !matched.isEmpty {
+            let lines = matched.map { "[\($0.source.rawValue)] \($0.title): \($0.snippet)" }
+            parts.append(contentsOf: lines)
+        }
+
+        // Clipboard — injected from the poller so we never read NSPasteboard here.
+        if let clip = await ClipboardContext.shared.snapshot(), !clip.isEmpty {
+            parts.append("Clipboard: \(clip.prefix(200))")
+        }
+
+        return parts.joined(separator: "\n")
+    }
+
     // MARK: Persistence
 
     private func save() {

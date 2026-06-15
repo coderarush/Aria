@@ -92,7 +92,24 @@ actor ToolRegistry {
             GitHubPRsTool(),
             LinearIssuesTool(),
             LinearProjectsTool(),
-            CrossSearchTool()
+            CrossSearchTool(),
+            LectureStartTool(),
+            LectureStopTool(),
+            MeetingStartTool(),
+            MeetingStopTool(),
+            FlashcardGenerateTool(),
+            ResearchTool(),
+            DocReadTool(),
+            DocSummarizeTool(),
+            AutomationCreateTool(),
+            AutomationListTool(),
+            EmailTaskTool(),
+            AgendaTool(),
+            FollowUpTool(),
+            UIRecordStartTool(),
+            UIRecordStopTool(),
+            SetToneTool(),
+            ToneStatusTool()
         ]
     }
 }

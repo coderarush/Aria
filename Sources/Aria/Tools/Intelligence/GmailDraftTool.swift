@@ -29,7 +29,11 @@ struct GmailDraftTool: AriaTool {
         }
         let to = input["to"] ?? ""
         let subject = input["subject"] ?? ""
-        let body = input["body"] ?? input["content"] ?? ""
+        let baseBody = input["body"] ?? input["content"] ?? ""
+        // Prepend the active tone instruction so the draft follows the user's
+        // chosen register (no-op when tone is .auto, which returns an empty string).
+        let toneNote = await ToneManager.shared.toneInstruction()
+        let body = toneNote.isEmpty ? baseBody : "\(toneNote)\n\n\(baseBody)"
         do {
             let result = try await connector.createDraft(
                 to: to, subject: subject, body: body, accessToken: token)

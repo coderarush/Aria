@@ -445,10 +445,28 @@ struct ConversationSettingsTab: View {
             }
 
             SSection("Speaker verification") {
-                Toggle("Only respond to my voice", isOn: $settings.speakerVerificationEnabled)
-                Button("Teach Aria my voice") { NotificationCenter.default.post(name: .ariaEnrollVoice, object: nil) }
-                Text("Experimental. After enabling, click “Teach Aria my voice”, then say “Hey Aria” a few times. She'll bias toward your voice and ignore others. Basic on-device voiceprint — not a hard security guarantee.")
+                Toggle("Speaker verification", isOn: $settings.speakerVerificationEnabled)
+                    .onChange(of: settings.speakerVerificationEnabled) { _, enabled in
+                        if !enabled { settings.speakerVerificationEnrolledDate = 0.0 }
+                    }
+                Text("When on, Aria checks it\'s your voice before acting. During the first 7 days after enrolling, mismatches warn rather than block.")
                     .font(.caption).foregroundStyle(.secondary)
+                if settings.speakerVerificationEnabled {
+                    Button("Teach Aria my voice") {
+                        NotificationCenter.default.post(name: .ariaEnrollVoice, object: nil)
+                    }
+                    if settings.speakerVerificationEnrolledDate > 0 {
+                        let enrolled = Date(timeIntervalSince1970: settings.speakerVerificationEnrolledDate)
+                        let inGrace = SpeakerGracePolicy.isInGracePeriod(enrolledDate: settings.speakerVerificationEnrolledDate)
+                        Text(inGrace
+                             ? "Grace period active \u{2014} mismatches warn, not block"
+                             : "Enrolled \(enrolled.formatted(date: .abbreviated, time: .omitted))")
+                            .font(.caption2)
+                            .foregroundStyle(inGrace ? Color.orange : Color.secondary)
+                    }
+                }
+                Text("Experimental. Basic on-device voiceprint \u{2014} not a hard security guarantee.")
+                    .font(.caption2).foregroundStyle(.tertiary)
             }
 
             SSection("Computer use") {
@@ -750,8 +768,9 @@ struct AgentsSettingsTab: View {
         case .daily(let h, let m): return String(format: "Daily at %d:%02d", h, m)
         case .interval(let s): return "Every \(Int(s / 60)) min"
         case .folderChanged(let p): return "When \((p as NSString).abbreviatingWithTildeInPath) changes"
-        case .mailMatched(let q): return "When inbox mail matches “\(q)”"
+        case .mailMatched(let q): return "When inbox mail matches \"\(q)\""
         case .urlChanged(let u): return "When \(u) changes"
+        case .calendarEventSoon(let t, let m): return "When \(t) starts within \(m) min"
         }
     }
 

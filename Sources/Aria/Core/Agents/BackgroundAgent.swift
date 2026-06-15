@@ -14,6 +14,9 @@ enum AgentTrigger: Codable, Equatable, Sendable {
     case mailMatched(query: String)
     /// V11 P7: the page at `url` changed (polled content hash).
     case urlChanged(url: String)
+    /// Fires when a calendar event whose title contains `titleContains`
+    /// starts within `minutesBefore` minutes.
+    case calendarEventSoon(titleContains: String, minutesBefore: Int)
 
     /// Poll cadence for watcher triggers (the sweep runs every 60s; these
     /// gate how often the precheck actually fetches).
@@ -21,6 +24,7 @@ enum AgentTrigger: Codable, Equatable, Sendable {
         switch self {
         case .mailMatched: return 300      // inbox: every 5 minutes
         case .urlChanged: return 1800      // web page: every 30 minutes
+        case .calendarEventSoon: return 300  // check every 5 min
         default: return nil
         }
     }
@@ -81,7 +85,7 @@ enum AgentSchedule {
             return now.timeIntervalSince(last) >= seconds
         case .folderChanged:
             return false   // watcher-fired, never timer-due
-        case .mailMatched, .urlChanged:
+        case .mailMatched, .urlChanged, .calendarEventSoon:
             guard let poll = trigger.pollInterval else { return false }
             guard let last = lastRun else { return true }
             return now.timeIntervalSince(last) >= poll

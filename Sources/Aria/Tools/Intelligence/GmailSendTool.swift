@@ -36,6 +36,7 @@ struct GmailSendTool: AriaTool {
         do {
             let result = try await connector.sendGmail(
                 to: toRaw, subject: subject, body: body, accessToken: token)
+            await FollowUpTracker.shared.track(subject: subject, recipient: toRaw)
             return .ok("Sent the email to \(toRaw).",
                        diagnostics: "gmail message id \(result.id)")
         } catch {

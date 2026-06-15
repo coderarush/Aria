@@ -44,6 +44,8 @@ final class AriaController {
     /// Set by startDictation(); the next captured transcript is inserted as text
     /// rather than handled as a command. Reset the instant it's consumed.
     private var dictationPending = false
+    /// Delivers system notifications for Aria-level events (agent completion, etc.).
+    let notificationBridge = NotificationBridge.shared
     private var settingsCancellable: AnyCancellable?
     /// True while Aria is speaking; keeps wake suspended even if the pill
     /// auto-hides mid-utterance, so she can't hear herself and re-trigger.
@@ -83,6 +85,7 @@ final class AriaController {
         if !d.bool(forKey: "app.disableHotkeys") { configureHotkeys() }
         configureDebugHooks()
         warmLocalModel()
+        Task.detached(priority: .utility) { await ClipboardContext.shared.start() }
         Log.trace("start: done")
     }
 
@@ -256,15 +259,28 @@ final class AriaController {
                 guard let self else { return (false, "unavailable") }
                 return await self.runSilentTask(goal: goal)
             },
-            notify: { title, body in
+            notify: { [weak self] title, body in
                 guard UserDefaults.standard.object(forKey: "app.notifyAgentRuns") as? Bool ?? true else { return }
                 Notifier.notify(title: title, body: body)
+                // Mirror through NotificationBridge for richer event semantics.
+                let agentName = title.components(separatedBy: " — ").first ?? title
+                Task.detached(priority: .utility) { [weak self] in
+                    await self?.notificationBridge.send(.agentCompleted(name: agentName, summary: body))
+                }
             })
         agentCoordinator = coordinator
         coordinator.start()
         // Settings tab posts this after any agent add/remove/toggle.
         NotificationCenter.default.addObserver(forName: .ariaAgentsChanged, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in await self?.agentCoordinator?.refreshWatchers() }
+        }
+    }
+
+    /// Deliver a system notification when a background agent finishes.
+    func notifyAgentCompleted(name: String, summary: String) {
+        Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
+            await self.notificationBridge.send(.agentCompleted(name: name, summary: summary))
         }
     }
 
@@ -697,14 +713,35 @@ final class AriaController {
     /// Wire (or unwire) the experimental speaker gate. verifyWake is only set when the
     /// gate is active (enrolling, or enabled + enrolled) so the wake path is untouched
     /// by default — accept() itself always allows when inert.
+    /// Grace period (first 7 days after enrollment): mismatches warn but don't block.
     private func refreshSpeakerGate() {
-        speakerGate.enabled = AppSettings.shared.speakerVerificationEnabled
-        wakeEngine.verifyWake = speakerGate.isActive ? { [weak self] f in self?.speakerGate.accept(f) ?? true } : nil
+        let settings = AppSettings.shared
+        speakerGate.enabled = settings.speakerVerificationEnabled
+        guard speakerGate.isActive else {
+            wakeEngine.verifyWake = nil
+            return
+        }
+        let enrolledDate = settings.speakerVerificationEnrolledDate
+        wakeEngine.verifyWake = { [weak self] features in
+            guard let self else { return true }
+            let passed = self.speakerGate.accept(features)
+            if passed { return true }
+            // Grace period: warn but don't block
+            if SpeakerGracePolicy.shouldBlock(verificationPassed: false, enrolledDate: enrolledDate) {
+                Log.trace("speaker gate: voice mismatch — blocking (grace period elapsed)")
+                return false
+            } else {
+                Log.trace("speaker gate: voice mismatch — grace period active, allowing through")
+                return true
+            }
+        }
     }
 
     /// Capture the next few "Hey Aria" utterances as the owner's voiceprint.
     func enrollOwnerVoice() {
         speakerGate.onEnrollmentComplete = { [weak self] in
+            // Record enrollment timestamp for the grace-period policy.
+            AppSettings.shared.speakerVerificationEnrolledDate = Date().timeIntervalSince1970
             self?.refreshSpeakerGate()
             self?.islandViewModel.beginListening()
         }

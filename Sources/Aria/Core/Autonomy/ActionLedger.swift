@@ -21,10 +21,19 @@ actor ActionLedger {
         }
     }
 
+    /// Posted after every recorded receipt. `userInfo["receipt"]` contains the `ActionReceipt`.
+    static let didRecordNotification = Notification.Name("AriaActionLedgerDidRecord")
+
     func record(_ r: ActionReceipt) {
         receipts.append(r)
         if receipts.count > cap { receipts.removeFirst(receipts.count - cap) }
         save()
+        let receipt = r
+        NotificationCenter.default.post(
+            name: ActionLedger.didRecordNotification,
+            object: nil,
+            userInfo: ["receipt": receipt]
+        )
     }
 
     /// Most recent first.
