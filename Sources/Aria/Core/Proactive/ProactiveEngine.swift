@@ -38,18 +38,28 @@ actor ProactiveEngine {
         let quiet = config.quietHoursEnabled && config.quietHours.contains(now)
         var live = candidates.filter { s in
             !s.isExpired(now: now) && !store.isSuppressed(key: s.dedupeKey, now: now)
+            // Precision floor: only surface ambient nudges she's fairly sure about.
+            // Time-critical ones (a meeting about to start) always get through.
+            && (s.urgency == .timeCritical || s.confidence >= Self.minConfidence)
         }
         if quiet { live = live.filter { $0.urgency == .timeCritical } }
 
-        // Best-first, then keep one per dedupe key.
+        // Best-first, then keep one per dedupe key, respecting the daily budget.
         let ranked = live.sorted(by: Suggestion.rank)
         var seen = Set<String>()
         for s in ranked where !seen.contains(s.dedupeKey) {
             seen.insert(s.dedupeKey)
-            return s   // first survivor is the best
+            // Ambient nudges spend from a daily budget; time-critical bypasses it.
+            if s.urgency != .timeCritical && store.atDailyCap(now: now) { continue }
+            store.recordSurface(now: now)
+            ProactiveStoreFile.save(store, to: storeURL)
+            return s
         }
         return nil
     }
+
+    /// Minimum confidence for an ambient (non-time-critical) nudge to surface.
+    static let minConfidence = 0.55
 
     /// Record how the user responded, update suppression, and persist.
     func record(_ outcome: SuggestionOutcome, for suggestion: Suggestion, now: Date) {

@@ -153,3 +153,216 @@ struct LocalModelSetupView: View {
         await refresh()
     }
 }
+
+// MARK: - Local voice setup (onboarding)
+
+/// One-tap "fast local voice" setup for first-run onboarding. Pulls the fast
+/// *instruct* chat model the voice path uses (default `llama3.2:3b`, or a
+/// hardware-appropriate fast model) so spoken conversation can run entirely
+/// on-device. Strictly OPTIONAL: a prominent "Skip — use cloud" path keeps
+/// voice instant via the cloud, and a missing Ollama runtime degrades to a
+/// download link rather than a crash or a hang.
+///
+/// Persists the chosen chat model to `UserDefaults.standard` under the key
+/// `app.localChatModel`, which `LocalFirstRouter` reads for the live voice
+/// chat path. Pure recommendation/label logic is `static` and unit-tested.
+@MainActor
+struct LocalVoiceSetupView: View {
+    /// UserDefaults key the router reads for the fast chat/voice model.
+    static let chatModelKey = "app.localChatModel"
+    /// Shipped default fast instruct chat model (matches LocalFirstRouter).
+    static let defaultChatModel = "llama3.2:3b"
+
+    enum Phase: Equatable {
+        case idle          // offer the one-tap setup
+        case checking      // probing Ollama / model state
+        case downloading   // pull in flight
+        case ready         // model present + persisted
+        case failed        // pull or start failed — retryable
+        case skipped       // user chose cloud
+        case ollamaMissing // runtime not installed — link out
+    }
+
+    /// Hardware-tier → fast instruct chat model for voice. Voice needs first
+    /// token in ~1s and full replies in seconds, so this favors small, fast
+    /// instruct models over the larger "thinking" models used for planning.
+    /// Pure + unit-tested.
+    static func recommendedVoiceModel(ramGB: Int) -> String {
+        switch ramGB {
+        case ..<16: return "llama3.2:1b"   // constrained: smallest, fastest
+        default:    return defaultChatModel // 16GB+: the fast 3B sweet spot
+        }
+    }
+
+    /// Human-readable name for a chat-model tag (falls back to the tag).
+    static func chatDisplayName(_ tag: String) -> String {
+        switch tag {
+        case "llama3.2:1b": return "Llama 3.2 1B"
+        case "llama3.2:3b": return "Llama 3.2 3B"
+        case "llama3.1:8b": return "Llama 3.1 8B"
+        default:            return tag
+        }
+    }
+
+    /// Status → short label for the voice setup row. Pure + unit-tested.
+    static func statusLabel(for phase: Phase) -> String {
+        switch phase {
+        case .idle:          return "Private voice, on this Mac"
+        case .checking:      return "Checking…"
+        case .downloading:   return "Downloading…"
+        case .ready:         return "Ready — voice runs on-device"
+        case .failed:        return "Download didn't finish"
+        case .skipped:       return "Using cloud voice (already fast)"
+        case .ollamaMissing: return "Runtime needed"
+        }
+    }
+
+    @State private var phase: Phase = .checking
+    @State private var fraction: Double = 0
+    @State private var statusDetail = ""
+    private let profile = HardwareProfiler.profile()
+
+    private var model: String { Self.recommendedVoiceModel(ramGB: profile.ramGB) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "waveform.circle.fill")
+                    .foregroundStyle(.purple)
+                Text("Fast local voice · \(Self.chatDisplayName(model))")
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+                badge
+            }
+
+            switch phase {
+            case .downloading:
+                VStack(alignment: .leading, spacing: 4) {
+                    ProgressView(value: fraction)
+                    Text(statusDetail.isEmpty
+                         ? "Pulling \(Self.chatDisplayName(model))… you can keep going."
+                         : statusDetail)
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            case .ready:
+                Text("Spoken conversation now runs entirely on-device — private and free. Cloud still backs it up.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            case .ollamaMissing:
+                HStack {
+                    Text("Needs Ollama — a free, one-time install. Voice already works via cloud until then.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    Link("Get Ollama", destination: URL(string: "https://ollama.com/download/mac")!)
+                        .font(.caption)
+                    Button("Re-check") { Task { await probe() } }
+                        .controlSize(.small)
+                }
+            case .skipped:
+                Text("No problem — Aria speaks through the cloud, which is already fast. You can set up on-device voice any time in Settings.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            case .failed:
+                actionRow(primaryTitle: "Try again", showSkip: true)
+            case .idle:
+                actionRow(primaryTitle: "Set up fast local voice", showSkip: true)
+            case .checking:
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Checking on-device readiness…")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.purple.opacity(0.06)))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.purple.opacity(0.18), lineWidth: 1))
+        .task { await probe() }
+    }
+
+    @ViewBuilder private var badge: some View {
+        switch phase {
+        case .ready:
+            Label("On-device", systemImage: "checkmark.seal.fill")
+                .font(.caption2).foregroundStyle(.green)
+        case .skipped:
+            Label("Cloud", systemImage: "cloud.fill")
+                .font(.caption2).foregroundStyle(.secondary)
+        case .downloading:
+            Text("\(Int(fraction * 100))%")
+                .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+        default:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private func actionRow(primaryTitle: String, showSkip: Bool) -> some View {
+        HStack(spacing: 10) {
+            Text(Self.statusLabel(for: phase))
+                .font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            if showSkip {
+                Button("Skip — use cloud") { phase = .skipped }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+            Button(primaryTitle) { Task { await setUp() } }
+                .buttonStyle(.borderedProminent)
+                .tint(.purple)
+                .controlSize(.small)
+        }
+    }
+
+    /// Non-blocking readiness probe: if the fast model is already pulled and
+    /// persisted, jump straight to ready; otherwise offer the one-tap setup.
+    private func probe() async {
+        phase = .checking
+        let status = await ModelInstaller.currentStatus(wanted: model)
+        switch status {
+        case .ready:
+            persistChatModel()
+            phase = .ready
+        case .ollamaMissing:
+            phase = .ollamaMissing
+        case .serverDown, .modelMissing:
+            phase = .idle
+        }
+    }
+
+    /// One-tap: start the server if needed, pull the fast model with live
+    /// progress, persist it, never blocking the UI. Any failure is recoverable
+    /// and never throws into the view.
+    private func setUp() async {
+        statusDetail = ""
+        fraction = 0
+        if await !ModelInstaller.serverAlive() {
+            guard await ModelInstaller.startServer() else {
+                phase = .ollamaMissing
+                return
+            }
+        }
+        phase = .downloading
+        do {
+            try await ModelInstaller.pull(model: model) { p in
+                Task { @MainActor in
+                    fraction = p.fraction
+                    if !p.status.isEmpty { statusDetail = p.status }
+                }
+            }
+            persistChatModel()
+            phase = .ready
+        } catch {
+            statusDetail = ""
+            phase = .failed
+        }
+    }
+
+    /// Persist the chosen fast chat model so `LocalFirstRouter` uses it for the
+    /// live voice path. Written directly to `UserDefaults.standard` (this view
+    /// does not own AppSettings).
+    private func persistChatModel() {
+        UserDefaults.standard.set(model, forKey: Self.chatModelKey)
+    }
+}

@@ -40,6 +40,10 @@ final class AriaController {
     /// Push-to-talk (⌥Space) and type-to-Aria (⌥⇧Space) global hotkeys.
     private var hotkeyTap: HotkeyTap?
     private var typePanel: CommandInputPanel?
+    private let dictation = DictationController()
+    /// Set by startDictation(); the next captured transcript is inserted as text
+    /// rather than handled as a command. Reset the instant it's consumed.
+    private var dictationPending = false
     private var settingsCancellable: AnyCancellable?
     /// True while Aria is speaking; keeps wake suspended even if the pill
     /// auto-hides mid-utterance, so she can't hear herself and re-trigger.
@@ -112,7 +116,8 @@ final class AriaController {
     private func configureHotkeys() {
         hotkeyTap = HotkeyTap(
             onTalk: { [weak self] in self?.summonAria() },
-            onType: { [weak self] in self?.showTypePanel() })
+            onType: { [weak self] in self?.showTypePanel() },
+            onDictate: { [weak self] in self?.startDictation() })
         if hotkeyTap?.start() != true {
             // Accessibility not granted yet (or granted AFTER launch — taps
             // can't be created retroactively). Keep retrying so the user never
@@ -140,6 +145,17 @@ final class AriaController {
     /// suspended (she's speaking) or already capturing.
     func summonAria() {
         wakeEngine.summon()
+    }
+
+    /// System-wide dictation (⌥⇧D): reuse the exact voice-capture path, but flag
+    /// the next captured transcript to be cleaned and TYPED into the focused app
+    /// instead of routed to the agent (see the divert at the top of handleCommand).
+    func startDictation() {
+        guard AppSettings.shared.dictationEnabled else { return }
+        dictationPending = true
+        islandViewModel.isDictating = true
+        playChime(.task)
+        summonAria()
     }
 
     /// Soft interaction chime, AEC-cancelled (played as far-end reference so
@@ -439,6 +455,17 @@ final class AriaController {
         guard let suggestion = await engine.tick(now: Date()) else { return }
         // An await elapsed — re-check we're still idle and nothing else surfaced.
         guard idleForProactive, presenter.pending == nil else { return }
+        // Phase D — anticipation that ACTS: a very-high-confidence, reversible
+        // suggestion runs on its own (receipted + undoable) instead of waiting to
+        // be accepted. Anything important-irreversible still surfaces to ask.
+        if let cmd = AnticipationPolicy.autoActCommand(for: suggestion,
+                                                       enabled: AppSettings.shared.autonomousActions) {
+            Log.trace("proactive: auto-acting on \(suggestion.dedupeKey)")
+            await engine.record(.accepted, for: suggestion, now: Date())
+            Notifier.notify(title: "Aria", body: "\(suggestion.spokenLine) — say “undo” to revert.")
+            runProactiveCommand(cmd)
+            return
+        }
         presenter.present(suggestion)
         scheduleProactiveExpiry(at: suggestion.expiry)
         Log.trace("proactive: surfaced \(suggestion.dedupeKey)")
@@ -596,11 +623,25 @@ final class AriaController {
 
     private func setupPanel() {
         let panel = IslandPanel()
-        let host = NSHostingView(rootView: IslandView(viewModel: islandViewModel))
+        let island = IslandView(viewModel: islandViewModel,
+                                onBlobFrameChange: { [weak panel] rect in panel?.setBlobFrame(rect) })
+        let host = NSHostingView(rootView: island)
         host.frame = panel.contentLayoutRect
         host.autoresizingMask = [.width, .height]
         panel.contentView = host
         self.panel = panel
+
+        // Keep the overlay (and its screen-edge border) fitted to the active
+        // display if the screen arrangement changes mid-session.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let panel = self.panel, panel.isVisible else { return }
+                panel.reposition()
+            }
+        }
 
         islandViewModel.onVisibilityChange = { [weak self] visible in
             guard let self else { return }
@@ -825,6 +866,31 @@ final class AriaController {
     // MARK: Command handling
 
     private func handleCommand(_ command: String) {
+        // Dictation divert: these words are output, not a command — clean them and
+        // type them into whatever the user is focused on, then tear the turn down
+        // cleanly (re-arms wake; never leaves her deaf).
+        if dictationPending {
+            dictationPending = false
+            islandViewModel.isDictating = false
+            let raw = command
+            let useAI = AppSettings.shared.dictationAICleanup
+            endConversation()
+            Task { [weak self] in
+                guard let self else { return }
+                // Heuristic clean is instant; the optional AI pass fixes punctuation
+                // and obvious mis-hears but costs a round-trip, so it's opt-in.
+                var text = DictationController.cleanup(raw)
+                if useAI, let polished = await self.dictation.aiCleanup(raw, via: self.orchestrator.geminiClient) {
+                    text = polished
+                }
+                if !text.isEmpty {
+                    self.dictation.insert(text)
+                    self.playChime(.done)
+                }
+            }
+            return
+        }
+
         let lower = command.lowercased()
 
         // Answering a plan preview? Affirmative → execute; anything else →
@@ -1007,6 +1073,9 @@ final class AriaController {
                     case .planReady(let plan):
                         self.taskViewModel.show(plan)
                     case .stepStarted(let i):
+                        // First real step → she splashes to the bottom and becomes
+                        // the working border. Simple chat answers never reach here.
+                        if i == 0 { self.islandViewModel.beginExecuting() }
                         self.taskViewModel.markRunning(i)
                         // Spoken play-by-play: a short "Searching the web…" as each step
                         // begins. The plan-start narrate already gave the overview, so skip
@@ -1019,10 +1088,18 @@ final class AriaController {
                     case .stepFinished(let i, let ok, let result):
                         self.taskViewModel.markFinished(i, ok: ok, result: result)
                     case .narrate(let line):
-                        self.islandViewModel.appendResponse(line + " ")
+                        // While executing she stays the screen-edge border and just
+                        // speaks the play-by-play; appending text would consolidate her
+                        // back into the blob mid-task. Outside execution, stream as before.
+                        if self.islandViewModel.state != .executing {
+                            self.islandViewModel.appendResponse(line + " ")
+                        }
                         self.streamVoice.enqueue(line)
                     case .finished(let ok, let summary):
                         self.taskActive = false   // now the next queue-drain re-arms wake
+                        // She consolidates from the border back into the blob and
+                        // explains what she did (then the existing drain re-arms / dismisses).
+                        self.islandViewModel.showResponse(summary)
                         self.playChime(ok ? .done : .error)
                         // Project memory: every finished task is recallable later.
                         Task { await WorkJournal.shared.record(kind: .task, title: goal,

@@ -17,8 +17,27 @@ struct ProactiveStore: Codable, Equatable {
 
     static let suppressionThreshold = 3
     static let decay: TimeInterval = 14 * 24 * 3600   // 14 days
+    /// At most this many ambient surfaces per day — the anti-nag budget.
+    /// Time-critical suggestions (a meeting starting) bypass it.
+    static let dailyCap = 3
 
     private(set) var feedback: [String: SuggestionFeedback] = [:]
+    /// Surfaces per UTC day-bucket, so she can't exceed the daily budget. Pruned
+    /// to a week. Tolerant-decoded (see the extension) so old stores still load.
+    private(set) var surfacesByDay: [Int: Int] = [:]
+
+    /// Whole-UTC-day bucket — pure + deterministic (no formatter/timezone drift).
+    static func dayBucket(_ now: Date) -> Int { Int(now.timeIntervalSince1970 / 86_400) }
+
+    mutating func recordSurface(now: Date) {
+        let day = Self.dayBucket(now)
+        surfacesByDay[day, default: 0] += 1
+        let cutoff = day - 7
+        surfacesByDay = surfacesByDay.filter { $0.key >= cutoff }
+    }
+
+    func surfacedToday(now: Date) -> Int { surfacesByDay[Self.dayBucket(now)] ?? 0 }
+    func atDailyCap(now: Date) -> Bool { surfacedToday(now: now) >= Self.dailyCap }
 
     mutating func record(_ outcome: SuggestionOutcome, key: String, now: Date) {
         var f = feedback[key] ?? SuggestionFeedback()
@@ -42,6 +61,17 @@ struct ProactiveStore: Codable, Equatable {
               f.consecutiveDismisses >= Self.suppressionThreshold,
               let last = f.lastDismiss else { return false }
         return now.timeIntervalSince(last) < Self.decay
+    }
+}
+
+extension ProactiveStore {
+    enum CodingKeys: String, CodingKey { case feedback, surfacesByDay }
+    /// Tolerant decode so a pre-budget store (only `feedback` on disk) still loads
+    /// and just starts with an empty surface ledger — no feedback/suppression lost.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        feedback = try c.decodeIfPresent([String: SuggestionFeedback].self, forKey: .feedback) ?? [:]
+        surfacesByDay = try c.decodeIfPresent([Int: Int].self, forKey: .surfacesByDay) ?? [:]
     }
 }
 

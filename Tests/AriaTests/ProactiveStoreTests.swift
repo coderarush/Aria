@@ -52,4 +52,29 @@ final class ProactiveStoreTests: XCTestCase {
         let loaded = ProactiveStoreFile.load(from: url)
         XCTAssertTrue(loaded.isSuppressed(key: "k", now: t0))
     }
+
+    // MARK: Daily surface budget
+
+    func testDailyCapReachedAfterThreeSurfaces() {
+        var store = ProactiveStore()
+        XCTAssertFalse(store.atDailyCap(now: t0))
+        for _ in 0..<ProactiveStore.dailyCap { store.recordSurface(now: t0) }
+        XCTAssertTrue(store.atDailyCap(now: t0))
+        XCTAssertEqual(store.surfacedToday(now: t0), ProactiveStore.dailyCap)
+    }
+
+    func testBudgetResetsNextDay() {
+        var store = ProactiveStore()
+        for _ in 0..<ProactiveStore.dailyCap { store.recordSurface(now: t0) }
+        let tomorrow = t0.addingTimeInterval(24 * 3600)
+        XCTAssertFalse(store.atDailyCap(now: tomorrow))
+        XCTAssertEqual(store.surfacedToday(now: tomorrow), 0)
+    }
+
+    func testTolerantDecodeOfPreBudgetStore() throws {
+        // A store saved before the budget existed (only `feedback`) must still load.
+        let legacy = "{\"feedback\":{}}".data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(ProactiveStore.self, from: legacy)
+        XCTAssertEqual(decoded.surfacedToday(now: t0), 0)
+    }
 }

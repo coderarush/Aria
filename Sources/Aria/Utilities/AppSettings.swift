@@ -87,6 +87,60 @@ final class AppSettings: ObservableObject {
     /// V11 FRE: the persona picked at first run ("Student"/"Developer"/"Founder").
     /// Informs the installed pack and the default focus-mode preset.
     @Published var personaChoice: String { didSet { defaults.set(personaChoice, forKey: K.personaChoice) } }
+    /// V11.0.1: where the blob consolidates, as a normalized screen point
+    /// (0…1, origin top-left). `nil` = fall back to `orbPosition` alignment.
+    /// Set by dragging the blob; she reappears here next time she speaks.
+    @Published var orbAnchor: CGPoint? {
+        didSet {
+            if let a = orbAnchor {
+                defaults.set(Double(a.x), forKey: K.orbAnchorX)
+                defaults.set(Double(a.y), forKey: K.orbAnchorY)
+            } else {
+                defaults.removeObject(forKey: K.orbAnchorX)
+                defaults.removeObject(forKey: K.orbAnchorY)
+            }
+        }
+    }
+
+    /// Forget the dragged anchor and return to the `orbPosition` default.
+    func clearOrbAnchor() { orbAnchor = nil }
+
+    /// V11.0.1: opt-in Mac-wide personal context (recent files + upcoming events).
+    /// Same UserDefaults key the PersonalContextEngine reads, so they stay in sync.
+    @Published var personalContextEnabled: Bool {
+        didSet { defaults.set(personalContextEnabled, forKey: K.personalContextEnabled) }
+    }
+    /// System-wide dictation (⌥⇧D): talk → cleaned text typed into the focused app.
+    @Published var dictationEnabled: Bool {
+        didSet { defaults.set(dictationEnabled, forKey: K.dictationEnabled) }
+    }
+    /// V11.1.1 Phase C: opt-in on-device model of the user (people/projects she
+    /// refers to + writing-style profile). Same key the EntityStore reads.
+    @Published var personalizationEnabled: Bool {
+        didSet {
+            defaults.set(personalizationEnabled, forKey: K.personalizationEnabled)
+            // Seed the writing-style profile from the user's sent mail the moment
+            // they opt in (best-effort; no-op if Google isn't connected).
+            if personalizationEnabled { Task { await StyleLearner.shared.refreshFromSentMail() } }
+        }
+    }
+    /// V11.1.1: how connectors authenticate — "byo" (bring your own OAuth client ID,
+    /// the working default until the hosted relay is deployed) or "relay" (hosted,
+    /// no client ID needed — switch to this once the relay is live). Connector layer reads it.
+    @Published var connectorMode: String {
+        didSet { defaults.set(connectorMode, forKey: K.connectorMode) }
+    }
+    /// V11.1.1 Phase D: let Aria ACT on her own very-high-confidence, reversible
+    /// anticipations (receipted + undoable) instead of only suggesting. Opt-in —
+    /// it's the boldest autonomy, so the user turns it on deliberately.
+    @Published var autonomousActions: Bool {
+        didSet { defaults.set(autonomousActions, forKey: K.autonomousActions) }
+    }
+    /// Optional AI cleanup pass on dictated text (fixes punctuation / mis-hears at
+    /// the cost of a round-trip). Off by default — heuristic cleanup is instant.
+    @Published var dictationAICleanup: Bool {
+        didSet { defaults.set(dictationAICleanup, forKey: K.dictationAICleanup) }
+    }
 
     var accentChoice: AccentChoice {
         get { Theme.decodeChoice(accentChoiceRaw) }
@@ -119,13 +173,30 @@ final class AppSettings: ObservableObject {
         localModelEnabled = defaults.bool(forKey: K.localModelEnabled)
         localModelName = defaults.string(forKey: K.localModelName) ?? "qwen3:8b"
         localFirstEnabled = defaults.object(forKey: K.localFirstEnabled) as? Bool ?? true   // local is the default (V9)
-        localChatEnabled = defaults.bool(forKey: K.localChatEnabled)
+        // Local-first voice ON by default: only actually routes local when a local
+        // model server is alive (else it transparently falls back to fast cloud).
+        localChatEnabled = defaults.object(forKey: K.localChatEnabled) as? Bool ?? true
         spokenStepNarration = defaults.object(forKey: K.spokenStepNarration) as? Bool ?? true
         uiSoundsEnabled = defaults.object(forKey: K.uiSoundsEnabled) as? Bool ?? true
         orbScale = defaults.object(forKey: K.orbScale) as? Double ?? 1.0
         personaStyle = defaults.string(forKey: PersonaStyle.key) ?? "balanced"
         briefingSpoken = defaults.bool(forKey: K.briefingSpoken)
         personaChoice = defaults.string(forKey: K.personaChoice) ?? ""
+        orbAnchor = (defaults.object(forKey: K.orbAnchorX) as? Double).flatMap { x in
+            (defaults.object(forKey: K.orbAnchorY) as? Double).map { CGPoint(x: x, y: $0) }
+        }
+        personalContextEnabled = defaults.bool(forKey: K.personalContextEnabled)
+        dictationEnabled = defaults.object(forKey: K.dictationEnabled) as? Bool ?? true
+        dictationAICleanup = defaults.bool(forKey: K.dictationAICleanup)
+        autonomousActions = defaults.bool(forKey: K.autonomousActions)
+        personalizationEnabled = defaults.bool(forKey: K.personalizationEnabled)
+        // Raw values MUST match Core/Connectors ConnectorMode (.bringYourOwn/.relay).
+        connectorMode = defaults.string(forKey: K.connectorMode) ?? "bringYourOwn"
+        // Pin the working default so the connector layer reads a concrete mode
+        // (relay isn't deployed yet — bring-your-own is what actually connects today).
+        if defaults.string(forKey: K.connectorMode) == nil {
+            defaults.set("bringYourOwn", forKey: K.connectorMode)
+        }
     }
 
     /// Register/unregister the app as a login item (SMAppService, macOS 13+).
@@ -167,5 +238,13 @@ final class AppSettings: ObservableObject {
         static let orbScale = "app.orbScale"
         static let briefingSpoken = "app.briefingSpoken"
         static let personaChoice = "app.personaChoice"
+        static let orbAnchorX = "app.orbAnchorX"
+        static let orbAnchorY = "app.orbAnchorY"
+        static let personalContextEnabled = "app.personalContextEnabled"
+        static let dictationEnabled = "app.dictationEnabled"
+        static let dictationAICleanup = "app.dictationAICleanup"
+        static let autonomousActions = "app.autonomousActions"
+        static let personalizationEnabled = "app.personalizationEnabled"
+        static let connectorMode = "app.connectorMode"
     }
 }

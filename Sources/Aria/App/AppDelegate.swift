@@ -80,6 +80,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self   // rebuilt on every open (status line, mute state)
         item.menu = menu
         statusItem = item
+
+        // The app window's Settings pane asks us to open the existing Settings
+        // window (reuse, never reimplement).
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(openSettings),
+            name: .ariaOpenSettings, object: nil)
     }
 
     /// Rebuild the status menu each time it opens — live status, current mute
@@ -107,6 +113,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(mute)
 
         menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Open Aria", action: #selector(openAppWindow), keyEquivalent: "o"))
         menu.addItem(NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit Aria", action: #selector(quit), keyEquivalent: "q"))
@@ -161,6 +168,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func summon() { controller.summonAria() }
     @objc private func typeToAria() { controller.showTypePanel() }
     @objc private func quit() { NSApp.terminate(nil) }
+
+    /// Open (or front) the full Aria app window.
+    @objc private func openAppWindow() {
+        AppWindowController.shared.show()
+    }
 
     private var settingsWindow: NSWindow?
 

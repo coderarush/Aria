@@ -33,14 +33,16 @@ struct UIClickTool: AriaTool {
         }
         await MainActor.run { NotificationCenter.default.post(name: .ariaUIActivity, object: nil) }
         let role = (input["role"]?.isEmpty == false) ? input["role"] : nil
-        let ok = await MainActor.run(body: { UIActuator.click(role: role, label: label) })
-        if ok { return .ok("Clicked “\(label)”.") }
-        // Accessibility couldn't find it (Electron/canvas/custom UI) → locate by sight.
-        if let pt = await VisionLocator.locate(label) {
-            await MainActor.run { UIActuator.clickAt(pt) }
-            return .ok("Clicked “\(label)” (located by sight).")
+        // Confidence-gated path: re-resolves the target (AX first, vision fallback) and only
+        // clicks when we're sure enough. Below threshold we ask rather than click a guess.
+        switch await UIActuator.clickConfident(role: role, label: label) {
+        case .clicked:
+            return .ok("Clicked “\(label)”.")
+        case .unsure(let l):
+            return .fail("I found something that might be “\(l)”, but I'm not confident it's the right control. Can you confirm the exact label, or click it yourself? (Call ui_read to see the labels I can see.)")
+        case .notFound:
+            return .fail("Couldn't find “\(label)” on screen, even by sight. Call ui_read to see the exact labels.")
         }
-        return .fail("Couldn't find “\(label)” on screen, even by sight. Call ui_read to see the exact labels.")
     }
 }
 

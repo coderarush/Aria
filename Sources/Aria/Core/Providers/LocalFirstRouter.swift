@@ -26,6 +26,15 @@ struct LocalFirstRouter {
     private var enabled: Bool { defaults.object(forKey: Self.toggleKey) as? Bool ?? true }   // local is the default (V9)
     var localModelName: String { defaults.string(forKey: Self.modelKey) ?? "" }
 
+    static let chatModelKey = "app.localChatModel"
+    /// Live voice chat wants a FAST *instruct* model (sub-second first token), not
+    /// the heavier thinking model used for planning/agents. Defaults to a small
+    /// instruct model so enabling local chat + `ollama pull llama3.2:3b` is fast.
+    var localChatModelName: String {
+        let m = defaults.string(forKey: Self.chatModelKey) ?? ""
+        return m.isEmpty ? "llama3.2:3b" : m
+    }
+
     private func provider() -> any ModelProvider { makeProvider(localModelName) }
 
     // Cached availability so the live conversation path never pays the 1.5s
@@ -42,7 +51,10 @@ struct LocalFirstRouter {
     /// runs minutes. Planner/agents/knowledge calls (short prompts) stay
     /// local by default — flip this on when running a faster instruct model.
     func chatGoesLocal() async -> Bool {
-        guard enabled, defaults.bool(forKey: Self.chatToggleKey) else { return false }
+        // Local-first voice is ON by default; the availability probe below means it
+        // only wins when a local server is actually alive, else cloud takes over.
+        let chatOn = defaults.object(forKey: Self.chatToggleKey) as? Bool ?? true
+        guard enabled, chatOn else { return false }
         Self.probeLock.lock()
         if let p = Self.lastProbe, Date().timeIntervalSince(p.at) < 30 {
             Self.probeLock.unlock()

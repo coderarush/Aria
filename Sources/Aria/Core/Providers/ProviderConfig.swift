@@ -34,12 +34,35 @@ enum ProviderConfig {
         return list
     }
 
+    /// Fast chat-first clouds, ordered fastest-first. Used as the conversation
+    /// PRIMARY (ahead of Gemini) for snappy first-token latency — Cerebras and
+    /// Groq stream at thousands of tok/s, so first audio lands in a fraction of
+    /// Gemini's time. Gemini stays the fallback, so this is pure upside when a
+    /// key is present and a no-op when it isn't.
+    static func fastChatClients() -> [OpenAICompatibleClient] {
+        [
+            OpenAICompatibleClient(
+                label: "Cerebras",
+                baseURL: "https://api.cerebras.ai/v1",
+                models: ["llama-3.3-70b", "llama3.1-8b"],
+                keyProvider: { KeychainManager.read(account: KeychainKey.cerebrasAPIKey) }),
+            OpenAICompatibleClient(
+                label: "Groq",
+                baseURL: "https://api.groq.com/openai/v1",
+                models: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
+                keyProvider: { KeychainManager.read(account: KeychainKey.groqAPIKey) })
+        ]
+    }
+
     /// Concise persona for local + fallback providers (Gemini's own prompt stays as is).
     static var chatSystemPrompt: String {
         """
         You are Aria, a confident, charming, concise voice assistant on the user's Mac. \
         Answer naturally and briefly, like a spoken reply. Use a tool when the user wants \
-        an action taken; otherwise just answer. Never mention tools or internal plumbing.
+        an action taken; otherwise just answer. Never mention tools or internal plumbing. \
+        Be honest about what you do — never promise to check things "every hour" or watch \
+        anything in the background on your own; if they want that, they set up a background \
+        agent in Settings → Agents.
         """ + PersonaStyle.current.promptSuffix
     }
 }

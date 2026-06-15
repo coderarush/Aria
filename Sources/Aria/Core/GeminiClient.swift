@@ -187,7 +187,7 @@ actor GeminiClient {
                         await RoutingLog.shared.record(RoutingDecision(
                             taskClass: .simpleChat, tier: .local, reason: "conversation on local model"))
                         Log.trace("chat: local model")
-                        let local = OllamaProvider(model: router.localModelName)
+                        let local = OllamaProvider(model: router.localChatModelName)
                         // Trimmed tool catalog: prompt-eval cost on a small local
                         // model scales with spec bytes — the full 25-tool catalog
                         // costs ~3x the first-token time of this core set. Tools
@@ -205,6 +205,25 @@ actor GeminiClient {
                             for try await ev in stream { continuation.yield(ev) }
                             continuation.finish()
                         } catch { continuation.finish(throwing: error) }
+                    } else if let fast = await self.fastChatProvider() {
+                        // FAST CLOUD: snappier first-token than Gemini. Gemini stays
+                        // the fallback via the same first-token watchdog, so a stalled
+                        // or failing fast provider degrades cleanly — never a freeze.
+                        await RoutingLog.shared.record(RoutingDecision(
+                            taskClass: .simpleChat, tier: .cloud, reason: "fast cloud chat"))
+                        Log.trace("chat: fast cloud primary")
+                        let stream = Self.streamWithFallback(
+                            primary: await fast.streamChat(transcript: transcript, history: history,
+                                                           system: ProviderConfig.chatSystemPrompt, specs: specs),
+                            fallback: {
+                                Log.trace("chat: fast cloud failed before output — Gemini fallback")
+                                return cloud()
+                            },
+                            firstTokenTimeout: 6)
+                        do {
+                            for try await ev in stream { continuation.yield(ev) }
+                            continuation.finish()
+                        } catch { continuation.finish(throwing: error) }
                     } else {
                         do {
                             for try await ev in cloud() { continuation.yield(ev) }
@@ -216,6 +235,13 @@ actor GeminiClient {
             }
         }
         return cloud()
+    }
+
+    /// The fastest configured cloud chat provider (Cerebras → Groq), or nil if the
+    /// user hasn't added a key for either. When present it fronts Gemini for chat.
+    private func fastChatProvider() async -> OpenAICompatibleClient? {
+        for c in ProviderConfig.fastChatClients() where await c.hasCredentials() { return c }
+        return nil
     }
 
     /// Core everyday tools for local-model chat (kept small on purpose — see
@@ -713,5 +739,12 @@ actor GeminiClient {
     If they say "summarize this" and there's selected text, summarize that text; if \
     not, read the screen. When they reference the thing in front of them, act on the \
     SYSTEM CONTEXT — don't make them describe it.
+
+    Be honest about what you actually do. Do NOT promise background or scheduled \
+    work — you do not watch the inbox, the web, or anything "every hour" or "in the \
+    background" on your own. The only recurring thing that runs is silent on-device \
+    routine-learning. If the user wants you to keep watch or check on a schedule, \
+    tell them they can set up a background agent in Settings → Agents — never claim \
+    you'll "check every hour" or "keep monitoring" when you won't.
     """
 }

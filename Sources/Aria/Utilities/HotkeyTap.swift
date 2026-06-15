@@ -10,15 +10,20 @@ import Carbon.HIToolbox
 @MainActor
 final class HotkeyTap {
     nonisolated static let keySpace: Int64 = 49   // kVK_Space
+    nonisolated static let keyD: Int64 = 2        // kVK_ANSI_D
 
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private let onTalk: () -> Void
     private let onType: () -> Void
+    private let onDictate: () -> Void
 
-    init(onTalk: @escaping () -> Void, onType: @escaping () -> Void) {
+    init(onTalk: @escaping () -> Void,
+         onType: @escaping () -> Void,
+         onDictate: @escaping () -> Void) {
         self.onTalk = onTalk
         self.onType = onType
+        self.onDictate = onDictate
     }
 
     /// True when the tap is live. False = no Accessibility trust (or tap denied).
@@ -67,22 +72,31 @@ final class HotkeyTap {
             }
             return Unmanaged.passUnretained(event)
         }
-        guard type == .keyDown,
-              event.getIntegerValueField(.keyboardEventKeycode) == Self.keySpace else {
-            return Unmanaged.passUnretained(event)
-        }
+        guard type == .keyDown else { return Unmanaged.passUnretained(event) }
+        let code = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags
         let option = flags.contains(.maskAlternate)
         let shift = flags.contains(.maskShift)
         let command = flags.contains(.maskCommand)
         let control = flags.contains(.maskControl)
+        let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+
+        // ⌥⇧D = system-wide dictation (talk → typed into the focused app).
+        if code == Self.keyD {
+            guard option, shift, !command, !control, !isRepeat else {
+                return Unmanaged.passUnretained(event)
+            }
+            Task { @MainActor in Log.trace("hotkey: ⌥⇧D dictate"); self.onDictate() }
+            return nil
+        }
+
+        guard code == Self.keySpace else { return Unmanaged.passUnretained(event) }
         // User-selectable modifier (Settings → Conversation): option (default)
         // or control — always Space, type panel = +shift.
         let wantControl = UserDefaults.standard.string(forKey: "app.hotkeyModifier") == "control"
         let primary = wantControl ? control : option
         let other = wantControl ? option : control
         guard primary, !command, !other else { return Unmanaged.passUnretained(event) }
-        let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
         if !isRepeat {
             Task { @MainActor in
                 Log.trace("hotkey: ⌥\(shift ? "⇧" : "")Space")

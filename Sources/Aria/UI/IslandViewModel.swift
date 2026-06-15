@@ -7,7 +7,7 @@ import Combine
 @MainActor
 final class IslandViewModel: ObservableObject {
 
-    enum State: Equatable { case idle, listening, thinking, responding, error }
+    enum State: Equatable { case idle, listening, thinking, executing, responding, error }
 
     @Published private(set) var state: State = .idle
     @Published var responseText: String = ""
@@ -19,6 +19,9 @@ final class IslandViewModel: ObservableObject {
     /// `state` so it can sit on top of any state without disturbing the wake/
     /// listen/think flow. Speaks only when the user reveals it.
     @Published private(set) var hasSuggestion: Bool = false
+    /// System-wide dictation in progress — the caption reads "Dictating…" so the
+    /// user knows their words are being typed, not interpreted as a command.
+    @Published var isDictating: Bool = false
 
     /// Fired when the pill wants the hosting panel to show/hide.
     var onVisibilityChange: ((Bool) -> Void)?
@@ -34,6 +37,11 @@ final class IslandViewModel: ObservableObject {
     }
 
     func beginThinking() { cancelDismiss(); setState(.thinking) }
+
+    /// Enter multi-step execution: she splashes to the screen edge and works as
+    /// the rotating border. Only the autonomy (plan→execute) path calls this —
+    /// simple conversational answers never splash.
+    func beginExecuting() { cancelDismiss(); setState(.executing) }
 
     func showResponse(_ text: String) {
         responseText = text

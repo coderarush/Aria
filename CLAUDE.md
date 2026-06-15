@@ -1,9 +1,32 @@
-# Aria — V11 Launch Candidate Working Context
+# Aria — V11.1.1 "The Operator" Working Context
 
-**Status:** V11 launch candidate on branch `aria-v11` (V10 pre-release shipped
-on `aria-v9`; v8 on main).
+**Status:** v11.1.1 in progress on branch `aria-v11.1.1` (off v11.0.1). v11.0.1
+(Living Presence + dictation + connectors + premium app) is the predecessor.
 **Governing docs (read these for product direction):**
+- `docs/v11.1/ARIA_V11.1.1_SPEC.md` — v11.1.1 "The Operator" spec + locked decisions
+- `docs/superpowers/plans/2026-06-13-v11.1.1-phaseA-trust.md` — Phase A (Trust) plan
+- `docs/v11.1/OAUTH_RELAY_DESIGN.md` — hosted OAuth relay design (infra not deployed)
 - `docs/v11/ARIA_V11_MASTER.md` — V11 launch-candidate constitution (21 priorities)
+
+## v11.1.1 systems (built, branch aria-v11.1.1, 739 tests)
+- **Trust layer** (Core/Autonomy/): `ActionImportance` + `Safety.importance` (gate only
+  important-irreversible), `ActionReceipt` + `ActionLedger` (record everything,
+  undo-by-id; Receipts pane in app), `PostCondition` (verify step effects).
+  Chokepoint (AgentOrchestrator.execute) gates only important-irreversible + receipts
+  every action. `ReversibleAction`: file/clipboard/gmailDraft/calendarEvent undoable.
+- **Anticipation that acts** (Core/Proactive/AnticipationPolicy): very-high-confidence
+  reversible suggestions auto-run (receipted), opt-in `app.autonomousActions`.
+- **Connectors** (Core/Connectors/): Gmail send/draft, Calendar create, Notion
+  search/append, Slack recent/send — all via connected-account tokens + write OAuth
+  scopes. (Needs user: register OAuth apps + connect; relay deferred — infra.)
+- **Personalization** (Core/Identity/): EntityStore (resolve people/projects, in
+  UnifiedRecall as [who]) + StyleProfile/StyleLearner (drafts in user's voice),
+  opt-in `app.personalizationEnabled`.
+- **Operator targeting** (Core/ComputerUse/OperatorTargeting + OperatorPreview):
+  confidence-gated clicks (don't click a low-confidence guess) + re-resolve-on-retry
+  + dry-run preview helper (preview not yet auto-driven).
+- REMAINING: live validation (mic + connected accounts + human), ship (merge/push/
+  notarize — user decision), relay infra deploy, deeper computer-use reliability.
 - `docs/v10/ARIA_V10_MASTER.md` — V10 directive + status
 - `docs/v9/ARIA_V9_MASTER.md` — product + engineering constitution
 - `docs/v9/ARIA_WEBSITE_V9.md` — website design/motion/marketing constitution

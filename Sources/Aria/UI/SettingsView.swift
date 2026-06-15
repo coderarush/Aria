@@ -321,6 +321,21 @@ struct GeneralSettingsTab: View {
                 Toggle("Privacy mode (disable screen capture)", isOn: $settings.privacyMode)
                 Toggle("Launch at login", isOn: $settings.launchAtLogin)
             }
+
+            SSection("Autonomy") {
+                Toggle("Let Aria act on her own anticipations", isOn: $settings.autonomousActions)
+                Text("When she's very confident and the action is reversible, she'll just do it (e.g. open your standup doc at 9am) and notify you — everything is logged in Receipts and one “undo” away. Important or irreversible things always ask first.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            SSection("Connectors") {
+                Picker("Sign-in method", selection: $settings.connectorMode) {
+                    Text("Bring your own client ID").tag("bringYourOwn")
+                    Text("Hosted relay (no setup)").tag("relay")
+                }
+                Text("“Bring your own” connects with an OAuth client ID you paste per service (works today). “Hosted relay” needs no setup — available once Aria's relay is live.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -389,6 +404,16 @@ struct ConversationSettingsTab: View {
                     Text("⌃ Control + Space").tag("control")
                 }
                 Text("Talk = modifier + Space · Type = modifier + ⇧ + Space. Applies immediately.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            SSection("Dictation") {
+                Toggle("System-wide dictation (⌥⇧D)", isOn: $settings.dictationEnabled)
+                Text("Press ⌥⇧D anywhere, speak, and Aria types the cleaned-up text into whatever field you're in — email, Slack, code. Your words go in as-is; she doesn't answer them.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Toggle("Polish with AI", isOn: $settings.dictationAICleanup)
+                    .disabled(!settings.dictationEnabled)
+                Text("Fix punctuation and obvious mis-hears with a quick AI pass before inserting. Slightly slower; off uses instant local cleanup.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -513,6 +538,7 @@ struct ProactiveSettingsTab: View {
 
 struct KnowledgeSettingsTab: View {
     @State private var s = KnowledgeSettings.load()
+    @StateObject private var app = AppSettings.shared
     @State private var docCount = 0
     @State private var indexing = false
     @State private var status = ""
@@ -523,6 +549,18 @@ struct KnowledgeSettingsTab: View {
             SSection {
                 Toggle("Let Aria search my files", isOn: $s.enabled)
                 Text("Strictly local. Files are read and indexed on this Mac only — content never leaves the machine. Ask things like “what did the investor say about pricing?”")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            SSection("Personal context") {
+                Toggle("Let Aria see my recent files & schedule", isOn: $app.personalContextEnabled)
+                Text("On-device awareness of your world — recently downloaded files, Desktop files, and upcoming calendar events — so she can answer “what was that file I just got?” or “what’s next today?”. Local-only; nothing leaves your Mac.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            SSection("Personalization") {
+                Toggle("Let Aria learn who & how I write", isOn: $app.personalizationEnabled)
+                Text("Builds an on-device model of the people and projects you refer to (so “email Sara” resolves) and your writing voice (so her drafts sound like you). Local-only; turning it off wipes it.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 

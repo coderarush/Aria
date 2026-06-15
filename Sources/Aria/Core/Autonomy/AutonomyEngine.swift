@@ -130,7 +130,7 @@ actor AutonomyEngine {
             // ("send the email to John"), and a long agent run deserves a heads-up
             // before it starts rather than only at the leaf action.
             if case .agent(let a) = step.executor,
-               Safety.isDestructive(tool: a, input: step.input) || Safety.isDestructive(summary: step.summary) {
+               Self.shouldPause(tool: a, input: step.input, summary: step.summary) {
                 let okToRun = await confirm("Aria wants to \(step.summary). Allow?")
                 if !okToRun {
                     plan.steps[i].status = .failed
@@ -152,6 +152,11 @@ actor AutonomyEngine {
                 try? await Task.sleep(nanoseconds: 400_000_000)   // 0.4s backoff
                 result = await execute(step, lastOutput: lastOutput, material: material)
             }
+            // Verify the step's EFFECT, not just that the call returned — an
+            // unconfirmed post-condition is a failure, so recovery runs (v11.1.1 trust).
+            if result.success, !step.postCondition.isSatisfied(byResult: result.output, ok: result.success) {
+                result = .fail("Step ran but its expected result couldn't be confirmed.")
+            }
             // Recover (alternative action) for anything still failing except a decline —
             // a missing-input CAN be fixed by a different action, a decline must not be.
             if !result.success, !result.wasDeclined {
@@ -164,6 +169,9 @@ actor AutonomyEngine {
             plan.steps[i].status = result.success ? .done : .failed
             plan.steps[i].result = result.output
             emit(.stepFinished(i, ok: result.success, result: result.output))
+            // (Receipts are recorded at the universal tool chokepoint in
+            // AgentOrchestrator.execute, so every caller — not just plan steps — is
+            // covered without double-recording.)
             if result.success, !result.output.isEmpty {
                 lastOutput = result.output
                 completed.append((summary: step.summary, output: result.output))
@@ -292,6 +300,12 @@ actor AutonomyEngine {
     }
 
     // MARK: Execution
+
+    /// Highly-autonomous gate (v11.1.1): pause for the user ONLY when the action is
+    /// extremely important AND irreversible. Everything else runs free and receipted.
+    static func shouldPause(tool: String, input: [String: String], summary: String) -> Bool {
+        Safety.importance(tool: tool, input: input, summary: summary).requiresApproval
+    }
 
     private func execute(_ step: TaskStep, lastOutput: String, material: String) async -> ToolResult {
         switch step.executor {

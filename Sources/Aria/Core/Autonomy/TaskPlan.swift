@@ -14,6 +14,8 @@ struct TaskStep: Identifiable, Equatable {
     var input: [String: String] = [:]
     var status: StepStatus = .pending
     var result: String = ""
+    /// What must hold after this step for it to count as done (v11.1.1 trust).
+    var postCondition: PostCondition = .none
     static func == (l: TaskStep, r: TaskStep) -> Bool { l.id == r.id && l.status == r.status && l.result == r.result }
 }
 

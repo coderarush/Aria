@@ -14,6 +14,46 @@ enum UIActuator {
         return true
     }
 
+    /// Outcome of a confidence-gated click attempt.
+    enum ClickOutcome: Equatable {
+        case clicked                 // we acted
+        case unsure(label: String)   // located something, but too low-confidence to click blindly
+        case notFound                // couldn't locate at all
+    }
+
+    /// Locate a target FRESH (AX first, vision fallback) and attach a confidence. Called
+    /// on every attempt — including retries — so a moved UI is re-resolved rather than
+    /// clicked at a stale rect. `nil` means we couldn't find it at all.
+    ///
+    /// AX path is synchronous + MainActor-friendly; the vision fallback is async and only
+    /// runs when AX misses, so ordinary clicks never pay for a screenshot.
+    static func resolveTarget(role: String?, label: String) async -> ResolvedTarget? {
+        // AX read + geometry are nonisolated static helpers (same as `click` uses); only the
+        // vision fallback is async.
+        if let hit = AXReader.findScored(role: role, label: label) {
+            return ResolvedTarget(point: center(of: hit.el), confidence: .fromAX(matchScore: hit.score))
+        }
+        if let v = await VisionLocator.locateScored(label) {
+            return ResolvedTarget(point: v.point, confidence: .fromVision(score: v.confidence))
+        }
+        return nil
+    }
+
+    /// Confidence-gated click: re-resolve the target, and only fire the click if the
+    /// targeting decision says `.act`. Below threshold we DON'T click a guess — we report
+    /// `.unsure` so the caller can ask the user to confirm instead of clicking blindly.
+    static func clickConfident(role: String?, label: String,
+                               threshold: Double = OperatorTargeting.actThreshold) async -> ClickOutcome {
+        guard let target = await resolveTarget(role: role, label: label) else { return .notFound }
+        switch OperatorTargeting.decide(target.confidence, threshold: threshold) {
+        case .act:
+            clickAt(target.point)
+            return .clicked
+        case .askFirst, .abort:
+            return .unsure(label: label)
+        }
+    }
+
     static func clickAt(_ p: CGPoint) {
         let src = CGEventSource(stateID: .hidSystemState)
         CGEvent(mouseEventSource: src, mouseType: .leftMouseDown, mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
