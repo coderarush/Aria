@@ -100,7 +100,12 @@ actor ToolRegistry {
             FlashcardGenerateTool(),
             ResearchTool(),
             DocReadTool(),
-            DocSummarizeTool()
+            DocSummarizeTool(),
+            AutomationCreateTool(),
+            AutomationListTool(),
+            EmailTaskTool(),
+            AgendaTool(),
+            FollowUpTool()
         ]
     }
 }
