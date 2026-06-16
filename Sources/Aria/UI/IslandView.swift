@@ -13,6 +13,14 @@ struct IslandView: View {
     @State private var pulse = false           // springy pop on state change
     @State private var dragOffset: CGSize = .zero
     @State private var isDragging = false
+    // 2a: Typewriter caption reveal
+    @State private var displayedCaption = ""
+    @State private var captionTask: Task<Void, Never>? = nil
+    @State private var cursorVisible = false
+    // 2b: Blob entrance burst particles
+    @State private var showBurstParticles = false
+    // 2f: State transition color flash
+    @State private var flashIntensity: Double = 0
 
     /// Reported up to the hosting panel so it can make ONLY the blob interactive.
     var onBlobFrameChange: ((CGRect?) -> Void)?
@@ -77,12 +85,42 @@ struct IslandView: View {
         .onChange(of: viewModel.state) { _, _ in
             pulse = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.34) { pulse = false }
+            // 2f: Flash the blob white briefly on every state transition.
+            flashIntensity = 0.4
+            withAnimation(.easeOut(duration: 0.35)) { flashIntensity = 0 }
         }
         .onChange(of: choreographer.kind) { _, kind in
             // The blob is only draggable when fully settled; the instant she
             // leaves that phase (splash, consolidate-out, dismiss) the panel
             // returns to fully click-through so no stale region swallows clicks.
             if kind != .blob { onBlobFrameChange?(nil) }
+            // 2b: Trigger particle burst when the blob first appears.
+            if kind == .blob {
+                showBurstParticles = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { showBurstParticles = false }
+            }
+        }
+        // 2a: Typewriter caption reveal — triggered whenever the source text changes.
+        .onChange(of: captionText) { _, newText in
+            captionTask?.cancel()
+            if newText.isEmpty {
+                displayedCaption = ""
+            } else {
+                captionTask = Task {
+                    displayedCaption = ""
+                    for char in newText {
+                        guard !Task.isCancelled else { break }
+                        displayedCaption.append(char)
+                        try? await Task.sleep(nanoseconds: 18_000_000)
+                    }
+                }
+            }
+        }
+        .onAppear {
+            // Blinking cursor for typewriter effect.
+            Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+                cursorVisible.toggle()
+            }
         }
     }
 
@@ -103,6 +141,17 @@ struct IslandView: View {
             if let cp = choreographer.consolidateProgress(at: t) {
                 EdgeGatherView(palette: palette, progress: cp, center: restingCenter(in: size))
             }
+            // 2d: Audio-reactive outer glow ring during listening.
+            if viewModel.state == .listening && viewModel.audioLevel > 0.05 {
+                Circle()
+                    .fill((palette.first ?? .purple).opacity(Double(viewModel.audioLevel) * 0.35))
+                    .frame(width: 150 + CGFloat(viewModel.audioLevel) * 60,
+                           height: 150 + CGFloat(viewModel.audioLevel) * 60)
+                    .blur(radius: 18)
+                    .blendMode(.plusLighter)
+                    .animation(.easeOut(duration: 0.08), value: viewModel.audioLevel)
+                    .position(blobPosition(in: size, t: t))
+            }
             // The blob (thinking / answering / suggestion / pooling / splashing).
             if choreographer.showsBlob {
                 blobBody(t: t)
@@ -121,12 +170,13 @@ struct IslandView: View {
         let thinking = viewModel.state == .thinking
         let suggesting = viewModel.hasSuggestion && viewModel.state == .idle
         let breathe = suggesting ? (0.5 + 0.5 * sin(t * 1.8)) : 0
-        let amp = 0.07 + level * 0.16 + speaking * 0.13 + (thinking ? 0.07 : 0)
+        // 2d: More dramatic audio reactivity for listening.
+        let amp = 0.07 + level * 0.28 + speaking * 0.15 + (thinking ? 0.09 : 0)
                 + breathe * 0.04 + choreographer.blobAmpBoost(at: t)
         // Slower morph = silkier, liquid-glass squirm.
         let speed = thinking ? 1.3 : 0.75
-        // A clearer "pull" while she speaks so you can see she's talking.
-        let envScale = 1 + level * 0.12 + speaking * 0.16 + breathe * 0.06
+        // 2d: Stronger envelope scale for listening.
+        let envScale = 1 + level * 0.20 + speaking * 0.18 + breathe * 0.06
         let radii = BlobMath.radii(t: t, n: 11, amp: amp, speed: speed)
         let c0 = palette.first ?? viewModel.accent
         let c1 = palette.count > 1 ? palette[1] : c0
@@ -134,35 +184,74 @@ struct IslandView: View {
         let fall = choreographer.blobFall(at: t)
         let squash = fall > 0.8 ? 1 - (fall - 0.8) / 0.2 * 0.18 : 1
         let dragScale = isDragging ? 1.05 : 1.0
-        let pulseScale = pulse ? 1.06 : 1.0
+        // 2e: Bigger pulse scale.
+        let pulseScale = pulse ? 1.10 : 1.0
         let combinedScale = dragScale * choreographer.blobScale(at: t) * pulseScale * settings.orbScale
         // Liquid-glass: the specular highlight drifts slowly so light slides over
         // her like a glass bead, and a faint top sheen reads as a refractive edge.
         let gx = 0.38 + 0.05 * sin(t * 0.5)
         let gy = 0.30 + 0.04 * cos(t * 0.42)
 
-        return BlobShape(radii: radii)
-            .fill(LinearGradient(colors: [c0, c1], startPoint: .topLeading, endPoint: .bottomTrailing))
-            .overlay(
-                BlobShape(radii: radii)
-                    .fill(RadialGradient(colors: [.white.opacity(0.55), .white.opacity(0)],
-                                         center: .init(x: gx, y: gy), startRadius: 1, endRadius: 62))
-            )
-            .overlay(
-                BlobShape(radii: radii)
-                    .fill(LinearGradient(colors: [.white.opacity(0.22), .clear],
-                                         startPoint: .top, endPoint: .center))
+        return ZStack {
+            BlobShape(radii: radii)
+                .fill(LinearGradient(colors: [c0, c1], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .overlay(
+                    BlobShape(radii: radii)
+                        .fill(RadialGradient(colors: [.white.opacity(0.55), .white.opacity(0)],
+                                             center: .init(x: gx, y: gy), startRadius: 1, endRadius: 62))
+                )
+                .overlay(
+                    BlobShape(radii: radii)
+                        .fill(LinearGradient(colors: [.white.opacity(0.22), .clear],
+                                             startPoint: .top, endPoint: .center))
+                        .blendMode(.plusLighter)
+                )
+                // 2f: State transition flash overlay.
+                .overlay(
+                    BlobShape(radii: radii)
+                        .fill(Color.white.opacity(flashIntensity))
+                        .blendMode(.plusLighter)
+                )
+                .frame(width: 150, height: 150)
+                .scaleEffect(x: envScale, y: envScale * squash)
+                .scaleEffect(combinedScale)
+                .shadow(color: .black.opacity(0.22), radius: 10, y: 7)
+                .shadow(color: c0.opacity(0.28 + (suggesting ? 0.25 * breathe : 0)),
+                        radius: 16 + (suggesting ? 10 * breathe : 0))
+
+            // 2c: Rotating shimmer ring while thinking.
+            if thinking {
+                Circle()
+                    .stroke(
+                        AngularGradient(colors: [.clear, (palette.first ?? .purple).opacity(0.6), .clear],
+                                       center: .center),
+                        lineWidth: 2
+                    )
+                    .frame(width: 170, height: 170)
+                    .rotationEffect(.degrees(t * 120))
+                    .opacity(0.7)
                     .blendMode(.plusLighter)
-            )
-            .frame(width: 150, height: 150)
-            .scaleEffect(x: envScale, y: envScale * squash)
-            .scaleEffect(combinedScale)
-            .shadow(color: .black.opacity(0.22), radius: 10, y: 7)
-            .shadow(color: c0.opacity(0.28 + (suggesting ? 0.25 * breathe : 0)),
-                    radius: 16 + (suggesting ? 10 * breathe : 0))
-            .frame(width: 184, height: 184)
-            .animation(.spring(response: 0.5, dampingFraction: 0.72), value: pulse)
-            .animation(.spring(response: 0.45, dampingFraction: 0.78), value: isDragging)
+            }
+
+            // 2b: Burst particles on blob entrance.
+            if showBurstParticles {
+                ForEach(0..<6, id: \.self) { i in
+                    let angle = Double(i) / 6.0 * .pi * 2
+                    let dx = showBurstParticles ? cos(angle) * 40 : 0
+                    let dy = showBurstParticles ? sin(angle) * 40 : 0
+                    Circle()
+                        .fill(palette.first ?? .purple)
+                        .frame(width: 6, height: 6)
+                        .opacity(showBurstParticles ? 0 : 0.7)
+                        .offset(x: dx, y: dy)
+                        .animation(.spring(response: 0.4, dampingFraction: 0.6).delay(Double(i) * 0.02), value: showBurstParticles)
+                }
+            }
+        }
+        .frame(width: 184, height: 184)
+        // 2e: Snappier spring physics.
+        .animation(.spring(response: 0.38, dampingFraction: 0.62), value: pulse)
+        .animation(.spring(response: 0.35, dampingFraction: 0.65), value: isDragging)
     }
 
     // MARK: - Positioning

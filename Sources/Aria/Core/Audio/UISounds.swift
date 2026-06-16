@@ -18,6 +18,16 @@ enum UISounds {
         case task
         /// Something failed: a gentle low double-tap, never alarming.
         case error
+        /// She started thinking/processing: a soft upward shimmer — like a breath in.
+        case thinking
+        /// A proactive suggestion appeared: one delicate high ping.
+        case notification
+        /// User confirmed / suggestion accepted: a warm two-note resolution.
+        case confirm
+        /// Caption text arriving — one extremely quiet soft tick (play per word, not per char).
+        case tick
+        /// She's been dismissed / task cancelled: a gentle downward whoosh.
+        case dismiss
     }
 
     /// 16-bit mono PCM at `sampleRate`. Deterministic.
@@ -40,6 +50,26 @@ enum UISounds {
             // Two soft low E4 taps — informative, not punitive.
             return note(freq: 329.6, secs: 0.09, amp: 0.15)
                  + note(freq: 329.6, secs: 0.14, amp: 0.12)
+        case .thinking:
+            // Quick ascending shimmer — 4 notes, breath-in feeling.
+            return note(freq: 660, secs: 0.04, amp: 0.10)
+                 + note(freq: 880, secs: 0.04, amp: 0.10)
+                 + note(freq: 1108, secs: 0.04, amp: 0.10)
+                 + note(freq: 1318, secs: 0.04, amp: 0.10)
+        case .notification:
+            // Single high pure tone — C7, clean and non-intrusive.
+            return note(freq: 2093, secs: 0.12, amp: 0.09)
+        case .confirm:
+            // Warm two-note resolution — E5 → A5.
+            return note(freq: 659, secs: 0.08, amp: 0.12)
+                 + note(freq: 880, secs: 0.18, amp: 0.12)
+        case .tick:
+            // Single very quiet sine at A5 — almost inaudible.
+            return note(freq: 880, secs: 0.025, amp: 0.04)
+        case .dismiss:
+            // Gentle descending whoosh — A5 → E4.
+            return note(freq: 880, secs: 0.08, amp: 0.11)
+                 + note(freq: 329, secs: 0.14, amp: 0.11)
         }
     }
 

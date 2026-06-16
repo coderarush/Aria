@@ -58,6 +58,10 @@ final class AriaController {
     /// True while Aria is speaking; keeps wake suspended even if the pill
     /// auto-hides mid-utterance, so she can't hear herself and re-trigger.
     private var isSpeaking = false
+    /// Word counter for the caption tick sound — plays every ~4 words of streamed response text.
+    private var tickWordCount = 0
+    /// Whether the confirm chime has already fired for the current streaming turn.
+    private var confirmChimeFired = false
     private var streamVoice: StreamingVoice!
     private var session: ConversationSession?
     private var convSilenceTimer: Timer?
@@ -172,7 +176,7 @@ final class AriaController {
     /// Soft interaction chime, AEC-cancelled (played as far-end reference so
     /// the mic never hears it). Deferred off the caller's stack so it can never
     /// block the wake path; subtle by design; toggleable in Settings.
-    private func playChime(_ kind: UISounds.Kind) {
+    func playChime(_ kind: UISounds.Kind) {
         guard AppSettings.shared.uiSoundsEnabled else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -437,6 +441,7 @@ final class AriaController {
             if case let .runSavedCommand(command) = pattern.action {
                 Log.app.info("Firing automation: \(command, privacy: .public)")
                 islandViewModel.beginThinking()
+                playChime(.thinking)
                 let response = await orchestrator.handle(command: command)
                 islandViewModel.showResponse("⚡️ " + response.message)
             }
@@ -978,10 +983,12 @@ final class AriaController {
         if BriefingComposer.isBriefingIntent(command) {
             islandViewModel.beginThinking()
             playChime(.task)
+            playChime(.thinking)
             currentTurnTask = Task { [weak self] in
                 guard let self else { return }
                 let (text, _) = await self.deliverBriefing(silent: false)
                 await MainActor.run {
+                    self.playChime(.confirm)
                     self.islandViewModel.appendResponse(text)
                     self.speakAndListen(text)
                 }
@@ -1024,6 +1031,9 @@ final class AriaController {
         speechStartedAt = Date()
         applyVoiceSettings()
         islandViewModel.beginThinking()
+        playChime(.thinking)
+        tickWordCount = 0
+        confirmChimeFired = false
         // The Gemini voice speaks the whole reply in ONE call at the end — per-
         // sentence TTS calls burn the free quota fast.
         streamVoice.onAllFinished = { [weak self] in
@@ -1043,7 +1053,20 @@ final class AriaController {
             guard let self else { return }
             await self.orchestrator.handleStreaming(command: command, privacyMode: AppSettings.shared.privacyMode) { delta in
                 Task { @MainActor [weak self] in
-                    self?.islandViewModel.appendResponse(delta)   // caption streams; no auto-dismiss
+                    guard let self else { return }
+                    // Play confirm on the first delta of each streaming turn.
+                    if !self.confirmChimeFired {
+                        self.confirmChimeFired = true
+                        self.playChime(.confirm)
+                    }
+                    self.islandViewModel.appendResponse(delta)   // caption streams; no auto-dismiss
+                    // Play a tick every ~4 words of streamed text.
+                    let newWords = delta.split(whereSeparator: \.isWhitespace).count
+                    self.tickWordCount += newWords
+                    if self.tickWordCount >= 4 {
+                        self.tickWordCount = 0
+                        self.playChime(.tick)
+                    }
                 }
             }
             await MainActor.run {
@@ -1068,6 +1091,7 @@ final class AriaController {
     /// V11 P12: end the focus session — recap from the timeline, journal it.
     private func endFocusMode() {
         islandViewModel.beginThinking()
+        playChime(.thinking)
         currentTurnTask = Task { [weak self] in
             guard let self else { return }
             guard let record = await FocusSession.shared.end() else {
@@ -1084,6 +1108,7 @@ final class AriaController {
                                             title: "\(record.mode.capitalized) focus session",
                                             outcome: "\(minutes) min, \(done) completed", ok: true)
             await MainActor.run {
+                self.playChime(.confirm)
                 self.islandViewModel.appendResponse(recap)
                 self.speakAndListen(recap)
             }
@@ -1094,6 +1119,7 @@ final class AriaController {
                                    prebuiltSteps: [TaskStep]? = nil) {
         taskActive = true
         playChime(.task)   // "rolling up sleeves" — a longer job is starting
+        playChime(.thinking)
         wakeEngine.isSuspended = true
         isSpeaking = true
         speechStartedAt = Date()
@@ -1196,6 +1222,7 @@ final class AriaController {
             proactivePresenter?.expire(now: Date())
         }
         wakeEngine.endConversation()
+        playChime(.dismiss)
         islandViewModel.dismiss()
     }
 
@@ -1257,7 +1284,10 @@ private final class ProactiveSurfaceAdapter: PresenterSurface {
     weak var controller: AriaController?
     init(controller: AriaController) { self.controller = controller }
 
-    func showGlow() { controller?.islandViewModel.showSuggestionGlow() }
+    func showGlow() {
+        controller?.islandViewModel.showSuggestionGlow()
+        controller?.playChime(.notification)
+    }
     func clearGlow() { controller?.islandViewModel.clearSuggestionGlow() }
     func speak(_ line: String) { controller?.speakAndListen(line) }
     func runCommand(_ command: String) async { controller?.runProactiveCommand(command) }
