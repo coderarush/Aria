@@ -877,9 +877,10 @@ final class AriaController {
 
     @MainActor private func handleBarge() {
         guard AppSettings.shared.bargeInEnabled, isSpeaking else { return }
-        // Grace at the start of her speech: the AEC needs a moment to converge, so
-        // ignore the first ~400 ms to avoid a residual-echo false barge.
-        guard Date().timeIntervalSince(speechStartedAt) > 0.4 else { return }
+        // Grace at the start of her speech: the AEC needs ~1.2 s to converge on
+        // typical hardware; shorter windows let Aria's own voice echo back and
+        // self-interrupt. Increase if "cutting off" still occurs.
+        guard Date().timeIntervalSince(speechStartedAt) > 1.2 else { return }
         Log.trace("barge-in — user talked over Aria")
         streamVoice.stop()              // → AudioBus.stopPlayback()
         currentTurnTask?.cancel()
@@ -975,7 +976,12 @@ final class AriaController {
             // fall through — process `command` as an ordinary turn
         }
 
-        if lower.contains("dismiss") || lower.contains("thanks aria") || lower.contains("never mind") {
+        let dismissPhrases = [
+            "dismiss", "thanks aria", "never mind", "bye", "bye aria",
+            "goodbye", "go away", "okay go away", "that's all", "that's it",
+            "you can go", "stop", "get out of here", "see you", "later aria"
+        ]
+        if dismissPhrases.contains(where: lower.contains) {
             streamVoice.stop(); session?.end(); return
         }
 

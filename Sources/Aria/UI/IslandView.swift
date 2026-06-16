@@ -100,20 +100,29 @@ struct IslandView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { showBurstParticles = false }
             }
         }
-        // 2a: Typewriter caption reveal — triggered whenever the source text changes.
-        .onChange(of: captionText) { _, newText in
+        // Typewriter for streamed response text: append only NEW characters so
+        // each streaming delta extends the display without restarting from zero.
+        .onChange(of: viewModel.responseText) { _, newText in
+            let alreadyShown = displayedCaption.count
+            guard newText.count > alreadyShown else {
+                // Text shrank or cleared (new turn) — reset.
+                captionTask?.cancel(); displayedCaption = ""; return
+            }
+            let newChars = String(newText.dropFirst(alreadyShown))
             captionTask?.cancel()
-            if newText.isEmpty {
-                displayedCaption = ""
-            } else {
-                captionTask = Task {
-                    displayedCaption = ""
-                    for char in newText {
-                        guard !Task.isCancelled else { break }
-                        displayedCaption.append(char)
-                        try? await Task.sleep(nanoseconds: 18_000_000)
-                    }
+            captionTask = Task {
+                for char in newChars {
+                    guard !Task.isCancelled else { break }
+                    displayedCaption.append(char)
+                    try? await Task.sleep(nanoseconds: 18_000_000)
                 }
+            }
+        }
+        // For non-response state labels ("Thinking…" etc.) clear the typewriter buffer.
+        .onChange(of: viewModel.state) { _, state in
+            if state != .responding && state != .error {
+                captionTask?.cancel()
+                displayedCaption = ""
             }
         }
         .onAppear {
@@ -132,25 +141,20 @@ struct IslandView: View {
         ZStack {
             // The screen-edge glow (listening / executing / transitions). Shares
             // the one clock — `t` — so there's no second TimelineView to drift.
-            if borderIntensity > 0.001 {
+            // Boost intensity by audio level while listening so the border pulses
+            // with the user's voice — the audio-reactive effect lives here, not
+            // as a separate ring around the blob.
+            let audioBoost = viewModel.state == .listening
+                ? Double(viewModel.audioLevel) * 0.55
+                : 0
+            if borderIntensity + audioBoost > 0.001 {
                 ScreenBorderView(t: t, palette: palette,
-                                 intensity: borderIntensity,
+                                 intensity: min(borderIntensity + audioBoost, 1.0),
                                  sweepPhase: choreographer.borderSweep(at: t))
             }
             // The gather: light streaming from the edge into the blob as she pools.
             if let cp = choreographer.consolidateProgress(at: t) {
                 EdgeGatherView(palette: palette, progress: cp, center: restingCenter(in: size))
-            }
-            // 2d: Audio-reactive outer glow ring during listening.
-            if viewModel.state == .listening && viewModel.audioLevel > 0.05 {
-                Circle()
-                    .fill((palette.first ?? .purple).opacity(Double(viewModel.audioLevel) * 0.35))
-                    .frame(width: 150 + CGFloat(viewModel.audioLevel) * 60,
-                           height: 150 + CGFloat(viewModel.audioLevel) * 60)
-                    .blur(radius: 18)
-                    .blendMode(.plusLighter)
-                    .animation(.easeOut(duration: 0.08), value: viewModel.audioLevel)
-                    .position(blobPosition(in: size, t: t))
             }
             // The blob (thinking / answering / suggestion / pooling / splashing).
             if choreographer.showsBlob {
@@ -312,9 +316,14 @@ struct IslandView: View {
     // MARK: - Caption
 
     private var caption: some View {
-        Group {
+        // Typewriter effect only on response text — status labels ("Thinking…") appear instantly.
+        let isResponse = viewModel.state == .responding || viewModel.state == .error
+        let shownText = isResponse
+            ? displayedCaption + (cursorVisible ? "|" : " ")
+            : captionText
+        return Group {
             if showCaption {
-                Text(captionText)
+                Text(shownText)
                     .font(.system(size: 19, weight: .semibold, design: .rounded))
                     .foregroundStyle(.primary)
                     .multilineTextAlignment(.center)

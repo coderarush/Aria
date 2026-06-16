@@ -172,7 +172,7 @@ final class AppSettings: ObservableObject {
         // recognition again, turn it off in Settings → Conversation.
         echoCancellation = defaults.object(forKey: K.echoCancellation) as? Bool ?? true
         bargeInEnabled = defaults.object(forKey: K.bargeInEnabled) as? Bool ?? true
-        bargeInSensitivity = defaults.object(forKey: K.bargeInSensitivity) as? Double ?? 0.5
+        bargeInSensitivity = defaults.object(forKey: K.bargeInSensitivity) as? Double ?? 0.35
         conversationSilenceTimeout = defaults.object(forKey: K.conversationSilenceTimeout) as? Double ?? 9
         speakerVerificationEnabled = defaults.bool(forKey: K.speakerVerificationEnabled)
         speakerVerificationEnrolledDate = defaults.object(forKey: K.speakerVerificationEnrolledDate) as? Double ?? 0.0
