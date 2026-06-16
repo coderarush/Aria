@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { motion, useScroll, useTransform, useReducedMotion } from "framer-motion";
 import Blob from "./Blob.jsx";
 
-const DOWNLOAD = "https://github.com/coderarush/Aria/releases/latest";
+const DOWNLOAD = "https://github.com/coderarush/Aria/releases/download/v0.0.0/Aria.dmg";
 const GITHUB = "https://github.com/coderarush/Aria";
 // Waitlist backend (POST JSON {email}). Empty → mailto fallback. See README.
 const WAITLIST_ENDPOINT = "";
