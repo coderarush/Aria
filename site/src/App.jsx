@@ -9,15 +9,19 @@ const WAITLIST_ENDPOINT = "";
 const CONTACT = "arushp@icloud.com";
 
 /* Apple-style: content drifts up and settles as it enters the viewport. */
-const rise = {
-  hidden: { opacity: 0, y: 28 },
-  show: (i = 0) => ({
-    opacity: 1, y: 0,
-    transition: { duration: 0.8, delay: i * 0.09, ease: [0.22, 1, 0.36, 1] },
-  }),
-};
+function useRise(reduce) {
+  return {
+    hidden: { opacity: 0, y: reduce ? 0 : 40, scale: reduce ? 1 : 0.98 },
+    show: (i = 0) => ({
+      opacity: 1, y: 0, scale: 1,
+      transition: { duration: 0.8, delay: i * 0.09, ease: [0.22, 1, 0.36, 1] },
+    }),
+  };
+}
 
 function Reveal({ children, i = 0, className }) {
+  const reduce = useReducedMotion();
+  const rise = useRise(reduce);
   return (
     <motion.div
       className={className}
@@ -32,7 +36,7 @@ function Reveal({ children, i = 0, className }) {
   );
 }
 
-/* Numbered editorial section label, like the reference: "02 · FEATURES". */
+/* Numbered editorial section label */
 function Label({ n, children }) {
   return <Reveal><span className="mono label">{n} · {children}</span></Reveal>;
 }
@@ -73,6 +77,27 @@ function Waitlist() {
   );
 }
 
+const MARQUEE_ITEMS = [
+  "Voice control", "Computer use", "Memory & recall", "Daily briefings",
+  "Recipes & automation", "Meeting notes", "Focus mode", "Calendar",
+  "Email", "Screen awareness", "Always private",
+];
+
+function Marquee() {
+  const items = [...MARQUEE_ITEMS, ...MARQUEE_ITEMS];
+  return (
+    <div className="marqueeBand" aria-hidden="true">
+      <div className="marqueeTrack">
+        {items.map((item, i) => (
+          <span key={i} className="marqueeItem">
+            {item}<span className="marqueeDot">·</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const reduce = useReducedMotion();
 
@@ -87,43 +112,139 @@ export default function App() {
   const { scrollYProgress: featP } = useScroll({ target: featRef, offset: ["start end", "end start"] });
   const crestY = useTransform(featP, [0, 0.7], [reduce ? 0 : 170, 0]);
 
+  const featureCards = [
+    {
+      glyph: "●",
+      title: "Voice first",
+      body: "Natural conversation — no commands to memorize.",
+      iconClass: "featIconAmber",
+    },
+    {
+      glyph: "◐",
+      title: "Context aware",
+      body: "She sees the window, the selection, the field you're in.",
+      iconClass: "featIconSage",
+    },
+    {
+      glyph: "→",
+      title: "Takes action",
+      body: "Opens apps, clicks, types, sends — completes the task.",
+      iconClass: "featIconInk",
+    },
+    {
+      glyph: "○",
+      title: "Private by default",
+      body: "On-device wake word; your data stays on your Mac.",
+      iconClass: "featIconRose",
+    },
+  ];
+
+  const setupSteps = [
+    {
+      n: "01",
+      title: "Download & Install",
+      body: "Download the .dmg file, open it, drag Aria to Applications. Right-click Aria → Open (required once — we're not notarized yet).",
+    },
+    {
+      n: "02",
+      title: "Grant permissions",
+      body: "Aria needs Accessibility + Screen Recording + Microphone. Each triggers a macOS prompt on first launch — click Allow all three. If missed: System Settings → Privacy & Security.",
+    },
+    {
+      n: "03",
+      title: "Add your Gemini API key",
+      body: "Open Aria → press ⌘, (Settings) → paste your key in the API section. Get a free key at ai.google.dev — no credit card required.",
+    },
+    {
+      n: "04",
+      title: "Say \"Hey Aria\"",
+      body: "She wakes on the phrase \"Hey Aria\". Or press ⌥Space to talk, ⌥⇧Space to type. She appears as a small orb on your screen.",
+    },
+    {
+      n: "05",
+      title: "Try your first command",
+      body: "\"Brief me on my day\" · \"What did I do today?\" · \"Summarize this email\" · \"Open my calendar\" · \"Remember this for later\"",
+    },
+  ];
+
   return (
     <>
-      <div className="wrap">
-        <nav className="nav">
+      {/* ---------- nav ---------- */}
+      <nav className="nav">
+        <div className="wrap navInner">
           <div className="brand"><span className="dot" /> Aria</div>
           <div className="links">
             <a href="#features">Features</a>
             <a href="#privacy">Privacy</a>
-            <a href="#blog">Blog</a>
+            <a href="#setup">Setup</a>
             <a className="btn small" href={DOWNLOAD} target="_blank" rel="noreferrer">Download</a>
           </div>
-        </nav>
+        </div>
+      </nav>
 
+      <div className="wrap">
         {/* ---------- 01 · HERO ---------- */}
         <header className="hero" ref={heroRef}>
           <div>
-            <motion.h1 className="display" variants={rise} custom={0} initial="hidden" animate="show">
+            <motion.h1
+              className="display heroHeadline"
+              initial={{ opacity: 0, y: reduce ? 0 : 40, scale: reduce ? 1 : 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
+            >
               The assistant<br />that lives on<br />your Mac.
             </motion.h1>
-            <motion.p className="body" variants={rise} custom={1} initial="hidden" animate="show">
+            <motion.p
+              className="body heroBody"
+              initial={{ opacity: 0, y: reduce ? 0 : 40 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.9, delay: 0.09, ease: [0.22, 1, 0.36, 1] }}
+            >
               Say it, and it's done. Aria hears you, sees your screen, and
               operates your apps — so you stay in flow.
             </motion.p>
-            <motion.div className="cta" variants={rise} custom={2} initial="hidden" animate="show">
+            <motion.div
+              className="cta"
+              initial={{ opacity: 0, y: reduce ? 0 : 40 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.9, delay: 0.18, ease: [0.22, 1, 0.36, 1] }}
+            >
               <a className="btn" href="#features">Meet Aria ↓</a>
               <a className="btn ghost" href={DOWNLOAD} target="_blank" rel="noreferrer">Download</a>
             </motion.div>
+            {/* Animated scroll indicator */}
+            <motion.div
+              className="scrollIndicator"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 1.2, duration: 0.6 }}
+              aria-hidden="true"
+            >
+              <motion.span
+                className="scrollChevron"
+                animate={reduce ? {} : { y: [0, 6, 0] }}
+                transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
+              >
+                ↓
+              </motion.span>
+            </motion.div>
           </div>
-          <motion.div className="heroBlob"
+          <motion.div
+            className="heroBlob"
             initial={{ opacity: 0, scale: 0.72 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 1.2, ease: [0.22, 1, 0.36, 1], delay: 0.15 }}
-            style={{ scale: heroScale, y: heroY }}>
-            <Blob size={430} mood="idle" />
+            style={{ scale: heroScale, y: heroY }}
+          >
+            <div className="heroBlobGlow">
+              <Blob size={430} mood="idle" />
+            </div>
           </motion.div>
         </header>
       </div>
+
+      {/* ---------- MARQUEE ---------- */}
+      <Marquee />
 
       {/* ---------- 01.5 · THE FILM ---------- */}
       <section className="filmSec">
@@ -151,17 +272,20 @@ export default function App() {
             and get more done.</p>
           </Reveal>
           <div className="featRow">
-            {[
-              ["●", "Voice first", "Natural conversation — no commands to memorize."],
-              ["◐", "Context aware", "She sees the window, the selection, the field you're in."],
-              ["→", "Takes action", "Opens apps, clicks, types, sends — completes the task."],
-              ["○", "Private by default", "On-device wake word; your data stays on your Mac."],
-            ].map(([glyph, title, body], i) => (
-              <Reveal key={title} i={i} className="feat">
-                <span className="featIcon" aria-hidden="true">{glyph}</span>
+            {featureCards.map(({ glyph, title, body, iconClass }, i) => (
+              <motion.div
+                key={title}
+                className="feat"
+                initial={{ opacity: 0, y: reduce ? 0 : 40, scale: reduce ? 1 : 0.98 }}
+                whileInView={{ opacity: 1, y: 0, scale: 1 }}
+                viewport={{ once: true, margin: "-70px" }}
+                transition={{ duration: 0.8, delay: i * 0.09, ease: [0.22, 1, 0.36, 1] }}
+                whileHover={reduce ? {} : { y: -6 }}
+              >
+                <span className={`featIcon ${iconClass}`} aria-hidden="true">{glyph}</span>
                 <h4>{title}</h4>
                 <p>{body}</p>
-              </Reveal>
+              </motion.div>
             ))}
           </div>
         </div>
@@ -210,9 +334,11 @@ export default function App() {
             <Reveal i={3}><a className="btn ghost" href={DOWNLOAD} target="_blank" rel="noreferrer">Try speaking →</a></Reveal>
           </div>
           <Reveal i={2} className="voiceRingWrap" aria-hidden="true">
-            <motion.div className="voiceRing"
-              animate={reduce ? {} : { scale: [1, 1.035, 1] }}
-              transition={{ duration: 3.4, repeat: Infinity, ease: "easeInOut" }}>
+            <motion.div
+              className="voiceRing"
+              animate={reduce ? {} : { scale: [1, 1.06, 1] }}
+              transition={{ duration: 3.4, repeat: Infinity, ease: "easeInOut" }}
+            >
               <Blob size={64} mood="listening" />
             </motion.div>
           </Reveal>
@@ -268,7 +394,7 @@ export default function App() {
         </div>
       </section>
 
-      {/* ---------- 06 · INTELLIGENCE (V11) ---------- */}
+      {/* ---------- 06 · INTELLIGENCE ---------- */}
       <section id="intelligence">
         <div className="wrap cols">
           <div>
@@ -308,7 +434,7 @@ export default function App() {
                   </motion.div>
                 ))}
               </motion.div>
-              <span className="noteAll">Say “brief me”</span>
+              <span className="noteAll">Say "brief me"</span>
             </div>
           </Reveal>
         </div>
@@ -338,17 +464,49 @@ export default function App() {
         </div>
       </section>
 
-      {/* ---------- 08 · DOWNLOAD ---------- */}
+      {/* ---------- 08 · SETUP GUIDE ---------- */}
+      <section id="setup" className="setupSec">
+        <div className="wrap">
+          <Label n="08">Setup Guide</Label>
+          <Reveal i={1}><h2 className="display">Up and running<br />in 5 minutes.</h2></Reveal>
+          <Reveal i={2}>
+            <p className="body sub">A few one-time steps and Aria is yours.</p>
+          </Reveal>
+          <div className="setupGrid">
+            {setupSteps.map((step, i) => (
+              <motion.div
+                key={step.n}
+                className={`setupCard${step.n === "05" ? " setupCardFull" : ""}`}
+                initial={{ opacity: 0, y: reduce ? 0 : 40, scale: reduce ? 1 : 0.98 }}
+                whileInView={{ opacity: 1, y: 0, scale: 1 }}
+                viewport={{ once: true, margin: "-60px" }}
+                transition={{ duration: 0.8, delay: i * 0.1, ease: [0.22, 1, 0.36, 1] }}
+              >
+                <span className="setupN mono">{step.n}</span>
+                <h4 className="setupTitle">{step.title}</h4>
+                <p className="setupBody">{step.body}</p>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ---------- 09 · DOWNLOAD ---------- */}
       <section id="download" className="downloadSec">
         <div className="wrap cols">
           <div>
-            <Label n="08">Download</Label>
-            <Reveal i={1}><h2 className="display">Early access for<br />focused people.</h2></Reveal>
+            <Label n="09">Download</Label>
+            <Reveal i={1}><h2 className="display">Ready to try Aria.</h2></Reveal>
             <Reveal i={2}>
-              <p className="body sub">Aria is a launch candidate. Grab the build today — free,
-              open source — or leave your email for the polished release.</p>
+              <p className="body sub">Free to download. No account needed. Just your Mac and a free Gemini key.</p>
             </Reveal>
-            <Reveal i={3}><Waitlist /></Reveal>
+            <Reveal i={3}>
+              <a className="btn downloadBtn" href={DOWNLOAD} target="_blank" rel="noreferrer">Download for Mac ↓</a>
+            </Reveal>
+            <Reveal i={4}>
+              <p className="waitlistLabel">Or join the email list for launch updates:</p>
+              <Waitlist />
+            </Reveal>
           </div>
           <Reveal i={2} className="laptopWrap" aria-hidden="true">
             <div className="laptop">
@@ -359,71 +517,25 @@ export default function App() {
         </div>
       </section>
 
-      {/* ---------- 09 · BLOG ---------- */}
-      <section id="blog">
-        <div className="wrap cols">
-          <div>
-            <Label n="09">Blog</Label>
-            <Reveal i={1}><h2 className="display">Thoughts on design,<br />privacy, and the<br />future of computing.</h2></Reveal>
-            <Reveal i={2}><a className="btn ghost" href={GITHUB} target="_blank" rel="noreferrer">Visit the blog →</a></Reveal>
-          </div>
-          <div className="postCol">
-            {[
-              ["Why on-device AI is the future", "Jan 12, 2026"],
-              ["Designing technology that disappears", "Mar 08, 2026"],
-              ["Privacy isn't a feature. It's a foundation.", "Apr 02, 2026"],
-            ].map(([t, d], i) => (
-              <Reveal key={t} i={i} className="post">
-                <span className="postThumb" aria-hidden="true" />
-                <div><h4>{t}</h4><span className="mono postDate">{d}</span></div>
-              </Reveal>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ---------- 10 · ABOUT ---------- */}
-      <section id="about">
-        <div className="wrap cols">
-          <div>
-            <Label n="10">About</Label>
-            <Reveal i={1}><h2 className="display">About Aria</h2></Reveal>
-            <Reveal i={2}>
-              <p className="body sub">We're a small team building the next generation of
-              personal computing experiences. Aria is our first step.</p>
-            </Reveal>
-            <Reveal i={3}><a className="btn ghost" href={GITHUB} target="_blank" rel="noreferrer">Learn more about us →</a></Reveal>
-          </div>
-          <Reveal i={2} className="teamGrid" aria-hidden="true">
-            {[0, 1, 2, 3].map((i) => <div key={i} className="teamPhoto" />)}
-          </Reveal>
-        </div>
-      </section>
-
       {/* ---------- footer ---------- */}
       <footer>
         <div className="wrap footGrid">
-          <div>
+          <div className="footBrand">
             <div className="brand"><span className="dot" /> Aria</div>
+            <p className="footTagline">The assistant that lives on your Mac.</p>
           </div>
           <div>
-            <h5 className="mono">Product</h5>
+            <h5 className="mono footHeading">Product</h5>
             <a href={DOWNLOAD} target="_blank" rel="noreferrer">Download</a>
             <a href="#features">Features</a>
-            <a href="#download">Early access</a>
-          </div>
-          <div>
-            <h5 className="mono">Company</h5>
-            <a href="#about">About</a>
-            <a href="#blog">Blog</a>
-            <a href={`mailto:${CONTACT}`}>Contact</a>
+            <a href="#setup">Setup</a>
           </div>
           <div className="footMeta">
             <div className="social">
               <a href={GITHUB} target="_blank" rel="noreferrer">GitHub</a>
               <a href={`mailto:${CONTACT}`}>Email</a>
             </div>
-            <span>© 2026 Aria. All rights reserved.</span>
+            <span className="footCopy">© 2026 Aria</span>
           </div>
         </div>
       </footer>
