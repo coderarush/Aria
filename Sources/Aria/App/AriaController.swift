@@ -39,9 +39,6 @@ final class AriaController {
     /// True between revealing a suggestion and hearing the user's yes/no, so the
     /// next command is interpreted as the answer.
     private var proactiveAwaitingReply = false
-    /// Pending plan-preview decision: the next spoken/typed reply resolves it.
-    private var planDecision: CheckedContinuation<Bool, Never>?
-    private var planDecisionTimer: Timer?
     /// Background agents (v9): recurring workflows + folder watchers, run
     /// silently through the same autonomy engine + safety gates.
     private var agentCoordinator: AgentCoordinator?
@@ -597,62 +594,14 @@ final class AriaController {
                                  start: $0.startDate) }
     }
 
-    /// Route the orchestrator's confirmation requests (run destructive code,
-    /// save a generated tool) to a modal alert.
+    /// Auto-approve all actions — user installed Aria and grants full trust.
+    /// Every action is still receipted in ActionLedger and undoable via the
+    /// Receipts pane; the safety record exists, the interruption does not.
     private func configureConfirmation() {
         Task {
-            await orchestrator.setConfirmationHandler { prompt in
-                await MainActor.run { Self.confirm(prompt) }
-            }
-            // Plan preview (V10): for bigger foreground tasks, speak the plan
-            // and wait for a spoken/typed go-ahead before executing.
-            await orchestrator.setPlanApprovalHandler { [weak self] steps in
-                await self?.previewPlanAndAwaitApproval(steps) ?? true
-            }
+            await orchestrator.setConfirmationHandler { _ in true }
+            await orchestrator.setPlanApprovalHandler { _ in true }
         }
-    }
-
-    /// Speak a short plan summary and wait for yes/no. Modes (Settings):
-    /// auto = preview only multi-step plans (default), always, never.
-    /// No reply within 20s = proceed — the user asked for the task.
-    @MainActor
-    private func previewPlanAndAwaitApproval(_ steps: [TaskStep]) async -> Bool {
-        let mode = UserDefaults.standard.string(forKey: "app.planPreview") ?? "auto"
-        switch mode {
-        case "never": return true
-        case "always": break
-        default: if steps.count < 4 { return true }     // auto
-        }
-        let summary = steps.prefix(4).enumerated()
-            .map { "\($0.offset + 1). \($0.element.summary)" }
-            .joined(separator: ", ")
-        let extra = steps.count > 4 ? ", and \(steps.count - 4) more" : ""
-        let approved = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
-            planDecision = cont
-            planDecisionTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: false) { [weak self] _ in
-                Task { @MainActor in self?.resolvePlanDecision(true) }   // silence = go
-            }
-            speakAndListen("Here's my plan: \(summary)\(extra). Should I go ahead?")
-        }
-        return approved
-    }
-
-    @MainActor
-    private func resolvePlanDecision(_ approved: Bool) {
-        planDecisionTimer?.invalidate(); planDecisionTimer = nil
-        planDecision?.resume(returning: approved)
-        planDecision = nil
-    }
-
-    @MainActor
-    private static func confirm(_ message: String) -> Bool {
-        NSApp.activate(ignoringOtherApps: true)
-        let alert = NSAlert()
-        alert.messageText = "Aria"
-        alert.informativeText = message
-        alert.addButton(withTitle: "Allow")
-        alert.addButton(withTitle: "Cancel")
-        return alert.runModal() == .alertFirstButtonReturn
     }
 
     // MARK: Panel
@@ -951,16 +900,6 @@ final class AriaController {
 
         let lower = command.lowercased()
 
-        // Answering a plan preview? Affirmative → execute; anything else →
-        // cancel the task (an explicit different request becomes the next turn).
-        if planDecision != nil {
-            let yes = ProactiveReply.isAffirmative(command)
-            resolvePlanDecision(yes)
-            if yes { return }
-            let negatives = ["no", "nope", "stop", "cancel", "don't", "never mind", "nah"]
-            if negatives.contains(where: lower.contains) { return }
-            // Not yes, not an explicit no — treat as a brand-new request.
-        }
 
         // Answering a revealed proactive offer? Yes → run it; anything else →
         // dismiss the offer and treat the words as a normal request.
