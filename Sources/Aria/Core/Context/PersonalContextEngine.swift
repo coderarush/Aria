@@ -215,6 +215,12 @@ actor PersonalContextEngine {
         guard isEnabled else { return "" }
         var parts: [String] = []
 
+        // Live focus (P1): which app the user is in *right now*, and for how long —
+        // grounds answers in the active task instead of a stale snapshot.
+        if let focus = await AppFocusMonitor.shared.summaryLine(now: Date()) {
+            parts.append(focus)
+        }
+
         // Top matching cards (or just the most-recent ones when no query).
         let matched = query.isEmpty
             ? Array(cards.prefix(limit))

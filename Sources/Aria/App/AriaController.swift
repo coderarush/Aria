@@ -417,6 +417,9 @@ final class AriaController {
     }
 
     private func observeAppEvents() {
+        // P1: track which app the user is actually in, continuously — so context
+        // reflects live focus instead of a once-an-hour snapshot.
+        Task { await AppFocusMonitor.shared.start() }
         let nc = NSWorkspace.shared.notificationCenter
         nc.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { [weak self] note in
             guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
