@@ -604,14 +604,34 @@ final class AriaController {
                                  start: $0.startDate) }
     }
 
-    /// Auto-approve all actions — user installed Aria and grants full trust.
-    /// Every action is still receipted in ActionLedger and undoable via the
-    /// Receipts pane; the safety record exists, the interruption does not.
+    /// Confirm genuinely destructive actions before they run. The orchestrator
+    /// only routes important-irreversible actions (send / pay / delete / external
+    /// comms / raw shell) to this handler — everything reversible or routine still
+    /// runs without a prompt and is receipted + undoable as before. Users who want
+    /// the original zero-friction mode can opt out via `app.confirmDestructive`.
     private func configureConfirmation() {
         Task {
-            await orchestrator.setConfirmationHandler { _ in true }
+            await orchestrator.setConfirmationHandler { [weak self] prompt in
+                await self?.confirmDestructiveAction(prompt) ?? false
+            }
             await orchestrator.setPlanApprovalHandler { _ in true }
         }
+    }
+
+    /// Block on a native confirmation for a destructive action. The safe choice
+    /// (Cancel) is the default button, so a stray Return can't approve a send or
+    /// delete. Returns true only on a deliberate Approve click.
+    @MainActor
+    private func confirmDestructiveAction(_ prompt: String) async -> Bool {
+        guard ConfirmationPolicy.confirmsDestructive() else { return true }
+        let alert = NSAlert()
+        alert.messageText = "Confirm before Aria does this?"
+        alert.informativeText = prompt
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Cancel")    // default (Return / Esc) — the safe choice
+        alert.addButton(withTitle: "Approve")
+        NSApp.activate(ignoringOtherApps: true)
+        return alert.runModal() == .alertSecondButtonReturn
     }
 
     // MARK: Panel
