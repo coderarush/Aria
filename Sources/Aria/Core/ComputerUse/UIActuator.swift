@@ -60,6 +60,96 @@ enum UIActuator {
         CGEvent(mouseEventSource: src, mouseType: .leftMouseUp, mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
     }
 
+    /// Synthetic right-click (secondary button) at a point — pops the context menu.
+    static func rightClickAt(_ p: CGPoint) {
+        let src = CGEventSource(stateID: .hidSystemState)
+        CGEvent(mouseEventSource: src, mouseType: .rightMouseDown, mouseCursorPosition: p, mouseButton: .right)?.post(tap: .cghidEventTap)
+        CGEvent(mouseEventSource: src, mouseType: .rightMouseUp, mouseCursorPosition: p, mouseButton: .right)?.post(tap: .cghidEventTap)
+    }
+
+    /// Right-click a control by label to open its context menu. Tries the
+    /// Accessibility "show menu" action first (clean, no cursor jump), else
+    /// falls back to a synthetic right-click at the element's center.
+    static func rightClick(role: String?, label: String) -> Bool {
+        guard let el = AXReader.find(role: role, label: label) else { return false }
+        if AXUIElementPerformAction(el, kAXShowMenuAction as CFString) == .success { return true }
+        rightClickAt(center(of: el))
+        return true
+    }
+
+    // MARK: Menu-bar traversal (P4 — menus are 20-30% of Mac workflows)
+
+    /// Parse a human menu path ("Format > Font > Bold", "View → Zoom → In") into
+    /// its components, tolerating extra whitespace and stray separators.
+    static func menuPath(_ raw: String) -> [String] {
+        raw.split(whereSeparator: { $0 == ">" || $0 == "→" })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    /// Match a queried menu title against an actual item title, case-insensitively
+    /// and tolerating a trailing ellipsis ("Export…" matches "Export").
+    static func menuTitleMatches(itemTitle: String, query: String) -> Bool {
+        let t = itemTitle.lowercased().trimmingCharacters(in: .whitespaces)
+        let q = query.lowercased().trimmingCharacters(in: .whitespaces)
+        guard !t.isEmpty, !q.isEmpty else { return false }
+        if t == q { return true }
+        let stripped = t.replacingOccurrences(of: "…", with: "")
+            .replacingOccurrences(of: "...", with: "")
+            .trimmingCharacters(in: .whitespaces)
+        return stripped == q
+    }
+
+    /// Walk the frontmost app's menu bar along `components` and press the leaf.
+    /// e.g. menuPath("Format > Font > Bold"). Returns false if any step is missing.
+    static func clickMenuPath(_ components: [String]) -> Bool {
+        guard !components.isEmpty, let app = AXReader.frontmostTarget() else { return false }
+        let axApp = AXUIElementCreateApplication(app.processIdentifier)
+        var ref: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(axApp, kAXMenuBarAttribute as CFString, &ref) == .success,
+              let raw = ref, CFGetTypeID(raw) == AXUIElementGetTypeID() else { return false }
+        var container = raw as! AXUIElement
+        for (i, title) in components.enumerated() {
+            guard let item = menuItems(of: container).first(where: {
+                menuTitleMatches(itemTitle: axString($0, kAXTitleAttribute as String), query: title)
+            }) else { return false }
+            if i == components.count - 1 {
+                return AXUIElementPerformAction(item, kAXPressAction as CFString) == .success
+            }
+            // Open the submenu, then descend (its AXMenu child is flattened next round).
+            AXUIElementPerformAction(item, kAXPressAction as CFString)
+            container = item
+        }
+        return false
+    }
+
+    /// Children of a menu container, flattening a single AXMenu wrapper so a
+    /// menu-bar item's items and a submenu's items read uniformly.
+    private static func menuItems(of el: AXUIElement) -> [AXUIElement] {
+        var out: [AXUIElement] = []
+        for child in axChildren(el) {
+            if axString(child, kAXRoleAttribute as String) == "AXMenu" {
+                out.append(contentsOf: axChildren(child))
+            } else {
+                out.append(child)
+            }
+        }
+        return out
+    }
+
+    private static func axChildren(_ el: AXUIElement) -> [AXUIElement] {
+        var ref: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(el, kAXChildrenAttribute as CFString, &ref) == .success,
+              let arr = ref as? [AXUIElement] else { return [] }
+        return arr
+    }
+
+    private static func axString(_ el: AXUIElement, _ attr: String) -> String {
+        var ref: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(el, attr as CFString, &ref) == .success else { return "" }
+        return (ref as? String) ?? ""
+    }
+
     /// Scroll the area under the pointer (pixels; +dy scrolls down content up).
     static func scroll(dx: Int, dy: Int) {
         let src = CGEventSource(stateID: .hidSystemState)

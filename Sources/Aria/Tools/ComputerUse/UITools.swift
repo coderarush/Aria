@@ -93,6 +93,53 @@ struct UIScrollTool: AriaTool {
     }
 }
 
+/// Right-click a control to open its context menu.
+struct UIRightClickTool: AriaTool {
+    static let name = "ui_right_click"
+    static let description = "Right-click (secondary click) a control in the frontmost app by its visible label to open its context menu. Input: {label, role?}. Follow with ui_click to pick an item from the menu that appears."
+    static let paramHints: [String: String] = [
+        "label": "The control's visible text to right-click (e.g. a file name, a selection)",
+        "role": "Optional element role to disambiguate (e.g. AXRow)"
+    ]
+
+    func run(input: [String: String]) async throws -> ToolResult {
+        guard let label = input["label"], !label.isEmpty else { throw ToolError.missingInput("label") }
+        guard await MainActor.run(body: { AXReader.hasPermission }) else {
+            return .fail("Accessibility access is off — enable Aria in System Settings → Privacy & Security → Accessibility.")
+        }
+        let role = (input["role"]?.isEmpty == false) ? input["role"] : nil
+        let ok = await MainActor.run(body: {
+            NotificationCenter.default.post(name: .ariaUIActivity, object: nil)
+            return UIActuator.rightClick(role: role, label: label)
+        })
+        return ok ? .ok("Opened the context menu on “\(label)”. Call ui_read to see the menu items, then ui_click one.")
+                  : .fail("Couldn't find “\(label)” to right-click. Call ui_read to see the exact labels.")
+    }
+}
+
+/// Invoke a menu-bar command by path — the fast path for the ~30% of Mac
+/// workflows that live in menus rather than on-screen buttons.
+struct UIMenuTool: AriaTool {
+    static let name = "ui_menu"
+    static let description = "Invoke a menu-bar command in the frontmost app by path, e.g. \"Format > Font > Bold\" or \"File > Export…\". Walks the real menu bar and clicks the item — no need to ui_read first. Input: {path}."
+    static let paramHints: [String: String] = ["path": "Menu path separated by > , e.g. File > New Window"]
+
+    func run(input: [String: String]) async throws -> ToolResult {
+        guard let path = input["path"], !path.isEmpty else { throw ToolError.missingInput("path") }
+        guard await MainActor.run(body: { AXReader.hasPermission }) else {
+            return .fail("Accessibility access is off — enable Aria in System Settings → Privacy & Security → Accessibility.")
+        }
+        let components = UIActuator.menuPath(path)
+        guard !components.isEmpty else { return .fail("That doesn't look like a menu path. Try something like “File > Export”.") }
+        let ok = await MainActor.run(body: {
+            NotificationCenter.default.post(name: .ariaUIActivity, object: nil)
+            return UIActuator.clickMenuPath(components)
+        })
+        return ok ? .ok("Chose \(components.joined(separator: " → ")).")
+                  : .fail("Couldn't find the menu item “\(components.joined(separator: " → "))” in \(await MainActor.run(body: { AXReader.frontmostAppName() })). Check the exact menu names.")
+    }
+}
+
 /// Press a keyboard shortcut.
 struct UIKeyTool: AriaTool {
     static let name = "ui_key"

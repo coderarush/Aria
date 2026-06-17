@@ -81,6 +81,8 @@ actor ToolRegistry {
             TabContentTool(),
             UIReadTool(),
             UIClickTool(),
+            UIRightClickTool(),
+            UIMenuTool(),
             UITypeTool(),
             UIKeyTool(),
             UIScrollTool(),

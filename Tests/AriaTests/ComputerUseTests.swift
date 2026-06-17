@@ -37,6 +37,23 @@ final class ComputerUseTests: XCTestCase {
         XCTAssertTrue(s.contains("cats"))
     }
 
+    func testMenuPathParsing() {
+        XCTAssertEqual(UIActuator.menuPath("Format > Font > Bold"), ["Format", "Font", "Bold"])
+        XCTAssertEqual(UIActuator.menuPath("  File >  Export  "), ["File", "Export"])
+        XCTAssertEqual(UIActuator.menuPath("Bold"), ["Bold"])          // single leaf
+        XCTAssertEqual(UIActuator.menuPath("View → Zoom → In"), ["View", "Zoom", "In"])  // arrow too
+        XCTAssertEqual(UIActuator.menuPath("  >  "), [])               // empty segments dropped
+        XCTAssertEqual(UIActuator.menuPath(""), [])
+    }
+
+    func testMenuTitleMatchAllowsEllipsis() {
+        // Menu items often carry a trailing ellipsis ("Export…"); a plain query should still match.
+        XCTAssertTrue(UIActuator.menuTitleMatches(itemTitle: "Export…", query: "Export"))
+        XCTAssertTrue(UIActuator.menuTitleMatches(itemTitle: "Bold", query: "bold"))   // case-insensitive
+        XCTAssertFalse(UIActuator.menuTitleMatches(itemTitle: "Italic", query: "Bold"))
+        XCTAssertFalse(UIActuator.menuTitleMatches(itemTitle: "", query: "Bold"))
+    }
+
     func testKeyCombosResolve() {
         XCTAssertNotNil(UIActuator.keyCodes["s"])
         XCTAssertEqual(UIActuator.keyCodes["enter"], UIActuator.keyCodes["return"])
