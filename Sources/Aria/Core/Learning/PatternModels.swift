@@ -47,6 +47,20 @@ struct BehaviorPattern: Codable, Identifiable, Equatable {
     var lastFired: Date?
     var suggestionCount: Int    // how many times we've asked the user
 
+    /// Self-improvement loop (P12): outcome history of fired automations.
+    /// Optional so patterns.json written before this decodes unchanged (nil = 0).
+    var fireCount: Int?
+    var successCount: Int?
+
+    /// Fraction of fired automations that met their postcondition. Unknown
+    /// history is optimistic (1.0) so new automations aren't pre-emptively
+    /// blocked before they've had a chance to prove themselves.
+    var successRatio: Double {
+        let fired = fireCount ?? 0
+        guard fired > 0 else { return 1.0 }
+        return Double(successCount ?? 0) / Double(fired)
+    }
+
     init(id: UUID = UUID(),
          description: String,
          trigger: PatternTrigger,
@@ -56,7 +70,9 @@ struct BehaviorPattern: Codable, Identifiable, Equatable {
          status: PatternStatus = .observing,
          approvalMode: ApprovalMode? = nil,
          lastFired: Date? = nil,
-         suggestionCount: Int = 0) {
+         suggestionCount: Int = 0,
+         fireCount: Int? = nil,
+         successCount: Int? = nil) {
         self.id = id
         self.description = description
         self.trigger = trigger
@@ -67,6 +83,8 @@ struct BehaviorPattern: Codable, Identifiable, Equatable {
         self.approvalMode = approvalMode
         self.lastFired = lastFired
         self.suggestionCount = suggestionCount
+        self.fireCount = fireCount
+        self.successCount = successCount
     }
 }
 

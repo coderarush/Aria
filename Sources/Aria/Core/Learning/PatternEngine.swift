@@ -13,6 +13,9 @@ actor PatternEngine {
 
     static let observationGraceDays = 14
     private let minRefireInterval: TimeInterval = 3600  // 1h
+    /// Self-improvement loop (P12): how many fired outcomes to observe before
+    /// the success-ratio gate kicks in (don't judge an automation too early).
+    static let minOutcomeSamples = 3
 
     private let log: ObservationLog
     private let fileURL: URL
@@ -103,6 +106,10 @@ actor PatternEngine {
         for (idx, p) in patterns.enumerated() where p.status == .approved {
             guard PatternDetector.triggerMatches(p.trigger, now: now) else { continue }
             if let last = p.lastFired, now.timeIntervalSince(last) < minRefireInterval { continue }
+            // Self-improvement (P12): stop firing automations that, once they
+            // have a track record, keep failing — the difference between
+            // "feels like it learns" and "feels random".
+            if (p.fireCount ?? 0) >= Self.minOutcomeSamples && p.successRatio < 0.5 { continue }
             patterns[idx].lastFired = now
             firing.append(patterns[idx])
         }
@@ -119,6 +126,16 @@ actor PatternEngine {
 
     /// "Not yet": re-surface after 10 more occurrences (handled by status reset).
     func deferSuggestion(_ id: UUID) { mutate(id) { $0.status = .observing } }
+
+    /// Self-improvement loop (P12): record whether a fired automation actually
+    /// worked (met its postcondition / wasn't undone). Once enough samples
+    /// accumulate, `automationsToFire` stops firing automations that keep failing.
+    func recordOutcome(_ id: UUID, success: Bool) {
+        mutate(id) {
+            $0.fireCount = ($0.fireCount ?? 0) + 1
+            if success { $0.successCount = ($0.successCount ?? 0) + 1 }
+        }
+    }
 
     func delete(_ id: UUID) {
         patterns.removeAll { $0.id == id }

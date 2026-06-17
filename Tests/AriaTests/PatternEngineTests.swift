@@ -80,6 +80,67 @@ final class PatternEngineTests: XCTestCase {
         XCTAssertEqual(commands.first?.command, "new")
     }
 
+    // MARK: Self-improvement loop (P12) — outcome-gated automation firing
+
+    /// Build an approved time-of-day pattern that matches `fire`, via the real
+    /// detection pipeline (mirrors testApproveAndSuppressLifecycle).
+    private func makeApprovedPattern(fire: Date) async -> (PatternEngine, UUID) {
+        let engine = await makeEngine(observationStart: fire.addingTimeInterval(-20 * 24 * 3600))
+        for i in 0..<6 {
+            await engine.recordCommand("deploy site", at: fire.addingTimeInterval(Double(i) * 60))
+        }
+        _ = await engine.analyzePatterns(sensitivity: 0.7)
+        guard let p = await engine.allPatterns().first else {
+            XCTFail("no pattern detected"); return (engine, UUID())
+        }
+        await engine.approve(p.id, mode: .auto)
+        return (engine, p.id)
+    }
+
+    func testFailingAutomationStopsFiring() async {
+        let fire = Calendar.current.startOfDay(for: Date()).addingTimeInterval(10 * 3600)
+        let (engine, id) = await makeApprovedPattern(fire: fire)
+        // It fires while its track record is clean.
+        let firstRun = await engine.automationsToFire(now: fire)
+        XCTAssertEqual(firstRun.count, 1)
+        // Three consecutive failures push success ratio below 50%.
+        for _ in 0..<3 { await engine.recordOutcome(id, success: false) }
+        // Next eligible window (past the refire interval): it must NOT fire.
+        let later = fire.addingTimeInterval(7 * 24 * 3600)  // same weekday+time, past refire interval
+        let secondRun = await engine.automationsToFire(now: later)
+        XCTAssertTrue(secondRun.isEmpty, "a repeatedly-failing automation should stop firing")
+    }
+
+    func testHealthyAutomationKeepsFiring() async {
+        let fire = Calendar.current.startOfDay(for: Date()).addingTimeInterval(10 * 3600)
+        let (engine, id) = await makeApprovedPattern(fire: fire)
+        for _ in 0..<3 { await engine.recordOutcome(id, success: true) }
+        let later = fire.addingTimeInterval(7 * 24 * 3600)  // same weekday+time, past refire interval
+        let run = await engine.automationsToFire(now: later)
+        XCTAssertEqual(run.count, 1, "a succeeding automation should keep firing")
+    }
+
+    func testRecordOutcomeTracksSuccessRatio() async {
+        let fire = Calendar.current.startOfDay(for: Date()).addingTimeInterval(10 * 3600)
+        let (engine, id) = await makeApprovedPattern(fire: fire)
+        await engine.recordOutcome(id, success: true)
+        await engine.recordOutcome(id, success: false)
+        let p = await engine.allPatterns().first { $0.id == id }
+        XCTAssertEqual(p?.fireCount, 2)
+        XCTAssertEqual(p?.successCount, 1)
+        XCTAssertEqual(p?.successRatio ?? 0, 0.5, accuracy: 0.001)
+    }
+
+    func testUnprovenAutomationFiresOptimistically() async {
+        // Fewer than the sample threshold of failures: don't pre-emptively block.
+        let fire = Calendar.current.startOfDay(for: Date()).addingTimeInterval(10 * 3600)
+        let (engine, id) = await makeApprovedPattern(fire: fire)
+        await engine.recordOutcome(id, success: false)  // 1 sample only
+        let later = fire.addingTimeInterval(7 * 24 * 3600)  // same weekday+time, past refire interval
+        let run = await engine.automationsToFire(now: later)
+        XCTAssertEqual(run.count, 1, "below the sample threshold, fire optimistically")
+    }
+
     func testLearningSettingsDefaults() {
         let suite = UserDefaults(suiteName: "aria-brain-\(UUID().uuidString)")!
         let s = LearningSettings.load(suite)
