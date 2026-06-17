@@ -1,6 +1,26 @@
 import AppKit
 import Carbon.HIToolbox
 
+/// Detects a quick double-tap of the same trigger by timing successive taps.
+/// Pure and testable: feed it timestamps, it tells you when a pair completes.
+/// Consuming a pair resets state, so a triple-tap fires once (not twice).
+struct DoubleTapDetector {
+    let window: TimeInterval
+    private var lastTap: Date?
+
+    init(window: TimeInterval = 0.4) { self.window = window }
+
+    /// Register a tap; returns true exactly when it completes a double-tap.
+    mutating func registerTap(at time: Date = Date()) -> Bool {
+        if let last = lastTap, time.timeIntervalSince(last) <= window {
+            lastTap = nil            // consume the pair — next tap starts fresh
+            return true
+        }
+        lastTap = time
+        return false
+    }
+}
+
 /// Global hotkeys via a CGEvent tap — replaces the Carbon RegisterEventHotKey
 /// path (suspected of corrupting Swift concurrency executor state on macOS
 /// 26.3.x; the tap also consumes the keystroke so ⌥Space can't leak a space
@@ -17,20 +37,30 @@ final class HotkeyTap {
     private let onTalk: () -> Void
     private let onType: () -> Void
     private let onDictate: () -> Void
+    private let onQuickCapture: () -> Void
+
+    // Double-tap-modifier state. Touched only inside `handle`, which runs on the
+    // main run loop (the tap is added there), so this is single-threaded in practice.
+    nonisolated(unsafe) private var quickTap = DoubleTapDetector(window: 0.4)
+    nonisolated(unsafe) private var primaryHoldClean = false
+    nonisolated(unsafe) private var lastFlags: CGEventFlags = []
 
     init(onTalk: @escaping () -> Void,
          onType: @escaping () -> Void,
-         onDictate: @escaping () -> Void) {
+         onDictate: @escaping () -> Void,
+         onQuickCapture: @escaping () -> Void = {}) {
         self.onTalk = onTalk
         self.onType = onType
         self.onDictate = onDictate
+        self.onQuickCapture = onQuickCapture
     }
 
     /// True when the tap is live. False = no Accessibility trust (or tap denied).
     @discardableResult
     func start() -> Bool {
         stop()
-        let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
+        let mask = CGEventMask(1 << CGEventType.keyDown.rawValue
+                               | 1 << CGEventType.flagsChanged.rawValue)
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
@@ -72,7 +102,17 @@ final class HotkeyTap {
             }
             return Unmanaged.passUnretained(event)
         }
+        // Bare modifier double-tap (⌥⌥) → quick capture. We only OBSERVE
+        // flagsChanged and never consume it, so normal modifier use is untouched.
+        if type == .flagsChanged {
+            handleFlagsChanged(event)
+            return Unmanaged.passUnretained(event)
+        }
+
         guard type == .keyDown else { return Unmanaged.passUnretained(event) }
+        // Any real key press invalidates an in-progress bare-modifier hold, so
+        // ⌥Space (a combo) never counts as a bare ⌥ tap.
+        primaryHoldClean = false
         let code = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags
         let option = flags.contains(.maskAlternate)
@@ -104,6 +144,38 @@ final class HotkeyTap {
             }
         }
         return nil   // consume — no stray space reaches the focused app
+    }
+
+    /// Track press/release of the primary modifier alone and fire quick capture
+    /// on a clean double-tap. "Clean" = the primary modifier is the sole modifier
+    /// and no regular key was pressed during the hold.
+    private nonisolated func handleFlagsChanged(_ event: CGEvent) {
+        let flags = event.flags
+        let mainMods: CGEventFlags = [.maskCommand, .maskShift, .maskControl, .maskAlternate]
+        let wantControl = UserDefaults.standard.string(forKey: "app.hotkeyModifier") == "control"
+        let primaryMask: CGEventFlags = wantControl ? .maskControl : .maskAlternate
+
+        let wasPrimary = lastFlags.contains(primaryMask)
+        let nowPrimary = flags.contains(primaryMask)
+
+        if nowPrimary {
+            if !wasPrimary {
+                // press edge — clean only if the primary modifier is alone
+                primaryHoldClean = (flags.intersection(mainMods) == primaryMask)
+            } else if flags.intersection(mainMods) != primaryMask {
+                primaryHoldClean = false   // another modifier joined the hold
+            }
+        } else if wasPrimary {
+            // release edge
+            if primaryHoldClean, quickTap.registerTap(at: Date()) {
+                Task { @MainActor in
+                    Log.trace("hotkey: double-tap modifier → quick capture")
+                    self.onQuickCapture()
+                }
+            }
+            primaryHoldClean = false
+        }
+        lastFlags = flags
     }
 
     private func tapForReenable() -> CFMachPort? { tap }

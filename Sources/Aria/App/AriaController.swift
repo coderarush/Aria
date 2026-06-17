@@ -129,7 +129,8 @@ final class AriaController {
         hotkeyTap = HotkeyTap(
             onTalk: { [weak self] in self?.summonAria() },
             onType: { [weak self] in self?.showTypePanel() },
-            onDictate: { [weak self] in self?.startDictation() })
+            onDictate: { [weak self] in self?.startDictation() },
+            onQuickCapture: { [weak self] in self?.showTypePanel() })   // ⌥⌥ → command palette
         if hotkeyTap?.start() != true {
             // Accessibility not granted yet (or granted AFTER launch — taps
             // can't be created retroactively). Keep retrying so the user never
