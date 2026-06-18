@@ -26,7 +26,7 @@ enum BriefingComposer {
     /// stay valid).
     static func prompt(calendar: String, reminders: String, yesterdayWork: String,
                        recentDocs: String, projects: String = "", notes: String = "",
-                       date: Date) -> String {
+                       resume: String = "", date: Date) -> String {
         func section(_ s: String) -> String {
             s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "(none)" : s
         }
@@ -37,10 +37,14 @@ enum BriefingComposer {
         Style: calm, personal, premium — like a great chief of staff. Three short
         sections with these exact headers: "Today", "Carry-over", "Suggested focus".
         Under Today: the schedule and due reminders, with times. Under Carry-over:
-        what yesterday's work implies for today (done things need no action) and
-        which active project most needs attention. Under Suggested focus: ONE
-        concrete suggestion. Plain text, no markdown symbols, under 160 words
-        total. Never invent events, work, projects, or notes.
+        what yesterday's work implies for today (done things need no action), where
+        the user left off (see IN-PROGRESS), and which active project most needs
+        attention. Under Suggested focus: ONE concrete suggestion. Plain text, no
+        markdown symbols, under 160 words total. Never invent events, work,
+        projects, or notes.
+
+        IN-PROGRESS (where you left off — pick this up first if present):
+        \(section(resume))
 
         TODAY'S CALENDAR:
         \(section(calendar))
@@ -75,10 +79,12 @@ enum BriefingComposer {
             .map(\.title).joined(separator: ", ")
         let projects = await activeProjects()
         let notes = await recentNoteTitles()
+        // Session continuation (P3): the goal/next-step the user left mid-flight.
+        let resume = await SessionMemoryStore.shared.resumeDigest(now: now) ?? ""
 
         let p = prompt(calendar: calendarLines, reminders: reminderLines,
                        yesterdayWork: work, recentDocs: docs,
-                       projects: projects, notes: notes, date: now)
+                       projects: projects, notes: notes, resume: resume, date: now)
         do {
             let text = try await gemini.generateText(prompt: p, temperature: 0.4,
                                                      taskClass: .documentUnderstanding)

@@ -1184,6 +1184,16 @@ final class AriaController {
                         // Project memory: every finished task is recallable later.
                         Task { await WorkJournal.shared.record(kind: .task, title: goal,
                                                                outcome: summary, ok: ok) }
+                        // Session continuation (P3): remember where this work stands so
+                        // "continue yesterday" can resume it. A failed task leaves a
+                        // next-step to retry.
+                        Task {
+                            await SessionMemoryStore.shared.record(SessionSnapshot(
+                                project: ProjectTagger.infer(from: goal),
+                                goal: goal,
+                                progress: summary,
+                                nextStep: ok ? nil : "Retry: \(goal)"))
+                        }
                         self.streamVoice.enqueue(summary)
                         if !self.streamVoice.isSpeaking { self.streamVoice.onAllFinished?() }
                         let finishedGoal = goal

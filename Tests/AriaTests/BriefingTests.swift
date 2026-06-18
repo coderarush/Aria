@@ -47,6 +47,15 @@ final class BriefingTests: XCTestCase {
         XCTAssertTrue(p.contains("RECENT NOTES"))
     }
 
+    func testPromptIncludesSessionResume() {
+        let p = BriefingComposer.prompt(
+            calendar: "", reminders: "", yesterdayWork: "", recentDocs: "",
+            resume: "ship v12 — next: wire ContextCoordinator",
+            date: Date(timeIntervalSince1970: 1_750_000_000))
+        XCTAssertTrue(p.contains("IN-PROGRESS"))
+        XCTAssertTrue(p.contains("wire ContextCoordinator"))
+    }
+
     func testActiveProjectsDigestShowsLatestOutcome() async {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("journal-\(UUID().uuidString).json")
