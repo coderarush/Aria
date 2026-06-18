@@ -47,6 +47,20 @@ final class ContinueToolTests: XCTestCase {
         XCTAssertTrue(r.output.lowercased().contains("nothing in progress"))
     }
 
+    func testRecentDoesNotRepeatTitles() async throws {
+        let s = makeStores()
+        // A goal that is created AND advanced surfaces two events with the same
+        // title — the Recent list must not show it twice.
+        let g = await s.2.create(title: "Ship V12", project: "Aria", now: day)!
+        _ = await s.2.setNextAction(goalID: g.id, "notarize", now: day.addingTimeInterval(20))
+        let r = try await tool(s, now: day.addingTimeInterval(60)).run(input: [:])
+        let occurrences = r.output.components(separatedBy: "Ship V12").count - 1
+        // Once in the "Continue:" line, at most once more in Recent.
+        XCTAssertLessThanOrEqual(occurrences, 2)
+        let recentSection = r.output.components(separatedBy: "Recent:").last ?? ""
+        XCTAssertEqual(recentSection.components(separatedBy: "Ship V12").count - 1, 1)
+    }
+
     func testContinueListsRecentWork() async throws {
         let s = makeStores()
         _ = await s.2.create(title: "Goal", project: nil, now: day)

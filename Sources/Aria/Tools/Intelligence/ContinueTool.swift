@@ -24,7 +24,12 @@ struct ContinueTool: AriaTool {
         let project = input["project"]?.trimmingCharacters(in: .whitespaces)
         let at = now()
         let brief = await engine.resumeBrief(project: project?.isEmpty == false ? project : nil, now: at)
-        let recent = await engine.recent(3, now: at)
+        // Pull a few extra then collapse repeated titles (a goal created+advanced
+        // is two events but one line of news) so Recent stays spam-free.
+        var seen = Set<String>()
+        let recent = await engine.recent(6, now: at)
+            .filter { seen.insert($0.title.lowercased()).inserted }
+            .prefix(3)
         var out = brief
         if !recent.isEmpty {
             out += "\nRecent:\n" + recent.map { "  • \($0.title)" }.joined(separator: "\n")
