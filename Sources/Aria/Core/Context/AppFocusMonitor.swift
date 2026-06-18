@@ -43,8 +43,16 @@ actor AppFocusMonitor {
         }
         if let front = await MainActor.run(body: { NSWorkspace.shared.frontmostApplication }),
            front.bundleIdentifier != Bundle.main.bundleIdentifier {
-            noteActivation(appName: front.localizedName ?? "an app", bundleId: front.bundleIdentifier)
+            seedIfUnseen(appName: front.localizedName ?? "an app", bundleId: front.bundleIdentifier)
         }
+    }
+
+    /// Seed the initial focus only if nothing has been observed yet. The observer
+    /// is installed before this runs, so an activation that arrives during the
+    /// `await` in start() is strictly fresher and must not be clobbered.
+    func seedIfUnseen(appName: String, bundleId: String?, at date: Date = Date()) {
+        guard current == nil else { return }
+        noteActivation(appName: appName, bundleId: bundleId, at: date)
     }
 
     /// Record that `appName` gained focus. Re-activating the same app keeps the

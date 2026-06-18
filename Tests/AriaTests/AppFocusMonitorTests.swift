@@ -54,4 +54,23 @@ final class AppFocusMonitorTests: XCTestCase {
         let line = await m.summaryLine(now: Date())
         XCTAssertNil(line)
     }
+
+    func testStartupSeedDoesNotClobberFresherActivation() async {
+        // start() installs the observer before seeding the frontmost app. If a real
+        // switch lands during that window, the (older) seed must not overwrite it.
+        let m = AppFocusMonitor()
+        let t0 = Date()
+        await m.noteActivation(appName: "Mail", bundleId: "com.apple.mail", at: t0)  // arrived during await
+        await m.seedIfUnseen(appName: "Xcode", bundleId: "com.apple.dt.Xcode", at: t0.addingTimeInterval(-5))
+        let s = await m.snapshot()
+        XCTAssertEqual(s?.appName, "Mail", "fresher activation must survive the startup seed")
+        XCTAssertEqual(s?.since, t0)
+    }
+
+    func testSeedSetsFocusWhenNothingSeenYet() async {
+        let m = AppFocusMonitor()
+        await m.seedIfUnseen(appName: "Xcode", bundleId: "com.apple.dt.Xcode")
+        let s = await m.snapshot()
+        XCTAssertEqual(s?.appName, "Xcode")
+    }
 }
