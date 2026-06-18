@@ -30,7 +30,7 @@ struct FlashcardGenerator: Sendable {
 
         // Extract first [ to last ]
         guard let startIdx = raw.firstIndex(of: "["),
-              let endIdx = raw.lastIndex(of: "]") else {
+              let endIdx = raw.lastIndex(of: "]"), startIdx <= endIdx else {
             throw FlashcardError.parseFailure(raw: raw)
         }
         let jsonString = String(raw[startIdx...endIdx])

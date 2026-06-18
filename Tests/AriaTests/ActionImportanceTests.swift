@@ -14,6 +14,20 @@ final class ActionImportanceTests: XCTestCase {
     func testDeleteIsImportantIrreversible() {
         XCTAssertEqual(Safety.importance(tool: "delete_file", input: [:], summary: "delete the folder"), .importantIrreversible)
     }
+    // Regression: a reversible tool whose content/summary contains a danger word
+    // ("send") must stay .reversible and NOT trigger a spurious approval prompt.
+    func testReversibleToolWithDangerWordInSummaryStaysReversible() {
+        XCTAssertEqual(
+            Safety.importance(tool: "file_write",
+                              input: ["path": "~/notes.txt", "content": "remember to send the invoice"],
+                              summary: "file_write: path=~/notes.txt, content=remember to send the invoice"),
+            .reversible)
+        XCTAssertEqual(
+            Safety.importance(tool: "save_note",
+                              input: ["content": "delete the old draft and email Bob"],
+                              summary: "save_note: content=delete the old draft and email Bob"),
+            .reversible)
+    }
     func testOnlyImportantIrreversibleGates() {
         XCTAssertFalse(ActionImportance.routine.requiresApproval)
         XCTAssertFalse(ActionImportance.reversible.requiresApproval)

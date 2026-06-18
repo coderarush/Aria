@@ -110,6 +110,10 @@ enum KeychainManager {
     /// Remove the item for `account`. No-op if absent.
     @discardableResult
     static func delete(account: String) -> Bool {
+        // Evict the in-process cache too, or a later `read` would keep serving the
+        // deleted value (e.g. a user who clears their API key in Settings would have
+        // Aria keep using it until the next launch).
+        cacheLock.lock(); cache[account] = nil; cacheLock.unlock()
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

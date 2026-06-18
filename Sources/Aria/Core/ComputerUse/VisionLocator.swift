@@ -41,8 +41,8 @@ enum VisionLocator {
     /// 0.55 when the model omits it (a bare point is a guess we shouldn't over-trust).
     static func parseConfidence(_ raw: String) -> Double {
         let cleaned = GeminiClient.stripCodeFences(raw)
-        guard let start = cleaned.firstIndex(of: "{"), let end = cleaned.lastIndex(of: "}"),
-              let data = String(cleaned[start...end]).data(using: .utf8),
+        guard let sliced = JSONSlice.between(cleaned, open: "{", close: "}"),
+              let data = sliced.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let c = (obj["confidence"] as? NSNumber)?.doubleValue, (0...1).contains(c) else {
             return 0.55
@@ -53,8 +53,8 @@ enum VisionLocator {
     /// Parse {"x":..,"y":..} fractions; nil on {"found":false} or garbage.
     static func parseFraction(_ raw: String) -> CGPoint? {
         let cleaned = GeminiClient.stripCodeFences(raw)
-        guard let start = cleaned.firstIndex(of: "{"), let end = cleaned.lastIndex(of: "}"),
-              let data = String(cleaned[start...end]).data(using: .utf8),
+        guard let sliced = JSONSlice.between(cleaned, open: "{", close: "}"),
+              let data = sliced.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         if let found = obj["found"] as? Bool, !found { return nil }
         guard let x = (obj["x"] as? NSNumber)?.doubleValue, let y = (obj["y"] as? NSNumber)?.doubleValue,

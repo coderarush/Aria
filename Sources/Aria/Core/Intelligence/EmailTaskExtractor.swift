@@ -29,7 +29,7 @@ Emails:
 
         // Find JSON array in the response
         guard let startIdx = raw.firstIndex(of: "["),
-              let endIdx = raw.lastIndex(of: "]") else {
+              let endIdx = raw.lastIndex(of: "]"), startIdx <= endIdx else {
             throw EmailTaskError.parseFailure
         }
         let jsonString = String(raw[startIdx...endIdx])

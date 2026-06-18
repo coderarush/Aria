@@ -111,9 +111,8 @@ struct TaskPlannerAgent: SubAgent {
 
     static func parseActions(_ raw: String) -> [AgentAction]? {
         let cleaned = GeminiClient.stripCodeFences(raw)
-        guard let start = cleaned.firstIndex(of: "["),
-              let end = cleaned.lastIndex(of: "]"),
-              let data = String(cleaned[start...end]).data(using: .utf8),
+        guard let sliced = JSONSlice.between(cleaned, open: "[", close: "]"),
+              let data = sliced.data(using: .utf8),
               let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
         else { return nil }
         // Coerce input values to strings (the model sometimes emits numbers/bools),
@@ -207,8 +206,8 @@ struct PilotAgent: SubAgent {
 
     static func parse(_ raw: String) -> (tool: String, input: [String: String])? {
         let cleaned = GeminiClient.stripCodeFences(raw)
-        guard let start = cleaned.firstIndex(of: "{"), let end = cleaned.lastIndex(of: "}"),
-              let data = String(cleaned[start...end]).data(using: .utf8),
+        guard let sliced = JSONSlice.between(cleaned, open: "{", close: "}"),
+              let data = sliced.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let tool = obj["tool"] as? String else { return nil }
         let input = (obj["input"] as? [String: Any])?.reduce(into: [String: String]()) {

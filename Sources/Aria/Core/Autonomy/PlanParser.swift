@@ -5,9 +5,8 @@ import Foundation
 enum PlanParser {
     static func steps(fromJSON raw: String) -> [TaskStep] {
         let cleaned = GeminiClient.stripCodeFences(raw)
-        guard let start = cleaned.firstIndex(of: "["),
-              let end = cleaned.lastIndex(of: "]"),
-              let data = String(cleaned[start...end]).data(using: .utf8),
+        guard let sliced = JSONSlice.between(cleaned, open: "[", close: "]"),
+              let data = sliced.data(using: .utf8),
               let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
         else { return [] }
         return arr.compactMap { obj in

@@ -131,7 +131,7 @@ actor MeetingSession {
 
     private func parseMeetingJSON(_ raw: String, into finalNote: inout MeetingNotes) {
         guard let startIdx = raw.firstIndex(of: "{"),
-              let endIdx = raw.lastIndex(of: "}") else {
+              let endIdx = raw.lastIndex(of: "}"), startIdx <= endIdx else {
             finalNote.summary = "Meeting transcript saved. \(finalNote.segments.count) turns recorded."
             return
         }

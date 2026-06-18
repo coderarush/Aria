@@ -400,9 +400,8 @@ actor AutonomyEngine {
         let raw = (try? await gemini.generateText(prompt: prompt, temperature: 0.2,
                                                   preferredModel: ModelRouter.fastStructured)) ?? ""
         let cleaned = GeminiClient.stripCodeFences(raw)
-        guard let start = cleaned.firstIndex(of: "{"),
-              let end = cleaned.lastIndex(of: "}"),
-              let data = String(cleaned[start...end]).data(using: .utf8),
+        guard let sliced = JSONSlice.between(cleaned, open: "{", close: "}"),
+              let data = sliced.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let tool = obj["tool"] as? String, !tool.isEmpty
         else { return nil }

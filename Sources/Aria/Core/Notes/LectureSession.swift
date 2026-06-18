@@ -190,7 +190,7 @@ actor LectureSession {
 
     private func mergeOutlineUpdate(_ raw: String, into currentNote: inout LectureNote) {
         guard let startIdx = raw.firstIndex(of: "{"),
-              let endIdx = raw.lastIndex(of: "}") else { return }
+              let endIdx = raw.lastIndex(of: "}"), startIdx <= endIdx else { return }
 
         let jsonString = String(raw[startIdx...endIdx])
         guard let data = jsonString.data(using: .utf8),
@@ -221,7 +221,7 @@ actor LectureSession {
     @discardableResult
     private func parseFinalJSON(_ raw: String, into finalNote: inout LectureNote) -> String {
         guard let startIdx = raw.firstIndex(of: "{"),
-              let endIdx = raw.lastIndex(of: "}") else {
+              let endIdx = raw.lastIndex(of: "}"), startIdx <= endIdx else {
             return "Lecture transcript saved."
         }
 

@@ -64,8 +64,17 @@ enum Safety {
     /// reversible actions run free + receipted; only `.importantIrreversible` pauses.
     static func importance(tool: String, input: [String: String], summary: String) -> ActionImportance {
         if safeTools.contains(tool) { return .routine }
-        if importantTools.contains(tool) || isDestructive(summary: summary) { return .importantIrreversible }
+        // An explicitly important tool always gates — even if reversible-looking.
+        if importantTools.contains(tool) { return .importantIrreversible }
+        // A cleanly-reversible tool (file_write/clipboard/save_note) is undoable by
+        // definition, so it must NOT be promoted to importantIrreversible just
+        // because its content/summary happens to contain a danger word ("save note:
+        // remind me to SEND the invoice"). Classify it before the content-based
+        // summary gate, mirroring how connected reversible tools are exempted via
+        // safeTools above. (Bug: previously the summary gate ran first and forced a
+        // spurious approval prompt on harmless reversible actions.)
         if reversibleTools.contains(tool) { return .reversible }
+        if isDestructive(summary: summary) { return .importantIrreversible }
         if isDestructive(tool: tool, input: input) { return .importantIrreversible }
         return .routine
     }

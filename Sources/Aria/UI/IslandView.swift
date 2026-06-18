@@ -21,6 +21,11 @@ struct IslandView: View {
     @State private var showBurstParticles = false
     // 2f: State transition color flash
     @State private var flashIntensity: Double = 0
+    // Thinking split driven by real time, not SwiftUI animation.
+    // thinkingStartT: TimelineView `t` when thinking began (-1 = never)
+    // thinkingEndT:   TimelineView `t` when thinking ended (-1 = still thinking)
+    @State private var thinkingStartT: Double = -1
+    @State private var thinkingEndT:   Double = -1
 
     /// Reported up to the hosting panel so it can make ONLY the blob interactive.
     var onBlobFrameChange: ((CGRect?) -> Void)?
@@ -39,6 +44,42 @@ struct IslandView: View {
     private var palette: [Color] {
         let c = viewModel.glowColors.isEmpty ? [viewModel.accent, viewModel.accent] : viewModel.glowColors
         return c
+    }
+
+    /// Damped-spring position: x(elapsed) targeting `target`, starting from 0.
+    /// response ≈ period in seconds; damping < 1 = underdamped (overshoots).
+    /// With response=1.4, damping=0.38 the peak overshoot is ~25 % at t≈0.75 s.
+    static func spring(_ elapsed: Double, target: Double = 1.0,
+                       response: Double = 1.4, damping: Double = 0.38) -> Double {
+        guard elapsed > 0 else { return 0 }
+        let omega  = 2 * Double.pi / response
+        let zeta   = damping
+        let omegaD = omega * sqrt(max(1e-9, 1 - zeta * zeta))
+        let decay  = exp(-zeta * omega * elapsed)
+        return target * (1 - decay * (cos(omegaD * elapsed)
+                                      + (zeta * omega / omegaD) * sin(omegaD * elapsed)))
+    }
+
+    /// Compute thinkingSplit value [0…1+overshoot] from the shared clock.
+    /// Splitting:  spring 0→1 from thinkingStartT.
+    /// Rejoining:  spring 0→1 from thinkingEndT, then ts = 1 − that value.
+    func splitTS(at t: Double) -> Double {
+        guard thinkingStartT >= 0 else { return 0 }
+        if thinkingEndT < 0 {
+            // Still thinking: spring toward 1.
+            return Self.spring(t - thinkingStartT)
+        } else {
+            // Done thinking: spring from 1 back toward 0.
+            let ts = 1.0 - Self.spring(t - thinkingEndT)
+            // Once fully rejoined, reset so the orb section stops rendering.
+            if t - thinkingEndT > 3.0 && ts < 0.01 {
+                DispatchQueue.main.async {
+                    self.thinkingStartT = -1
+                    self.thinkingEndT   = -1
+                }
+            }
+            return ts
+        }
     }
 
     /// A synthetic speech envelope (~0…1) so the blob breathes while she talks.
@@ -82,12 +123,29 @@ struct IslandView: View {
             .overlay(alignment: .bottom) { caption }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onChange(of: viewModel.state) { _, _ in
+        .onChange(of: viewModel.state) { _, state in
             pulse = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.34) { pulse = false }
             // 2f: Flash the blob white briefly on every state transition.
             flashIntensity = 0.4
             withAnimation(.easeOut(duration: 0.35)) { flashIntensity = 0 }
+            // Orb split driven by real clock (TimelineView `t`), not SwiftUI animation.
+            // We record the timestamp of each transition; blobBody computes the
+            // spring value from elapsed time so it's guaranteed smooth every frame.
+            let wasThinking = thinkingStartT >= 0 && thinkingEndT < 0
+            if state == .thinking {
+                // Mark thinking start using wall clock (same epoch as TimelineView t).
+                thinkingStartT = Date().timeIntervalSinceReferenceDate
+                thinkingEndT   = -1
+            } else if wasThinking {
+                thinkingEndT = Date().timeIntervalSinceReferenceDate
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    flashIntensity = 0.6
+                    withAnimation(.easeOut(duration: 0.45)) { flashIntensity = 0 }
+                    showBurstParticles = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { showBurstParticles = false }
+                }
+            }
         }
         .onChange(of: choreographer.kind) { _, kind in
             // The blob is only draggable when fully settled; the instant she
@@ -137,28 +195,11 @@ struct IslandView: View {
 
     @ViewBuilder
     private func presenceContent(t: Double, size: CGSize) -> some View {
-        let borderIntensity = choreographer.borderIntensity(at: t)
         ZStack {
-            // The screen-edge glow (listening / executing / transitions). Shares
-            // the one clock — `t` — so there's no second TimelineView to drift.
-            // Boost intensity by audio level while listening so the border pulses
-            // with the user's voice — the audio-reactive effect lives here, not
-            // as a separate ring around the blob.
-            let audioBoost = viewModel.state == .listening
-                ? Double(viewModel.audioLevel) * 0.55
-                : 0
-            if borderIntensity + audioBoost > 0.001 {
-                ScreenBorderView(t: t, palette: palette,
-                                 intensity: min(borderIntensity + audioBoost, 1.0),
-                                 sweepPhase: choreographer.borderSweep(at: t))
-            }
-            // The gather: light streaming from the edge into the blob as she pools.
-            if let cp = choreographer.consolidateProgress(at: t) {
-                EdgeGatherView(palette: palette, progress: cp, center: restingCenter(in: size))
-            }
-            // The blob (thinking / answering / suggestion / pooling / splashing).
+            // The blob — always the primary presence; fades in on blobIn, out on dismiss.
             if choreographer.showsBlob {
                 blobBody(t: t)
+                    .opacity(choreographer.blobOpacity(at: t))
                     .background(blobFrameReporter(size: size))
                     .position(blobPosition(in: size, t: t))
                     .allowsHitTesting(choreographer.kind == .blob)
@@ -196,6 +237,56 @@ struct IslandView: View {
         let gx = 0.38 + 0.05 * sin(t * 0.5)
         let gy = 0.30 + 0.04 * cos(t * 0.42)
 
+        // ── Split animation ────────────────────────────────────────────────────────────
+        // `ts` is computed from the real clock (same `t` as TimelineView), NOT from
+        // SwiftUI animation — so it's guaranteed to interpolate smoothly every frame.
+        // Splitting overshoot (ts > 1): orbs slingshot past orbit then pull back.
+        // Rejoining overshoot (ts < 0): blob SPLATS to > 100 % scale then settles.
+        let ts = splitTS(at: t)
+
+        // Blob deform/dissolve timeline.
+        // deformT: 0→1 as ts goes 0.18→1.0 (blob holds full until 0.18, then deforms).
+        let blobDelay   = 0.18
+        let deformT     = max(0.0, min(1.0, (ts - blobDelay) / (1.0 - blobDelay)))
+        // Blob doesn't START shrinking until it has already stretched (deformT≥0.30),
+        // and it shrinks FAST after that → big overlap window where blob+orbs coexist.
+        let blobShrinkT = max(0.0, (deformT - 0.30) / 0.70)        // 0→1 as deformT 0.30→1.0
+        // blobSF: 1→0 while splitting. On rejoin overshoot (ts<0) it pops well above 1 → SPLAT.
+        let blobSF      = max(0.0, 1.0 - blobShrinkT) + max(0.0, -ts) * 1.2
+        // Alpha lingers (sqrt-ish) so the deformed blob stays visible deep into the split.
+        let blobAlpha   = max(0.0, 1.0 - blobShrinkT * blobShrinkT)
+
+        // Taffy stretch: peaks mid-deform (deformT≈0.5) — wide + flat right as orbs tear out.
+        let squishAmt   = sin(min(1.0, deformT) * .pi) * 0.50      // up to 50 %
+        let splitSX     = 1.0 + squishAmt * 0.85                   // horizontal stretch (≤1.43×)
+        let splitSY     = 1.0 - squishAmt * 0.75                   // vertical squeeze (≥0.62×)
+
+        // Orbs: present from ts≈0.12, sitting on the blob's surface, then flung outward.
+        // orbsT drives orb size + spread. normTs is the clamped [0,1] orbit progress.
+        let orbsT       = max(0.0, (ts - 0.12) / 0.88)             // 0→1+ as ts 0.12→1
+        let normTs      = min(1.0, orbsT)
+
+        // Detect split vs rejoin so orbits behave differently each direction.
+        let rejoining   = thinkingEndT >= 0
+        let maxOrbit    = 58.0                                       // tight cluster
+
+        // Split: orbs emerge from blob skin (50 px) and spread to maxOrbit.
+        // Rejoin: orbs converge all the way to CENTER (0 px) so blob grows from them.
+        //         Spring overshoot (ts < 0) clamps to 0 — blob pops over the converged orbs.
+        let orbitR: Double
+        if rejoining {
+            orbitR = max(0.0, ts) * maxOrbit                        // 58 → 0 px as ts: 1 → 0
+        } else {
+            let spreadEase = orbsT * orbsT * (3.0 - 2.0 * orbsT)   // smoothstep
+            orbitR = 50.0 + max(0.0, spreadEase) * 8.0             // 50 → 58+ px
+        }
+
+        // Elongation during rejoin: orbs stretch radially toward center as they fall in.
+        // "Sucked into a vortex" look. 0 = round, 1 = elongated toward center.
+        let convergeT   = rejoining ? max(0.0, 1.0 - ts * 2.0) : 0.0  // ramps up as ts drops below 0.5
+        let tangElong   = max(0.0, (normTs - 0.50) / 0.50)         // 0→1 as normTs 0.50→1.0
+        // ─────────────────────────────────────────────────────────────────────────────────
+
         return ZStack {
             BlobShape(radii: radii)
                 .fill(LinearGradient(colors: [c0, c1], startPoint: .topLeading, endPoint: .bottomTrailing))
@@ -217,24 +308,85 @@ struct IslandView: View {
                         .blendMode(.plusLighter)
                 )
                 .frame(width: 150, height: 150)
-                .scaleEffect(x: envScale, y: envScale * squash)
-                .scaleEffect(combinedScale)
+                // splitSX/splitSY: horizontal stretch + vertical squeeze at mid-transition.
+                // blobSF: 1→0 while splitting; overshoots above 1.0 on rejoin = satisfying pop.
+                .scaleEffect(x: envScale * splitSX, y: envScale * squash * splitSY)
+                .scaleEffect(combinedScale * blobSF)
+                .opacity(blobAlpha)
                 .shadow(color: .black.opacity(0.22), radius: 10, y: 7)
                 .shadow(color: c0.opacity(0.28 + (suggesting ? 0.25 * breathe : 0)),
                         radius: 16 + (suggesting ? 10 * breathe : 0))
 
-            // 2c: Rotating shimmer ring while thinking.
-            if thinking {
+            // Orbs are PULLED OUT of the blob's surface as it tears apart.
+            // They appear at the skin (orbitR≈65 px) the instant the split begins, so the
+            // eye reads "blob → pulled into orbs", never a teleport from center.
+            if ts > 0.04 || rejoining {
+                // Nucleus glow: dims while orbs orbit, blazes bright as they converge.
+                // On rejoin the glow swells to signal "they're coming back" before blob pops.
+                let nucleusOrbit  = min(1.0, orbsT * 2.0)
+                let nucleusRejoin = rejoining ? max(0.0, 1.0 - ts) : 0.0  // 0→1 as ts: 1→0
+                let nucleusAlpha  = max(nucleusOrbit * 0.5, nucleusRejoin * 0.9)
+                let nucleusR      = 28.0 + nucleusRejoin * 18.0            // swells on rejoin
                 Circle()
-                    .stroke(
-                        AngularGradient(colors: [.clear, (palette.first ?? .purple).opacity(0.6), .clear],
-                                       center: .center),
-                        lineWidth: 2
-                    )
-                    .frame(width: 170, height: 170)
-                    .rotationEffect(.degrees(t * 120))
-                    .opacity(0.7)
-                    .blendMode(.plusLighter)
+                    .fill(RadialGradient(colors: [c0.opacity(0.70), .clear],
+                                         center: .center, startRadius: 0, endRadius: nucleusR))
+                    .frame(width: nucleusR * 2 + 12, height: nucleusR * 2 + 12)
+                    .opacity(nucleusAlpha)
+                    .blur(radius: 8)
+
+                let orbCount = 12
+                ForEach(0..<orbCount, id: \.self) { i in
+                    let fi          = Double(i)
+                    let baseAngle   = 2.0 * .pi * fi / Double(orbCount)
+
+                    // Each orb has a slightly different angular speed — liquid drift.
+                    let speedMult   = 1.0 + 0.07 * sin(fi * 1.37)
+                    let angle       = baseAngle + t * 2.0 * speedMult
+
+                    // Radial wobble suppressed during rejoin so convergence reads clean.
+                    let wobble      = (rejoining ? 0.3 : 1.0) * sin(t * 1.1 + fi * 0.93) * 4.0
+                    let r           = max(0.0, orbitR + wobble)
+                    let dx          = cos(angle) * r
+                    let dy          = sin(angle) * r
+
+                    // Size: during rejoin, shrink proportionally as they converge (not fade).
+                    let sizeT       = min(1.0, orbsT / 0.50)
+                    let rejoinShrink = rejoining ? max(0.4, ts) : 1.0  // shrink toward 0.4× as they land
+                    let sizeVar     = 0.88 + 0.12 * sin(fi * 0.72)
+                    let breathPulse = 0.90 + 0.10 * sin(t * 2.3 + fi * 1.1)
+                    let d           = 20.0 * sizeT * rejoinShrink * sizeVar * breathPulse
+
+                    // Elongation: whisper of tangential during orbit; radial pull-in during rejoin.
+                    // convergeT ramps up as orbs fall toward center → stretch toward center.
+                    let elongFactor = 1.0 + tangElong * 0.07 + convergeT * 0.45
+                    // Rotation: tangential during orbit; switch to radial-inward during convergence.
+                    let radialInward = angle * (180.0 / .pi)           // points outward (+180 = inward)
+                    let tangential   = radialInward + 90.0
+                    let rotDeg       = tangential + convergeT * 90.0   // blend to inward radial
+
+                    // Opacity: shimmer while orbiting; stay solid during convergence.
+                    let shimmer     = rejoining
+                        ? min(1.0, ts * 1.5 + 0.3)                    // solid as they rush in
+                        : 0.80 + 0.20 * sin(t * 1.7 + fi * 0.8)
+
+                    Circle()
+                        .fill(LinearGradient(colors: [c0, c1],
+                                             startPoint: .topLeading,
+                                             endPoint: .bottomTrailing))
+                        .overlay(
+                            Circle()
+                                .fill(RadialGradient(colors: [.white.opacity(0.50), .clear],
+                                                     center: .init(x: 0.32, y: 0.28),
+                                                     startRadius: 0,
+                                                     endRadius: d / 2))
+                        )
+                        .frame(width: d, height: d)
+                        .scaleEffect(x: elongFactor, y: 1.0 / elongFactor)
+                        .rotationEffect(.degrees(rotDeg))
+                        .shadow(color: c0.opacity(0.65 * min(1.0, orbsT * 2.0)), radius: 8)
+                        .offset(x: dx, y: dy)
+                        .opacity(min(1.0, orbsT * 3.0) * shimmer)
+                }
             }
 
             // 2b: Burst particles on blob entrance.
