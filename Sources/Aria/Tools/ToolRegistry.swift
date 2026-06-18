@@ -78,6 +78,7 @@ actor ToolRegistry {
             MemoryGraphTool(),
             StatusTool(),
             ArtifactTool(),
+            DailyReviewTool(),
             RecallTool(),
             RememberEntityTool(),
             WhoIsTool(),
