@@ -30,3 +30,8 @@ video/out/
 # Local agent worktrees / tooling
 .claude/
 .worktrees/
+.agents/
+skills-lock.json
+
+# Built distributable (output of `make dmg`)
+*.dmg
