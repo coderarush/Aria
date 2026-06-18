@@ -69,6 +69,10 @@ actor AgentOrchestrator {
             var transcript = command
             var turnScreenshot = screenshot
             var lastMessage = ""
+            // Real execution outcome (not the model's narration): set when any
+            // action step fails or is declined, so the learning loop records the
+            // truth. See AriaResponse.succeeded / turnSucceeded.
+            var executionFailed = false
 
             for step in 0..<maxSteps {
                 Log.trace("orchestrator: step \(step) — sending to Gemini")
@@ -83,8 +87,10 @@ actor AgentOrchestrator {
 
                 switch response.type {
                 case .answer, .clarify:
-                    await record(command: command, response: response)
-                    return response
+                    var out = response
+                    out.succeeded = AriaResponse.turnSucceeded(type: response.type, executionFailed: executionFailed)
+                    await record(command: command, response: out)
+                    return out
 
                 case .action, .multiAction:
                     var results = ""
@@ -95,7 +101,7 @@ actor AgentOrchestrator {
                         results += "\n- \(action.tool): \(line)"
                         Log.trace("orchestrator: step \(step) \(action.tool) success=\(r.success)")
                         priorOutput = r.output
-                        if !r.success { break }
+                        if !r.success { executionFailed = true; break }
                     }
                     // Feed results back so the model decides the next step or the
                     // final spoken answer.
@@ -112,20 +118,23 @@ actor AgentOrchestrator {
                 }
             }
 
+            // Ran out of steps without a final answer — did not complete.
             let capped = AriaResponse(
                 type: .answer,
                 message: lastMessage.isEmpty ? "I wasn't able to finish that one." : lastMessage,
-                confidence: 1.0)
+                confidence: 1.0, succeeded: false)
             await record(command: command, response: capped)
             return capped
 
         } catch GeminiClient.GeminiError.missingAPIKey {
             return AriaResponse(type: .answer,
-                message: "I don't have a Gemini API key yet. Add one in Settings.", confidence: 1.0)
+                message: "I don't have a Gemini API key yet. Add one in Settings.",
+                confidence: 1.0, succeeded: false)
         } catch {
             Log.agent.error("Gemini request failed: \(error.localizedDescription)")
             return AriaResponse(type: .answer,
-                message: "Something went wrong reaching my brain. Try again in a moment.", confidence: 0.0)
+                message: "Something went wrong reaching my brain. Try again in a moment.",
+                confidence: 0.0, succeeded: false)
         }
     }
 

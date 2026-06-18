@@ -16,16 +16,31 @@ struct AriaResponse: Codable, Equatable {
     let actions: [AgentAction]
     let followup: String?
 
+    /// Whether the turn actually completed — set by the orchestrator from the
+    /// real execution outcome, NOT reported by the model. Transient (never
+    /// encoded): a decoded model response defaults to true and the orchestrator
+    /// overrides it on a failed/declined/capped turn. Used by the learning loop
+    /// so a failing automation is recorded as a failure (see PatternEngine).
+    var succeeded: Bool = true
+
     init(type: Kind,
          message: String,
          confidence: Double = 1.0,
          actions: [AgentAction] = [],
-         followup: String? = nil) {
+         followup: String? = nil,
+         succeeded: Bool = true) {
         self.type = type
         self.message = message
         self.confidence = confidence
         self.actions = actions
         self.followup = followup
+        self.succeeded = succeeded
+    }
+
+    /// A turn succeeds only when it completed: a clarify (needs the user) or a
+    /// turn whose action failed or was declined did not.
+    static func turnSucceeded(type: Kind, executionFailed: Bool) -> Bool {
+        type != .clarify && !executionFailed
     }
 
     private enum CodingKeys: String, CodingKey {

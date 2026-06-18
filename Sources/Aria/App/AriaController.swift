@@ -445,12 +445,11 @@ final class AriaController {
                 playChime(.thinking)
                 let response = await orchestrator.handle(command: command)
                 islandViewModel.showResponse("⚡️ " + response.message)
-                // Self-improvement loop (P12): feed the outcome back so an
-                // automation that keeps failing stops auto-firing. Conservative
-                // signal — the orchestrator only surfaces failure as a 0-confidence
-                // error or a clarify; everything else counts as "it ran".
-                let succeeded = response.confidence > 0 && response.type != .clarify
-                await patternEngine.recordOutcome(pattern.id, success: succeeded)
+                // Self-improvement loop (P12): feed the REAL execution outcome back
+                // (response.succeeded — set by the orchestrator from whether the
+                // action actually completed, not the model's narration) so an
+                // automation that keeps failing or gets declined stops auto-firing.
+                await patternEngine.recordOutcome(pattern.id, success: response.succeeded)
             }
         }
     }
