@@ -24,4 +24,30 @@ final class ConfirmationPolicyTests: XCTestCase {
         d.set(false, forKey: "app.confirmDestructive")
         XCTAssertFalse(ConfirmationPolicy.confirmsDestructive(d))
     }
+
+    func testDecisionAutoApprovesWhenConfirmationOff() {
+        XCTAssertEqual(
+            ConfirmationPolicy.decision(confirmsDestructive: false, unattended: false, alreadyConfirming: false),
+            .autoApprove)
+    }
+
+    func testDecisionDeclinesUnattended() {
+        // No user present → never present a blocking modal; decline outright.
+        XCTAssertEqual(
+            ConfirmationPolicy.decision(confirmsDestructive: true, unattended: true, alreadyConfirming: false),
+            .decline)
+    }
+
+    func testDecisionDeclinesReentrantConfirmation() {
+        // A second confirmation while one is open must not stack.
+        XCTAssertEqual(
+            ConfirmationPolicy.decision(confirmsDestructive: true, unattended: false, alreadyConfirming: true),
+            .decline)
+    }
+
+    func testDecisionPromptsAttendedFirstTime() {
+        XCTAssertEqual(
+            ConfirmationPolicy.decision(confirmsDestructive: true, unattended: false, alreadyConfirming: false),
+            .prompt)
+    }
 }

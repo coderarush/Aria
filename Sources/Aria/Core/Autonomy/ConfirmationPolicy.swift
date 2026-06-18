@@ -15,4 +15,22 @@ enum ConfirmationPolicy {
     static func confirmsDestructive(_ defaults: UserDefaults = .standard) -> Bool {
         (defaults.object(forKey: key) as? Bool) ?? true
     }
+
+    /// What to do when an important-irreversible action reaches the handler.
+    enum ConfirmDecision { case autoApprove, decline, prompt }
+
+    /// Decide without touching UI, so it's testable. Order matters:
+    /// - confirmation off  → auto-approve (power-user zero-friction mode)
+    /// - unattended        → decline (never block on a modal nobody will answer;
+    ///                        an important-irreversible action must not auto-fire)
+    /// - already confirming → decline (don't stack modals re-entrantly)
+    /// - otherwise         → prompt the user
+    static func decision(confirmsDestructive: Bool,
+                         unattended: Bool,
+                         alreadyConfirming: Bool) -> ConfirmDecision {
+        guard confirmsDestructive else { return .autoApprove }
+        if unattended { return .decline }
+        if alreadyConfirming { return .decline }
+        return .prompt
+    }
 }

@@ -49,6 +49,13 @@ final class AriaController {
     /// Set by startDictation(); the next captured transcript is inserted as text
     /// rather than handled as a command. Reset the instant it's consumed.
     private var dictationPending = false
+    /// True while a command is running with no user present (proactive auto-act,
+    /// learning-cycle automation). A destructive confirmation during an unattended
+    /// run is declined rather than blocking on a modal nobody will answer.
+    private var unattendedActive = false
+    /// True while a destructive-confirmation modal is open, so a second one can't
+    /// stack re-entrantly through the run-loop the modal pumps.
+    private var isConfirming = false
     /// Delivers system notifications for Aria-level events (agent completion, etc.).
     let notificationBridge = NotificationBridge.shared
     private var settingsCancellable: AnyCancellable?
@@ -443,7 +450,11 @@ final class AriaController {
                 Log.app.info("Firing automation: \(command, privacy: .public)")
                 islandViewModel.beginThinking()
                 playChime(.thinking)
+                // Unattended automation: decline destructive confirmations rather
+                // than block on a modal (restored to false after the turn).
+                unattendedActive = true
                 let response = await orchestrator.handle(command: command)
+                unattendedActive = false
                 islandViewModel.showResponse("⚡️ " + response.message)
                 // Self-improvement loop (P12): feed the REAL execution outcome back
                 // (response.succeeded — set by the orchestrator from whether the
@@ -505,7 +516,9 @@ final class AriaController {
             Log.trace("proactive: auto-acting on \(suggestion.dedupeKey)")
             await engine.record(.accepted, for: suggestion, now: Date())
             Notifier.notify(title: "Aria", body: "\(suggestion.spokenLine) — say “undo” to revert.")
-            runProactiveCommand(cmd)
+            // Unattended: a destructive action the model expands to here is
+            // declined, never run silently (see confirmDestructiveAction).
+            handleCommand(cmd, unattended: true)
             return
         }
         presenter.present(suggestion)
@@ -617,12 +630,23 @@ final class AriaController {
         }
     }
 
-    /// Block on a native confirmation for a destructive action. The safe choice
-    /// (Cancel) is the default button, so a stray Return can't approve a send or
-    /// delete. Returns true only on a deliberate Approve click.
+    /// Decide a destructive-action confirmation. Unattended runs are declined (an
+    /// important-irreversible action must never auto-fire with nobody there), and
+    /// a second confirmation while one is open is declined rather than stacked.
+    /// Only an attended, first-in-flight request presents the modal — where the
+    /// safe choice (Cancel) is the default button so a stray Return can't approve.
     @MainActor
     private func confirmDestructiveAction(_ prompt: String) async -> Bool {
-        guard ConfirmationPolicy.confirmsDestructive() else { return true }
+        switch ConfirmationPolicy.decision(confirmsDestructive: ConfirmationPolicy.confirmsDestructive(),
+                                           unattended: unattendedActive,
+                                           alreadyConfirming: isConfirming) {
+        case .autoApprove: return true
+        case .decline:     return false
+        case .prompt:      break
+        }
+        isConfirming = true
+        hotkeyTap?.setEnabled(false)            // freeze hotkeys for the modal's duration
+        defer { isConfirming = false; hotkeyTap?.setEnabled(true) }
         let alert = NSAlert()
         alert.messageText = "Confirm before Aria does this?"
         alert.informativeText = prompt
@@ -901,7 +925,11 @@ final class AriaController {
 
     // MARK: Command handling
 
-    private func handleCommand(_ command: String) {
+    private func handleCommand(_ command: String, unattended: Bool = false) {
+        // Track whether a user is present for this command, so a destructive
+        // confirmation during an unattended (proactive/auto) run is declined
+        // rather than blocking on a modal. User-initiated commands default false.
+        unattendedActive = unattended
         // Dictation divert: these words are output, not a command — clean them and
         // type them into whatever the user is focused on, then tear the turn down
         // cleanly (re-arms wake; never leaves her deaf).

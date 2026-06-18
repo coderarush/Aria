@@ -85,6 +85,13 @@ final class HotkeyTap {
         return true
     }
 
+    /// Temporarily enable/disable the live tap without tearing it down — used to
+    /// freeze hotkeys while a blocking confirmation modal is open so a keystroke
+    /// can't summon a second command on top of it.
+    func setEnabled(_ on: Bool) {
+        if let tap { CGEvent.tapEnable(tap: tap, enable: on) }
+    }
+
     func stop() {
         if let tap { CGEvent.tapEnable(tap: tap, enable: false) }
         if let runLoopSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes) }
