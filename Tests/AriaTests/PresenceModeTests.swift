@@ -12,16 +12,17 @@ final class PresenceModeTests: XCTestCase {
         XCTAssertEqual(PresenceMode.from(state: .idle, visible: true, hasSuggestion: true), .blob)
     }
 
-    func testListeningIsBorder() {
-        XCTAssertEqual(PresenceMode.from(state: .listening, visible: true, hasSuggestion: false), .border)
+    // Always-blob redesign: an active Aria is always the blob (no outer border glow).
+    func testListeningIsBlob() {
+        XCTAssertEqual(PresenceMode.from(state: .listening, visible: true, hasSuggestion: false), .blob)
     }
 
     func testThinkingIsBlob() {
         XCTAssertEqual(PresenceMode.from(state: .thinking, visible: true, hasSuggestion: false), .blob)
     }
 
-    func testExecutingIsBorder() {
-        XCTAssertEqual(PresenceMode.from(state: .executing, visible: true, hasSuggestion: false), .border)
+    func testExecutingIsBlob() {
+        XCTAssertEqual(PresenceMode.from(state: .executing, visible: true, hasSuggestion: false), .blob)
     }
 
     func testRespondingIsBlob() {

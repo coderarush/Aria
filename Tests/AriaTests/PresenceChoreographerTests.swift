@@ -33,38 +33,43 @@ final class PresenceChoreographerTests: XCTestCase {
 
     func testBlobToBorderSplashesThenIgnites() {
         let c = PresenceChoreographer()
-        c.setMode(.blob, now: 0)                               // blob settled directly
+        c.setMode(.blob, now: 0)                               // enters via blobIn
+        c.advance(now: PresenceChoreographer.dBlobIn)          // settles to blob
         XCTAssertEqual(c.kind, .blob)
-        c.setMode(.border, now: 0)
+        let t0 = PresenceChoreographer.dBlobIn
+        c.setMode(.border, now: t0)                            // legacy border path still works
         XCTAssertEqual(c.kind, .splashing)
-        let half = PresenceChoreographer.dSplash * 0.5
+        let half = t0 + PresenceChoreographer.dSplash * 0.5
         c.advance(now: half)
         XCTAssertGreaterThan(c.blobFall(at: half), 0)
         XCTAssertTrue(c.showsBlob)
         // splash completes → chains into igniting (NOT straight to border)
-        c.advance(now: PresenceChoreographer.dSplash)
+        c.advance(now: t0 + PresenceChoreographer.dSplash)
         XCTAssertEqual(c.kind, .igniting)
-        XCTAssertNotNil(c.borderSweep(at: PresenceChoreographer.dSplash))
+        XCTAssertNotNil(c.borderSweep(at: t0 + PresenceChoreographer.dSplash))
         // ignite completes → border
-        c.advance(now: PresenceChoreographer.dSplash + PresenceChoreographer.dIgnite)
+        c.advance(now: t0 + PresenceChoreographer.dSplash + PresenceChoreographer.dIgnite)
         XCTAssertEqual(c.kind, .border)
-        XCTAssertNil(c.borderSweep(at: PresenceChoreographer.dSplash + PresenceChoreographer.dIgnite))
+        XCTAssertNil(c.borderSweep(at: t0 + PresenceChoreographer.dSplash + PresenceChoreographer.dIgnite))
     }
 
     func testDismissGoesToHidden() {
         let c = PresenceChoreographer()
         c.setMode(.blob, now: 0)
-        c.setMode(.hidden, now: 0)
+        c.advance(now: PresenceChoreographer.dBlobIn)          // settle entrance → blob
+        c.setMode(.hidden, now: PresenceChoreographer.dBlobIn)
         XCTAssertEqual(c.kind, .dismissing)
-        c.advance(now: PresenceChoreographer.dDismiss)
+        c.advance(now: PresenceChoreographer.dBlobIn + PresenceChoreographer.dDismiss)
         XCTAssertEqual(c.kind, .hidden)
     }
 
-    func testHiddenToBlobPopsInDirectly() {
+    func testHiddenToBlobEntersViaBlobIn() {
         let c = PresenceChoreographer()
         c.setMode(.blob, now: 0)
+        XCTAssertEqual(c.kind, .blobIn)                        // spring entrance, not instant
+        XCTAssertTrue(c.showsBlob)                             // blob is drawn during the entrance
+        c.advance(now: PresenceChoreographer.dBlobIn)
         XCTAssertEqual(c.kind, .blob)
-        XCTAssertTrue(c.showsBlob)
     }
 
     func testNoOpWhenTargetUnchanged() {
