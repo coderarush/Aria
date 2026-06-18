@@ -108,6 +108,10 @@ actor GoalEngine {
 
     func goal(id: String) -> Goal? { goals.first { $0.id == id } }
 
+    /// Every goal, newest-created first — full history for the timeline (includes
+    /// done/archived). `active()` is the live working set; this is the record.
+    func all() -> [Goal] { goals.sorted { $0.createdAt > $1.createdAt } }
+
     /// Active goals, most recently updated first — the live working set.
     func active() -> [Goal] {
         goals.filter { $0.status == .active }.sorted { $0.updatedAt > $1.updatedAt }
