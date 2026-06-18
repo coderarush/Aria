@@ -215,10 +215,11 @@ actor PersonalContextEngine {
         guard isEnabled else { return "" }
         var parts: [String] = []
 
-        // Live focus (P1): which app the user is in *right now*, and for how long —
-        // grounds answers in the active task instead of a stale snapshot.
-        if let focus = await AppFocusMonitor.shared.summaryLine(now: Date()) {
-            parts.append(focus)
+        // Live world model (P1): the canonical "what's happening now" line —
+        // active app + duration + the most recent action — from ContextCoordinator,
+        // which aggregates the focus/work signals so answers ground in the live task.
+        if let world = await ContextCoordinator.shared.summaryLine(now: Date()) {
+            parts.append(world)
         }
 
         // Top matching cards (or just the most-recent ones when no query).

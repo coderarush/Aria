@@ -36,18 +36,20 @@ actor ContextCoordinator {
             now: now)
     }
 
-    /// A short text line for the system prompt: "Active: Xcode (2m) · clipboard …".
+    /// The ambient line for the system prompt: which app the user is in (and for
+    /// how long) plus the most recent thing Aria did — so answers ground in the
+    /// live task. Clipboard/OCR are injected separately by the prompt builder, so
+    /// they're intentionally not repeated here.
     func summaryLine(now: Date = Date()) async -> String? {
         let w = await worldState(now: now)
-        guard !w.activeApp.isEmpty || w.clipboardSummary != nil else { return nil }
         var parts: [String] = []
         if !w.activeApp.isEmpty {
-            parts.append("Active: \(w.activeApp) (\(Int(w.focusDuration / 60))m)")
+            parts.append("Right now you're working in \(w.activeApp) (\(Int(w.focusDuration / 60))m)")
         }
-        if let clip = w.clipboardSummary, !clip.isEmpty {
-            parts.append("clipboard: \(clip.prefix(60))")
+        if let recent = w.recentActions.first {
+            parts.append("recently: \(recent)")
         }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+        return parts.isEmpty ? nil : parts.joined(separator: "; ") + "."
     }
 
     /// Stream world snapshots on a fixed cadence. Cheap (one snapshot per tick);

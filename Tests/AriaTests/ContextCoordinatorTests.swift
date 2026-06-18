@@ -48,6 +48,29 @@ final class ContextCoordinatorTests: XCTestCase {
         XCTAssertEqual(decoded, s)
     }
 
+    func testSummaryLineReflectsInjectedWorld() async {
+        let coord = ContextCoordinator()
+        var w = CurrentWorldState.build(
+            activeApp: "Xcode", focusSince: Date().addingTimeInterval(-180),
+            clipboardSummary: "ignored here", openFiles: [],
+            recentActions: ["✓ Sent email to Sara"], pendingSuggestion: nil, now: Date())
+        w.focusDuration = 180
+        await coord.injectTestState(w)
+        let line = await coord.summaryLine()
+        XCTAssertNotNil(line)
+        XCTAssertTrue(line!.contains("Xcode"))
+        XCTAssertTrue(line!.contains("Sent email to Sara"))
+    }
+
+    func testSummaryLineNilForEmptyWorld() async {
+        let coord = ContextCoordinator()
+        await coord.injectTestState(CurrentWorldState.build(
+            activeApp: "", focusSince: nil, clipboardSummary: nil, openFiles: [],
+            recentActions: [], pendingSuggestion: nil, now: Date()))
+        let line = await coord.summaryLine()
+        XCTAssertNil(line)
+    }
+
     func testInjectTestStateOverridesWorldState() async {
         let coord = ContextCoordinator()
         let injected = CurrentWorldState.build(
