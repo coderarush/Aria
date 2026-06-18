@@ -73,6 +73,7 @@ actor ToolRegistry {
             SlackSendTool(),
             RecallWorkTool(),
             TimelineTool(),
+            GoalTool(),
             RecallTool(),
             RememberEntityTool(),
             WhoIsTool(),
