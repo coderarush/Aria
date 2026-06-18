@@ -513,13 +513,24 @@ final class AriaController {
         // be accepted. Anything important-irreversible still surfaces to ask.
         if let cmd = AnticipationPolicy.autoActCommand(for: suggestion,
                                                        enabled: AppSettings.shared.autonomousActions) {
-            Log.trace("proactive: auto-acting on \(suggestion.dedupeKey)")
-            await engine.record(.accepted, for: suggestion, now: Date())
-            Notifier.notify(title: "Aria", body: "\(suggestion.spokenLine) — say “undo” to revert.")
-            // Unattended: a destructive action the model expands to here is
-            // declined, never run silently (see confirmDestructiveAction).
-            handleCommand(cmd, unattended: true)
-            return
+            // Defense-in-depth (P5): the unified trust decision must also say "auto".
+            // If Safety classifies the command as important-irreversible (something
+            // AnticipationPolicy's text check missed), surface it to ask instead of
+            // firing it silently.
+            let importance = Safety.importance(tool: "", input: [:], summary: cmd)
+            let level = TrustProfile.advisedLevel(importance: importance,
+                                                  confirmsDestructive: ConfirmationPolicy.confirmsDestructive())
+            if level == .auto {
+                Log.trace("proactive: auto-acting on \(suggestion.dedupeKey)")
+                await engine.record(.accepted, for: suggestion, now: Date())
+                Notifier.notify(title: "Aria", body: "\(suggestion.spokenLine) — say “undo” to revert.")
+                // Unattended: any destructive action the model still expands to is
+                // declined, never run silently (see confirmDestructiveAction).
+                handleCommand(cmd, unattended: true)
+                return
+            }
+            Log.trace("proactive: trust gate held back auto-act for \(suggestion.dedupeKey) (\(level.rawValue)) — surfacing")
+            // fall through to present the suggestion for explicit approval
         }
         presenter.present(suggestion)
         scheduleProactiveExpiry(at: suggestion.expiry)
