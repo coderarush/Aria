@@ -505,7 +505,9 @@ final class AriaController {
     private func proactiveTick() async {
         guard let engine = proactiveEngine, let presenter = proactivePresenter else { return }
         guard idleForProactive, presenter.pending == nil else { return }
-        guard let suggestion = await engine.tick(now: Date()) else { return }
+        // World-aware (P2): bias ranking toward the app the user is in right now.
+        let activeApp = await ContextCoordinator.shared.worldState().activeApp
+        guard let suggestion = await engine.tick(now: Date(), activeApp: activeApp) else { return }
         // An await elapsed — re-check we're still idle and nothing else surfaced.
         guard idleForProactive, presenter.pending == nil else { return }
         // Phase D — anticipation that ACTS: a very-high-confidence, reversible

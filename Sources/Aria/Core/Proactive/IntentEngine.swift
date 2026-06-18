@@ -33,12 +33,17 @@ enum IntentEngine {
             .sorted { $0.confidence > $1.confidence }
     }
 
-    /// Boost an intent that references the app in focus — capped at 1.0.
+    /// Shared primitive: boost a base confidence when `text` mentions the app in
+    /// focus, capped at 1.0. Used by both this ranker and the proactive engine so
+    /// "world-aware" means the same thing everywhere.
+    static func boostedConfidence(text: String, base: Double, activeApp: String) -> Double {
+        guard !activeApp.isEmpty else { return base }
+        return text.lowercased().contains(activeApp.lowercased())
+            ? min(1.0, base + activeAppBoost) : base
+    }
+
     private static func adjustedConfidence(_ intent: PredictedIntent, world: CurrentWorldState) -> Double {
-        guard !world.activeApp.isEmpty else { return intent.confidence }
-        let app = world.activeApp.lowercased()
-        let mentions = intent.action.lowercased().contains(app)
-            || intent.reasoning.lowercased().contains(app)
-        return mentions ? min(1.0, intent.confidence + activeAppBoost) : intent.confidence
+        boostedConfidence(text: "\(intent.action) \(intent.reasoning)",
+                          base: intent.confidence, activeApp: world.activeApp)
     }
 }

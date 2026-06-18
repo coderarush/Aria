@@ -26,7 +26,7 @@ actor ProactiveEngine {
 
     /// The single best suggestion to surface right now, or nil if there's nothing
     /// worth interrupting for.
-    func tick(now: Date) async -> Suggestion? {
+    func tick(now: Date, activeApp: String = "") async -> Suggestion? {
         let config = settings()
         guard config.enabled else { return nil }
 
@@ -44,8 +44,15 @@ actor ProactiveEngine {
         }
         if quiet { live = live.filter { $0.urgency == .timeCritical } }
 
-        // Best-first, then keep one per dedupe key, respecting the daily budget.
-        let ranked = live.sorted(by: Suggestion.rank)
+        // World-aware ranking (P2): nudge a suggestion about the app you're in up
+        // the order. Boost affects ORDER ONLY — we keep the originals and return the
+        // unboosted suggestion, so downstream confidence gates (auto-act) are unchanged.
+        let originals = Dictionary(live.map { ($0.dedupeKey, $0) }, uniquingKeysWith: { a, _ in a })
+        let ranked = live.map { s -> Suggestion in
+            var c = s
+            c.confidence = IntentEngine.boostedConfidence(text: s.spokenLine, base: s.confidence, activeApp: activeApp)
+            return c
+        }.sorted(by: Suggestion.rank)
         var seen = Set<String>()
         for s in ranked where !seen.contains(s.dedupeKey) {
             seen.insert(s.dedupeKey)
@@ -53,7 +60,7 @@ actor ProactiveEngine {
             if s.urgency != .timeCritical && store.atDailyCap(now: now) { continue }
             store.recordSurface(now: now)
             ProactiveStoreFile.save(store, to: storeURL)
-            return s
+            return originals[s.dedupeKey] ?? s   // original (unboosted) confidence
         }
         return nil
     }

@@ -41,4 +41,13 @@ final class IntentEngineTests: XCTestCase {
         let ranked = IntentEngine.rank(c, world: world(activeApp: "Xcode"), floor: 0.5)
         XCTAssertLessThanOrEqual(ranked.first!.confidence, 1.0)
     }
+
+    func testBoostedConfidencePrimitive() {
+        XCTAssertEqual(IntentEngine.boostedConfidence(text: "run tests in Xcode", base: 0.6, activeApp: "Xcode"),
+                       0.75, accuracy: 0.001)
+        XCTAssertEqual(IntentEngine.boostedConfidence(text: "draft reply", base: 0.6, activeApp: "Xcode"),
+                       0.6, accuracy: 0.001)           // no mention → unchanged
+        XCTAssertEqual(IntentEngine.boostedConfidence(text: "anything", base: 0.6, activeApp: ""),
+                       0.6, accuracy: 0.001)           // no focus → unchanged
+    }
 }
