@@ -76,6 +76,7 @@ actor ToolRegistry {
             GoalTool(),
             ContinueTool(),
             MemoryGraphTool(),
+            StatusTool(),
             RecallTool(),
             RememberEntityTool(),
             WhoIsTool(),
