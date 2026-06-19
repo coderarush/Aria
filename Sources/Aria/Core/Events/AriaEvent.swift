@@ -34,6 +34,8 @@ struct AriaEvent: Sendable, Identifiable {
         // Presence / suggestions
         case suggestionOffered
         case suggestionResolved
+        // Migration
+        case shadowCompared
     }
 
     /// Delivery / handling priority. Higher cases sort greater.
