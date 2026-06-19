@@ -127,6 +127,36 @@ planning/tools (§101). Release gate proven in `Part5HarnessGateTests` (§105).
 AGI / friendship simulation / approval removal / autonomous execution
 deliberately NOT built (§106 stop).
 
+## Part 6 — Productization, reality, trust, adoption (Waves A–G)
+Built additively per Master Build Spec Part 6 (§§107–127). 30 new TDD tests, green.
+This part integrates/measures rather than adding engines (§108).
+
+| Layer | Type(s) | Spec |
+|---|---|---|
+| Migration | `MigrationController`, `MigrationDecision` | §109 |
+| Quality | `ExecutionQuality`/`ExecutionScore`, `TimeEngine` | §110/113 |
+| Trust/Failure | `TrustDashboard`, `FailureExperience` | §115/116 |
+| Onboarding | `OnboardingEngine`, `DefaultExperience` | §117/118 |
+| Product | `DelightEngine`, `HabitEngine`, `FeedbackEngine`, `AnalyticsEngine` | §111/112/114/121 |
+| Ops | `DogfoodEngine`, `LatencyBudget`, `ReleaseEngine`, `GlassReadiness` | §119/120/122/123 |
+| Eval | `DeleteAnalyzer`, `ProductHarness` | §124/125 |
+
+`MigrationController` promotes on ≥95% parity / rolls back on regression — but
+the real flip needs on-device parity data. Delight never interrupts/manipulates/
+gamifies (§111); analytics is metadata-only (§121); failures never blame the
+user (§116). **DeleteAnalyzer identifies dead code but never deletes** — the
+legacy path is preserved until the migration reaches `.cleanup` (§50/124), so
+removal stays a deliberate reviewed step. Release gate proven in
+`Part6HarnessGateTests` (§126). No new agents / AGI / architecture (§127 stop) —
+this part is about shipping.
+
+## All six spec parts executed
+Parts 1–6 of the Aria Master Build Spec are implemented on `runtime-os`: topology
+reorg + a full execution-first runtime, memory/continuity/presence, perception/
+multimodality/mesh/Glass, executive/delegation/identity, and productization/
+migration tooling. ~1386 tests, all green except the pre-existing
+`ConnectorStoreActorTests` baseline (2).
+
 ## Deferred / human-gated
 - **Production flip**: the bridge, adapters, shadow, and parity gate exist and
   are tested, but `LegacyExecutor`/`RuntimeExecutor` are not yet wired to the
