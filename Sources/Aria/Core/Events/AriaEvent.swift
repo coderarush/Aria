@@ -31,6 +31,9 @@ struct AriaEvent: Sendable, Identifiable {
         // Continuity
         case checkpointSaved
         case workResumed
+        // Presence / suggestions
+        case suggestionOffered
+        case suggestionResolved
     }
 
     /// Delivery / handling priority. Higher cases sort greater.
