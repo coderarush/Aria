@@ -80,6 +80,30 @@ Surfaces render only, never execute. Glass / camera / wearable / autonomous
 execution deliberately NOT built (§67 stop). Release gate proven in
 `Part3ReleaseGateTests` (§66).
 
+## Part 4 — Perception, multimodality, device mesh, Glass substrate (Waves A–G)
+Built additively per Master Build Spec Part 4 (§§68–87). 29 new TDD tests, green.
+New top-level `Perception/` and `Mesh/` layers.
+
+| Layer | Type(s) | Spec |
+|---|---|---|
+| Perception OS | `Observation`, `ObservationPolicy`, `ObservationBus`, `PerceptionStore`, `PerceptionEngine` | §69/70/83 |
+| Modality | `ScreenContextEngine`, `AudioContextEngine`, `VisualContextEngine` | §72-74 |
+| Fusion | `FusionEngine`, `ConflictResolver`, `UnifiedContext` | §75 |
+| Attention V2 | `ActivityDetector`, `ActivityMode` | §76 |
+| Mesh | `DeviceMesh`, `MeshDevice`, `ContextHandoff`, `HandoffBundle` | §77/78 |
+| Glass | `GlassRuntime`, `HUDState` | §79/80 |
+| Recall | `RecallEngine`, `RecallBundle` | §81 |
+| Knowledge | `KnowledgeEngine`, `KnowledgeNode`/`Edge` | §82 |
+| Eval | `PerceptionHarness` (95% relevance target) | §84 |
+
+**Perception produces observations, never actions** (§69). **No raw media
+retained** — screenshots/audio/frames are summarized to structured observations
+only (§72-74/83); observations are bounded, visible, deletable. Glass is
+software-only and works without hardware (§86); it consumes context and displays
+awareness with no execution/tools. Release gate proven in `Part4HarnessGateTests`
+(§86). Camera / wearable hardware / Glass execution / full autonomy deliberately
+NOT built (§87 stop).
+
 ## Deferred / human-gated
 - **Production flip**: the bridge, adapters, shadow, and parity gate exist and
   are tested, but `LegacyExecutor`/`RuntimeExecutor` are not yet wired to the
