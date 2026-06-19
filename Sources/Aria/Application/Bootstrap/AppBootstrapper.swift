@@ -28,4 +28,28 @@ actor AppBootstrapper {
         guard let runtime else { return false }
         return await runtime.state == .idle
     }
+
+    /// Full boot (spec §8): stand up the event bus, the runtime authority, and
+    /// every core engine sharing that bus, then start the runtime. Returns the
+    /// assembled ``RuntimeContainer``.
+    func boot(flags: FeatureFlags = FeatureFlags()) async -> RuntimeContainer {
+        let bus = EventBus()
+        let runtime = AriaRuntime(eventBus: bus)
+        await runtime.start()
+
+        self.eventBus = bus
+        self.runtime = runtime
+
+        return RuntimeContainer(
+            eventBus: bus,
+            runtime: runtime,
+            objectives: ObjectiveEngine(eventBus: bus),
+            execution: ExecutionEngine(eventBus: bus),
+            memory: MemoryStore(eventBus: bus),
+            context: ContextCollector(eventBus: bus),
+            presence: PresenceDetector(eventBus: bus),
+            metrics: MetricsCollector(),
+            timeline: ExecutionTimeline(),
+            flags: flags)
+    }
 }
