@@ -23,9 +23,10 @@ actor ExecutionEngine {
     private let eventBus: EventBus
     private let supervisor: ExecutionSupervisor
 
-    init(eventBus: EventBus, policy: ExecutionPolicy = ExecutionPolicy()) {
+    init(eventBus: EventBus, policy: ExecutionPolicy = ExecutionPolicy(), tools: [any ExecutableTool] = []) {
         self.eventBus = eventBus
         self.supervisor = ExecutionSupervisor(policy: policy)
+        for tool in tools { self.tools[tool.name] = tool }
     }
 
     /// Register a tool under its ``ExecutableTool/name``.

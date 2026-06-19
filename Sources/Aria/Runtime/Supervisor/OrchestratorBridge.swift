@@ -73,8 +73,11 @@ enum OrchestratorBridge {
     static func makeResponse(legacyHandler: any CommandHandling,
                              eventBus: EventBus = EventBus(),
                              stage: MigrationStage = .legacy) -> AriaResponseBridge {
+        let execution = ExecutionEngine(
+            eventBus: eventBus,
+            tools: AriaToolAdapter.adapters(from: ToolRegistry.builtins()))
         let coordinator = Coordinator(
-            execution: ExecutionEngine(eventBus: eventBus),
+            execution: execution,
             verifier: Verifier(),
             memory: MemoryEngine(eventBus: eventBus, scorer: ImportanceScorer(threshold: 0)),
             eventBus: eventBus)
