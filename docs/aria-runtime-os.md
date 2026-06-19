@@ -104,6 +104,29 @@ awareness with no execution/tools. Release gate proven in `Part4HarnessGateTests
 (§86). Camera / wearable hardware / Glass execution / full autonomy deliberately
 NOT built (§87 stop).
 
+## Part 5 — Delegation, executive function, identity, second brain (Waves A–G)
+Built additively per Master Build Spec Part 5 (§§88–106). 35 new TDD tests, green.
+New top-level `Executive/` layer.
+
+| Layer | Type(s) | Spec |
+|---|---|---|
+| Executive | `ExecutiveEngine`, `DelegationEngine`, `DelegationContract` | §89/90 |
+| Adaptive | `AdaptiveExecution`/`ExecutionProfile`, `ObjectiveMarket`, `ExecutionPolicyEngine`/`ExecutionPolicySet` | §91/92/93 |
+| Identity | `IdentityEngine`/`InteractionProfile`, `ProductMemory` | §94/95 |
+| Workflow/Artifact | `WorkflowEngine`/`ReusableWorkflow`, `ArtifactEngine`/`VersionedArtifact` | §96/97 |
+| Initiative | `InitiativeEngine` (ceiling awaitApproval), `ReviewEngine`/`ClosureReport`, `HorizonEngine` | §98/99/100 |
+| Glass/Command | `GlassExperience`, `CommandModel` | §101/102 |
+| Eval | `ExecutiveHarness` | §103 |
+
+**Authority is earned, never assumed** (§88): `ExecutiveEngine` executes only
+when `authority.allowsExecution`, else parks at `.review` for approval.
+**Initiative never executes** — ceiling is awaitApproval (§98/106). Identity
+never simulates emotion or personhood (§94). ProductMemory keeps bounded
+summaries, no transcripts (§95). Glass experience displays only — no execution/
+planning/tools (§101). Release gate proven in `Part5HarnessGateTests` (§105).
+AGI / friendship simulation / approval removal / autonomous execution
+deliberately NOT built (§106 stop).
+
 ## Deferred / human-gated
 - **Production flip**: the bridge, adapters, shadow, and parity gate exist and
   are tested, but `LegacyExecutor`/`RuntimeExecutor` are not yet wired to the
