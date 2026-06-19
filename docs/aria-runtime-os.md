@@ -58,13 +58,35 @@ Built additively on the Part 1 spine per Master Build Spec Part 2 (§§25–48).
 Presence **notices, never executes** (§42/§48). Proactive execution / autonomy /
 Glass intentionally NOT built (§48 stop).
 
-## Deferred (next waves)
-- **Live wiring**: the new runtime is built + tested but not yet the app's live
-  execution path; `AriaController`/`AgentOrchestrator` still drive production.
-  Bridging existing `AutonomyEngine`/`GoalEngine`/`ToolRegistry`/`AriaTool` onto
-  the `EventBus` + `ExecutableTool` is the main remaining integration.
-- **Execution**: parallel/speculative modes + hard per-action timeouts
-  (serial + retry are live).
+## Part 3 — Live migration, trust, observability, surface (Waves A–H)
+Built additively per Master Build Spec Part 3 (§§49–67). 46 new TDD tests, green.
+
+| Layer | Type(s) | Spec |
+|---|---|---|
+| Migration | `MigrationStage`, `LegacyExecutor`/`RuntimeExecutor`, `RuntimeBridge`, `ExecutionDiff` | §51 |
+| Shadow | `ShadowExecution`, `ParityReport` (95% gate) | §52 |
+| Permissions | `PermissionOS`, `PermissionType`/`Scope`, `ConsentLedger` | §54 |
+| Trust | `TrustEngine` (confidence, not autonomy) | §55 |
+| Governance | `ToolGovernor` (`ToolHealth`), `CapabilityMatrix` | §53 |
+| Coordination | `Coordinator` (plan→execute→verify→remember, no swarms), `ExecutionContract` | §59/60 |
+| Observability | `AriaInspector`, `ReplayEngine` | §56 |
+| Evaluation | `Scenario`, `ScenarioLibrary`, `EvaluationHarness` | §61 |
+| Recovery | `RecoveryEngine` (checkpoint/recover/rollback/failover) | §62 |
+| Surface | `SurfaceKind`/`SurfaceProtocol`, `ExperienceLayer`, `StreamState`, `ContextStream`, `ObjectiveWorkspace`, `ExecutionSurfaceState` | §57/58/64/65 |
+
+**Migration is staged + reversible** (legacy→shadow→dual→preferred→runtimeOnly→
+cleanup); shadow runs the runtime silently and gates promotion on 95% parity.
+Surfaces render only, never execute. Glass / camera / wearable / autonomous
+execution deliberately NOT built (§67 stop). Release gate proven in
+`Part3ReleaseGateTests` (§66).
+
+## Deferred / human-gated
+- **Production flip**: the bridge, adapters, shadow, and parity gate exist and
+  are tested, but `LegacyExecutor`/`RuntimeExecutor` are not yet wired to the
+  real `AgentOrchestrator`/runtime, and the stage is not advanced past `.legacy`
+  in production. Flipping requires conforming the real paths to the seams and
+  validating ≥95% parity on a real device — a human + device step, by design.
+- **Execution**: parallel/speculative modes + hard per-action timeouts.
 - **Storage**: SQLite-backed `KeyValueStore`/`MemoryStore` (in-memory seam today).
 - **Config**: Experiments + Policies beyond `FeatureFlags`.
-- **Presence acting** + Glass prep (Part 3 / spec Phase 5) — deliberately deferred.
+- **Glass / hardware**: out of scope by spec (§67).
