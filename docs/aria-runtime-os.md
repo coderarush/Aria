@@ -38,6 +38,26 @@ boot → `createObjective` → `SequentialPlanner.plan` → `ExecutionEngine.exe
 → `Verifier` → metrics/timeline drain → objective complete. Everything shares
 one `EventBus`.
 
+## Part 2 — Memory OS, Continuity, Presence (Waves A–G)
+Built additively on the Part 1 spine per Master Build Spec Part 2 (§§25–48).
+37 new TDD tests, all green.
+
+| Layer | Type(s) | Spec |
+|---|---|---|
+| Memory OS | `MemoryRecord`, `ImportanceScorer`, `MemoryEngine`, `ContextualRetrieval` | §27–31 |
+| Continuity | `Checkpoint`, `CheckpointManager`, `ContinuityEngine` | §32 |
+| Projects | `ObjectiveTracker`, `Project`, `ProjectEngine` | §33/34 |
+| Context V2 | `ContextEnvelope`, `ContextConfidence`, `ContextAssembler` | §35/36 |
+| Presence | `Opportunity`, `OpportunityDetector`, `OpportunityRanker`, `PresenceSuggestion`, `SuggestionEngine`, `PresenceEngine` | §37–39 |
+| Attention | `AttentionAssessment`, `AttentionAssessor` | §40 |
+| Learning | `LearningEngine` (no self-modify) | §43 |
+| Autonomy | `AutonomyLevel` (default `.suggest`) | §44 |
+
+**Release gate proven** (`Part2ReleaseGateTests`, §47): stop → return → continue
+→ trust suggestions → recover, plus memory retrieval by objective+keyword.
+Presence **notices, never executes** (§42/§48). Proactive execution / autonomy /
+Glass intentionally NOT built (§48 stop).
+
 ## Deferred (next waves)
 - **Live wiring**: the new runtime is built + tested but not yet the app's live
   execution path; `AriaController`/`AgentOrchestrator` still drive production.
@@ -47,4 +67,4 @@ one `EventBus`.
   (serial + retry are live).
 - **Storage**: SQLite-backed `KeyValueStore`/`MemoryStore` (in-memory seam today).
 - **Config**: Experiments + Policies beyond `FeatureFlags`.
-- **Presence**: suggestion surfacing + acting; Glass prep (spec Phase 5).
+- **Presence acting** + Glass prep (Part 3 / spec Phase 5) — deliberately deferred.
