@@ -66,4 +66,20 @@ enum OrchestratorBridge {
                       runtime: runtime,
                       eventBus: eventBus)
     }
+
+    /// The typed production bridge for the command path, wired to the
+    /// orchestrator with an inert runtime coordinator (never invoked at
+    /// `.legacy`). Default stage `.legacy` ⇒ behavior-identical forwarding.
+    static func makeResponse(legacyHandler: any CommandHandling,
+                             eventBus: EventBus = EventBus(),
+                             stage: MigrationStage = .legacy) -> AriaResponseBridge {
+        let coordinator = Coordinator(
+            execution: ExecutionEngine(eventBus: eventBus),
+            verifier: Verifier(),
+            memory: MemoryEngine(eventBus: eventBus, scorer: ImportanceScorer(threshold: 0)),
+            eventBus: eventBus)
+        let runtime = RuntimeCoordinatorAdapter(coordinator: coordinator,
+                                                planner: { _ in [] }, rules: [])
+        return AriaResponseBridge(stage: stage, legacy: legacyHandler, runtime: runtime, eventBus: eventBus)
+    }
 }

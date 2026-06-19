@@ -23,6 +23,10 @@ final class AriaController {
     private let speakerGate = SpeakerGate()
     private let computerUseIndicator = ComputerUseIndicator()
     private let orchestrator = AgentOrchestrator()
+    /// Routes the non-streaming command path through the migration bridge.
+    /// Defaults to `.legacy` ⇒ byte-identical forwarding to `orchestrator`;
+    /// advancing the stage is the deliberate, parity-gated production flip.
+    private lazy var responseBridge = OrchestratorBridge.makeResponse(legacyHandler: orchestrator)
     private let patternEngine = PatternEngine()
     private var panel: IslandPanel?
     private let taskViewModel = TaskViewModel()
@@ -453,7 +457,7 @@ final class AriaController {
                 // Unattended automation: decline destructive confirmations rather
                 // than block on a modal (restored to false after the turn).
                 unattendedActive = true
-                let response = await orchestrator.handle(command: command)
+                let response = await responseBridge.handle(command: command, privacyMode: false)
                 unattendedActive = false
                 islandViewModel.showResponse("⚡️ " + response.message)
                 // Self-improvement loop (P12): feed the REAL execution outcome back
@@ -1265,7 +1269,7 @@ final class AriaController {
     /// the response text. Routes through the orchestrator's non-streaming path so
     /// AppIntents get a clean string back.
     func handleCommandForShortcuts(_ command: String) async -> String {
-        let response = await orchestrator.handle(command: command)
+        let response = await responseBridge.handle(command: command, privacyMode: false)
         return response.message
     }
 
