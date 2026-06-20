@@ -9,6 +9,15 @@ protocol CommandHandling: Sendable {
 
 extension AgentOrchestrator: CommandHandling {}
 
+/// The plan-only capability the runtime path needs: produce a model response
+/// (with chosen actions) WITHOUT executing. ``AgentOrchestrator/plan(command:privacyMode:)``
+/// satisfies this, so it conforms via an empty extension.
+protocol CommandPlanning: Sendable {
+    func plan(command: String, privacyMode: Bool) async -> AriaResponse
+}
+
+extension AgentOrchestrator: CommandPlanning {}
+
 /// Adapts the production command handler (the real ``AgentOrchestrator``) to the
 /// ``LegacyExecutor`` seam. Translates a ``BridgeRequest`` into a command and
 /// the resulting ``AriaResponse`` into a ``BridgeResult``.

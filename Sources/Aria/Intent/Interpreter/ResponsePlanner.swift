@@ -27,3 +27,10 @@ struct ModelIntentPlanner: IntentPlanner {
         ResponsePlanner.steps(from: await planOnly(objective))
     }
 }
+
+extension ModelIntentPlanner {
+    /// Build from any plan-only command source (e.g. the real orchestrator).
+    init(planner: any CommandPlanning) {
+        self.init(planOnly: { await planner.plan(command: $0, privacyMode: false) })
+    }
+}

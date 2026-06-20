@@ -39,6 +39,15 @@ final class PlannerSeamTests: XCTestCase {
         XCTAssertEqual(steps.first?.parameters["cmd"], "ls")
     }
 
+    func testModelIntentPlannerFromCommandPlanning() async {
+        let planner = ModelIntentPlanner(planner: SeamFakePlanner(
+            response: AriaResponse(type: .action, message: "x",
+                                   actions: [AgentAction(tool: "gmail", input: ["to": "a@b"])])))
+        let steps = await planner.plan(objective: "email someone")
+        XCTAssertEqual(steps.first?.tool, "gmail")
+        XCTAssertEqual(steps.first?.parameters["to"], "a@b")
+    }
+
     // MARK: - RuntimeCoordinatorAdapter uses the planner
 
     func testAdapterPlansThenExecutes() async {
@@ -60,4 +69,9 @@ private struct SeamEchoTool: AriaTool {
     static let name = "echo"
     static let description = "echo"
     func run(input: [String: String]) async throws -> ToolResult { .ok(input["msg"] ?? "") }
+}
+
+private struct SeamFakePlanner: CommandPlanning {
+    let response: AriaResponse
+    func plan(command: String, privacyMode: Bool) async -> AriaResponse { response }
 }

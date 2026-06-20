@@ -138,6 +138,31 @@ actor AgentOrchestrator {
         }
     }
 
+    /// Plan-only: ask the model what to do for `command` and return its response
+    /// (including `actions`) WITHOUT executing anything. This is exactly the
+    /// first model turn `handle(...)` performs, factored out so the runtime
+    /// migration path can plan via the same model. No tools run — no side effects.
+    func plan(command: String, privacyMode: Bool = false) async -> AriaResponse {
+        let screenshot: Data? = privacyMode ? nil : try? await screen.capturePrimaryJPEG()
+        let history = await memory.recentContext()
+        let context = await systemContext(privacyMode: privacyMode)
+        let catalog = await registry.catalog()
+            + "\n\nSUB-AGENTS (dispatch via action tool = the agent name, input.task = the goal):\n"
+            + (await subAgents.catalog())
+        do {
+            return try await gemini.send(
+                transcript: command,
+                screenshotJPEG: screenshot,
+                history: history,
+                context: context,
+                toolCatalog: catalog)
+        } catch {
+            Log.agent.error("Plan request failed: \(error.localizedDescription)")
+            return AriaResponse(type: .answer, message: "planning failed",
+                                confidence: 0.0, succeeded: false)
+        }
+    }
+
     /// Run a single action. "dynamic" → factory codegen+exec. Other tools are
     /// routed to dynamic generation for now (static registry comes next pass).
     private func execute(_ action: AgentAction,
