@@ -32,11 +32,11 @@ struct LegacyOrchestratorAdapter: LegacyExecutor {
 struct RuntimeCoordinatorAdapter: RuntimeExecutor {
 
     private let coordinator: Coordinator
-    private let planner: @Sendable (String) -> [PlanStep]
+    private let planner: any IntentPlanner
     private let rules: [String]
 
     init(coordinator: Coordinator,
-         planner: @escaping @Sendable (String) -> [PlanStep],
+         planner: any IntentPlanner,
          rules: [String]) {
         self.coordinator = coordinator
         self.planner = planner
@@ -44,10 +44,9 @@ struct RuntimeCoordinatorAdapter: RuntimeExecutor {
     }
 
     func execute(_ request: BridgeRequest) async -> BridgeResult {
+        let steps = await planner.plan(objective: request.objective)
         let objective = Domain.Objective(title: request.objective, intent: request.objective)
-        let contract = await coordinator.run(objective: objective,
-                                             steps: planner(request.objective),
-                                             rules: rules)
+        let contract = await coordinator.run(objective: objective, steps: steps, rules: rules)
         return BridgeResult(output: contract.status.rawValue,
                             success: contract.status == .completed)
     }
@@ -82,7 +81,7 @@ enum OrchestratorBridge {
             memory: MemoryEngine(eventBus: eventBus, scorer: ImportanceScorer(threshold: 0)),
             eventBus: eventBus)
         let runtime = RuntimeCoordinatorAdapter(coordinator: coordinator,
-                                                planner: { _ in [] }, rules: [])
+                                                planner: StaticPlanner(steps: []), rules: [])
         return AriaResponseBridge(stage: stage, legacy: legacyHandler, runtime: runtime, eventBus: eventBus)
     }
 }

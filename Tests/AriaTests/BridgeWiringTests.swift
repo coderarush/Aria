@@ -41,7 +41,7 @@ final class BridgeWiringTests: XCTestCase {
                                       memory: MemoryEngine(eventBus: bus, scorer: ImportanceScorer(threshold: 0)),
                                       eventBus: bus)
         let adapter = RuntimeCoordinatorAdapter(coordinator: coordinator,
-                                                planner: { _ in [PlanStep(tool: "noop")] },
+                                                planner: StaticPlanner(steps: [PlanStep(tool: "noop")]),
                                                 rules: ["minCompleted:1"])
         let result = await adapter.execute(BridgeRequest(objective: "z"))
         XCTAssertTrue(result.success)
@@ -52,7 +52,7 @@ final class BridgeWiringTests: XCTestCase {
         let bridge = OrchestratorBridge.make(
             legacyHandler: FakeHandler(response: AriaResponse(type: .answer, message: "legacy-out")),
             runtime: RuntimeCoordinatorAdapter(coordinator: noopCoordinator(bus),
-                                               planner: { _ in [] }, rules: []),
+                                               planner: StaticPlanner(steps: []), rules: []),
             eventBus: bus)
         let stage = await bridge.stage
         XCTAssertEqual(stage, .legacy)
