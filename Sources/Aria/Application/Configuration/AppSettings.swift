@@ -72,6 +72,10 @@ final class AppSettings: ObservableObject {
     /// Use a local Ollama model as a last-resort fallback (offline / all-quota-exhausted).
     @Published var localModelEnabled: Bool { didSet { defaults.set(localModelEnabled, forKey: K.localModelEnabled) } }
     @Published var localModelName: String { didSet { defaults.set(localModelName, forKey: K.localModelName) } }
+    /// Local vision model (llava / qwen2.5vl / moondream) for on-device screen
+    /// understanding — the Lens + computer-use targeting. Empty ⇒ vision uses
+    /// cloud (Gemini). Read by `VisionRouter` (key `app.localVisionModel`).
+    @Published var localVisionModel: String { didSet { defaults.set(localVisionModel, forKey: K.localVisionModel) } }
     /// V9 local-first: prefer the local model for local-eligible task classes
     /// (planning, files, productivity…). Cloud always remains the fallback.
     @Published var localFirstEnabled: Bool { didSet { defaults.set(localFirstEnabled, forKey: K.localFirstEnabled) } }
@@ -178,6 +182,7 @@ final class AppSettings: ObservableObject {
         speakerVerificationEnrolledDate = defaults.object(forKey: K.speakerVerificationEnrolledDate) as? Double ?? 0.0
         localModelEnabled = defaults.bool(forKey: K.localModelEnabled)
         localModelName = defaults.string(forKey: K.localModelName) ?? "qwen3:8b"
+        localVisionModel = defaults.string(forKey: K.localVisionModel) ?? ""
         localFirstEnabled = defaults.object(forKey: K.localFirstEnabled) as? Bool ?? true   // local is the default (V9)
         // Local-first voice ON by default: only actually routes local when a local
         // model server is alive (else it transparently falls back to fast cloud).
@@ -238,6 +243,7 @@ final class AppSettings: ObservableObject {
         static let speakerVerificationEnrolledDate = "app.speakerVerificationEnrolledDate"
         static let localModelEnabled = "app.localModelEnabled"
         static let localModelName = "app.localModelName"
+        static let localVisionModel = "app.localVisionModel"
         static let localFirstEnabled = "app.localFirst"
         static let localChatEnabled = "app.localChat"
         static let spokenStepNarration = "app.spokenStepNarration"

@@ -544,3 +544,85 @@ footer a:hover { color: #f7f4ec; }
   content: ""; position: absolute; top: -14px; left: 4px; width: 22px; height: 20px;
   border: 5px solid var(--ink); border-bottom: none; border-radius: 11px 11px 0 0;
 }
+
+/* ---------- Lens · circle to explain ---------- */
+.lensSec { padding-top: 8px; }
+.lensHead { max-width: 640px; }
+.newPill {
+  display: inline-block; margin-left: 8px; padding: 2px 9px;
+  font-size: 0.6rem; letter-spacing: 0.12em; border-radius: 999px;
+  background: var(--ink); color: var(--paper); vertical-align: middle;
+}
+.lensStageWrap { margin-top: 56px; }
+.lensStage {
+  position: relative;
+  width: 100%; max-width: 760px; margin: 0 auto;
+  aspect-ratio: 16 / 10;
+  border-radius: 22px;
+  background: linear-gradient(160deg, #15130d 0%, #211d15 100%);
+  box-shadow: 0 40px 90px -40px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.05);
+  overflow: hidden;
+}
+/* faux app window */
+.lensWindow {
+  position: absolute; inset: 8% 10%;
+  background: var(--paper); border-radius: 12px;
+  box-shadow: 0 24px 50px -20px rgba(0,0,0,0.5);
+  overflow: hidden;
+}
+.lensTitlebar {
+  height: 30px; display: flex; align-items: center; gap: 7px; padding: 0 14px;
+  background: var(--bg-2); border-bottom: 1px solid var(--line);
+}
+.lensTitlebar i { width: 10px; height: 10px; border-radius: 50%; background: #d8cdb6; }
+.lensTitlebar i:nth-child(1) { background: #e6a08a; }
+.lensTitlebar i:nth-child(2) { background: #e8cf8e; }
+.lensTitlebar i:nth-child(3) { background: #a7cf9a; }
+.lensRows { padding: 22px 26px; display: flex; flex-direction: column; gap: 20px; }
+.lensRow { display: flex; align-items: center; gap: 14px; }
+.lensBar { height: 11px; border-radius: 6px; background: var(--line); display: inline-block; }
+.lensBar.w20 { width: 20%; } .lensBar.w30 { width: 30%; } .lensBar.w40 { width: 40%; }
+.lensBar.w50 { width: 50%; } .lensBar.w60 { width: 60%; } .lensBar.w70 { width: 70%; }
+.lensBar.w80 { width: 80%; }
+.lensChip {
+  font-size: 0.82rem; font-weight: 600; color: var(--ink);
+  background: #ece6d6; border: 1px solid var(--line);
+  padding: 6px 14px; border-radius: 8px; white-space: nowrap;
+}
+.lensRowTarget { position: relative; }
+/* the drawn loop overlay, positioned over the target row */
+.lensLoop {
+  position: absolute; left: 30%; top: 44%; width: 34%; height: 38%;
+  overflow: visible; pointer-events: none;
+  filter: drop-shadow(0 4px 14px rgba(108,124,240,0.5));
+}
+.lensTrailBlob {
+  position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px;
+  border-radius: 47% 53% 50% 50% / 50% 47% 53% 50%;
+  background: radial-gradient(circle at 35% 30%, #8fa6ff, #6b66e6 70%);
+  box-shadow: 0 0 12px rgba(108,124,240,0.7);
+  /* sit on the loop region */
+  transform: none;
+}
+.lensLoop, .lensTrailBlob { z-index: 3; }
+.lensTrailBlob { left: 30%; top: 44%; }
+/* place trail blobs within the loop box via inline left/top (0–100% of that box) */
+.lensStage .lensTrailBlob { position: absolute; }
+.lensAnswer {
+  position: absolute; right: 4%; bottom: 7%; z-index: 4;
+  width: min(300px, 46%);
+  background: var(--paper); border: 1px solid var(--line); border-radius: 14px;
+  padding: 16px 18px; box-shadow: 0 26px 60px -24px rgba(0,0,0,0.6);
+}
+.lensAnswerHead {
+  display: flex; align-items: center; gap: 8px;
+  font-weight: 600; font-size: 0.9rem; margin-bottom: 8px; color: var(--ink);
+}
+.lensAnswerOrb { width: 20px; height: 20px; display: inline-flex; }
+.lensAnswer p { font-size: 0.92rem; line-height: 1.5; color: var(--ink-soft); }
+.lensAnswer strong { color: var(--ink); }
+@media (max-width: 720px) {
+  .lensStage { aspect-ratio: 4 / 5; }
+  .lensAnswer { width: 70%; right: 6%; bottom: 5%; }
+  .lensLoop { left: 26%; width: 42%; }
+}

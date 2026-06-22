@@ -78,9 +78,9 @@ function Waitlist() {
 }
 
 const MARQUEE_ITEMS = [
-  "Voice control", "Computer use", "Memory & recall", "Daily briefings",
-  "Recipes & automation", "Meeting notes", "Focus mode", "Calendar",
-  "Email", "Screen awareness", "Always private",
+  "Circle to explain", "Draw on screen", "Voice control", "Computer use",
+  "Memory & recall", "Daily briefings", "Recipes & automation", "Meeting notes",
+  "Focus mode", "Calendar", "Email", "Screen awareness", "Runs 100% local",
 ];
 
 function Marquee() {
@@ -95,6 +95,93 @@ function Marquee() {
         ))}
       </div>
     </div>
+  );
+}
+
+/* The Lens showcase — Aria's circle-to-explain, drawn in her own gooey idiom.
+   A stylized window with a hand-drawn loop around a control, small blobs riding
+   the stroke, and the explanation surfacing beside it. Motion is meaning. */
+function LensShowcase() {
+  const reduce = useReducedMotion();
+  // Points along the drawn loop (stage-relative %), where the trailing blobs sit.
+  const trail = [
+    { x: 47, y: 43 }, { x: 62, y: 50 }, { x: 65, y: 63 },
+    { x: 60, y: 80 }, { x: 47, y: 83 }, { x: 32, y: 78 }, { x: 29, y: 60 },
+  ];
+  return (
+    <section id="lens" className="lensSec firstSection">
+      <div className="wrap">
+        <div className="lensHead">
+          <span className="mono label">03 · Lens <span className="newPill">New</span></span>
+          <Reveal i={1}><h2 className="display">Circle anything.<br />Aria explains it.</h2></Reveal>
+          <Reveal i={2}>
+            <p className="body sub">Hold <span className="mono inline">⌥⇧C</span> and draw a loop
+            around whatever you don't understand — an error, a chart, a button, a foreign
+            phrase. Aria reads just that, and tells you what it is and what it does. Or say
+            "draw on my screen" and she hands you the ink.</p>
+          </Reveal>
+        </div>
+
+        <Reveal i={2} className="lensStageWrap">
+          <div className="lensStage" aria-hidden="true">
+            {/* faux window beneath */}
+            <div className="lensWindow">
+              <div className="lensTitlebar"><i /><i /><i /></div>
+              <div className="lensRows">
+                <div className="lensRow"><span className="lensBar w70" /><span className="lensBar w40" /></div>
+                <div className="lensRow"><span className="lensBar w50" /><span className="lensBar w60" /></div>
+                <div className="lensRow lensRowTarget">
+                  <span className="lensChip">Export ▾</span>
+                  <span className="lensBar w30" />
+                </div>
+                <div className="lensRow"><span className="lensBar w80" /><span className="lensBar w20" /></div>
+              </div>
+            </div>
+
+            {/* the drawn loop + trailing blobs */}
+            <svg className="lensLoop" viewBox="0 0 100 92" preserveAspectRatio="none">
+              <motion.path
+                d="M50,16 C72,14 84,32 82,52 C80,74 58,80 38,76 C18,72 14,46 22,30 C28,18 38,17 50,16 Z"
+                fill="none" stroke="url(#lensGrad)" strokeWidth="2.4"
+                strokeLinecap="round"
+                initial={{ pathLength: 0, opacity: 0.2 }}
+                whileInView={reduce ? { pathLength: 1, opacity: 1 } : { pathLength: [0, 1], opacity: 1 }}
+                viewport={{ once: true }}
+                transition={{ duration: 1.6, ease: [0.22, 1, 0.36, 1] }}
+              />
+              <defs>
+                <linearGradient id="lensGrad" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stopColor="#6b8cff" />
+                  <stop offset="50%" stopColor="#7c66f0" />
+                  <stop offset="100%" stopColor="#21d4b4" />
+                </linearGradient>
+              </defs>
+            </svg>
+            {trail.map((p, i) => (
+              <motion.span key={i} className="lensTrailBlob"
+                style={{ left: `${p.x}%`, top: `${p.y}%` }}
+                initial={{ scale: 0, opacity: 0 }}
+                whileInView={{ scale: 1, opacity: 1 }}
+                viewport={{ once: true }}
+                transition={{ delay: 0.5 + i * 0.12, duration: 0.5, ease: "backOut" }}
+                animate={reduce ? {} : { y: [0, -3, 0] }}
+              />
+            ))}
+
+            {/* explanation surfacing */}
+            <motion.div className="lensAnswer"
+              initial={{ opacity: 0, y: 16, scale: 0.96 }}
+              whileInView={{ opacity: 1, y: 0, scale: 1 }}
+              viewport={{ once: true }}
+              transition={{ delay: 1.5, duration: 0.7, ease: [0.22, 1, 0.36, 1] }}>
+              <div className="lensAnswerHead"><span className="lensAnswerOrb"><Blob size={20} mood="thinking" /></span> Aria</div>
+              <p>That's the <strong>Export</strong> menu — it lets you save this as PDF, PNG, or
+              CSV. The ▾ opens the format list.</p>
+            </motion.div>
+          </div>
+        </Reveal>
+      </div>
+    </section>
   );
 }
 
@@ -130,18 +217,18 @@ export default function App() {
     },
     {
       n: "03",
-      title: "Add your Gemini API key",
-      body: "Open Aria → press ⌘, (Settings) → paste your key in the API section. Get a free key at ai.google.dev — no credit card required.",
+      title: "Pick your model — local by default",
+      body: "Open Aria → ⌘, (Settings) → one-click install a local model sized to your Mac. It runs entirely on-device. Prefer the cloud? Paste a free Gemini key (ai.google.dev) instead — optional.",
     },
     {
       n: "04",
       title: "Say \"Hey Aria\"",
-      body: "She wakes on the phrase \"Hey Aria\". Or press ⌥Space to talk, ⌥⇧Space to type. She appears as a small orb on your screen.",
+      body: "She wakes on the phrase \"Hey Aria\". Or press ⌥Space to talk, ⌥⇧Space to type, ⌥⇧C to circle-and-explain. She appears as a small blob on your screen.",
     },
     {
       n: "05",
       title: "Try your first command",
-      body: "\"Brief me on my day\" · \"What did I do today?\" · \"Summarize this email\" · \"Open my calendar\" · \"Remember this for later\"",
+      body: "\"Brief me on my day\" · \"What did I do today?\" · ⌥⇧C then circle an error · \"Draw on my screen\" · \"Open my calendar\" · \"Remember this for later\"",
     },
   ];
 
@@ -155,6 +242,7 @@ export default function App() {
           </div>
           <div className="links">
             <a href="#features">Features</a>
+            <a href="#lens">Lens</a>
             <a href="#privacy">Privacy</a>
             <a href="#setup">Setup</a>
             <a className={scrolled ? "btn small" : "btnLightSmall"} href={DOWNLOAD} download="Aria.dmg">Download</a>
@@ -188,8 +276,8 @@ export default function App() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.9, delay: 0.55, ease: [0.22, 1, 0.36, 1] }}
         >
-          Say it, and it's done. Aria hears you, sees your screen,<br />
-          and operates your apps — so you stay in flow.
+          Say it, and it's done. Aria hears you, sees your screen, and operates<br />
+          your apps. Circle anything to understand it. Runs on your Mac.
         </motion.p>
 
         <motion.div className="heroCta"
@@ -279,18 +367,21 @@ export default function App() {
             <motion.div className="bentoCard" whileHover={reduce ? {} : { y: -4 }}
               initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }} transition={{ duration: 0.7, delay: 0.3 }}>
-              <span className="bentoNumber">04 · Private by default</span>
+              <span className="bentoNumber">04 · Runs 100% local</span>
               <h3>Your Mac. Your data.</h3>
-              <p>On-device wake word. Nothing leaves your device without you choosing it.</p>
+              <p>A local model does the thinking by default. Only your voice ever touches the cloud — and only if you let it.</p>
             </motion.div>
           </div>
         </div>
       </section>
 
-      {/* ---------- 03 · HOW IT WORKS ---------- */}
+      {/* ---------- 03 · LENS (circle to explain) ---------- */}
+      <LensShowcase />
+
+      {/* ---------- 03.5 · HOW IT WORKS ---------- */}
       <section>
         <div className="wrap">
-          <Label n="03">How it works</Label>
+          <Label n="04">How it works</Label>
           <div className="cols">
             <Reveal i={1}>
               <h2 className="display">One tiny icon.<br />Always within reach.</h2>

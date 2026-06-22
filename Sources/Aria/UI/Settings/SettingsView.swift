@@ -1071,6 +1071,11 @@ struct APIKeyTab: View {
                     TextField("Ollama model", text: $settings.localModelName)
                 }
                 if settings.localFirstEnabled {
+                    TextField("Local vision model (Lens / screen — optional)", text: $settings.localVisionModel)
+                    Text("On-device screen understanding for Lens (⌥⇧C circle-to-explain) and computer-use targeting. Pull a vision model — e.g. `ollama pull qwen2.5vl` or `llava` — and put its name here. Leave blank to use cloud vision (Gemini).")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if settings.localFirstEnabled {
                     Toggle("Local conversation too (experimental)", isOn: $settings.localChatEnabled)
                     Text("Planning, agents, knowledge and similar work runs on your Mac first — private, free, no quota — with automatic cloud fallback. Live conversation can run locally too, but needs a fast instruct model (thinking models like Qwen 3.5 take minutes per spoken reply; try llama3.1:8b or qwen2.5:7b-instruct). Requires Ollama (ollama.com) with the model pulled.")
                         .font(.caption).foregroundStyle(.secondary)

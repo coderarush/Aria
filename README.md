@@ -29,6 +29,12 @@ Google's Gemini free tier with your own key.
 
 ## What she does
 
+- **Circle anything, ask anything (Lens).** Press `⌥⇧C` (or say "let me circle something")
+  and draw a loop around whatever you don't understand — an error, a chart, a button, a
+  foreign phrase. Aria captures *just that region* and explains it through the blob + voice.
+  The ink is rendered in her own gooey idiom (the stroke trails small morphing blobs), and a
+  "draw on my screen" mode hands you freeform annotation. On-device when a local vision model
+  is set; cloud fallback otherwise.
 - **Acts, doesn't narrate.** A real tool + sub-agent system: open apps, click and type in
   any app (Accessibility tree, with a vision fallback for canvas/Electron UIs), run menus,
   scroll, search and fetch the web, read and write files, calendar and reminders (EventKit),
