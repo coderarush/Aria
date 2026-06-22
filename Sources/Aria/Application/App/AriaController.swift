@@ -49,6 +49,7 @@ final class AriaController {
     /// Push-to-talk (⌥Space) and type-to-Aria (⌥⇧Space) global hotkeys.
     private var hotkeyTap: HotkeyTap?
     private var typePanel: CommandInputPanel?
+    private var lensOverlay: LensOverlayController?
     private let dictation = DictationController()
     /// Set by startDictation(); the next captured transcript is inserted as text
     /// rather than handled as a command. Reset the instant it's consumed.
@@ -141,7 +142,8 @@ final class AriaController {
             onTalk: { [weak self] in self?.summonAria() },
             onType: { [weak self] in self?.showTypePanel() },
             onDictate: { [weak self] in self?.startDictation() },
-            onQuickCapture: { [weak self] in self?.showTypePanel() })   // ⌥⌥ → command palette
+            onQuickCapture: { [weak self] in self?.showTypePanel() },   // ⌥⌥ → command palette
+            onLens: { [weak self] in self?.startLens() })               // ⌥⇧C → circle to explain
         if hotkeyTap?.start() != true {
             // Accessibility not granted yet (or granted AFTER launch — taps
             // can't be created retroactively). Keep retrying so the user never
@@ -169,6 +171,58 @@ final class AriaController {
     /// suspended (she's speaking) or already capturing.
     func summonAria() {
         wakeEngine.summon()
+    }
+
+    /// Lens (⌥⇧C / menu / "what's this"): drop a full-screen, see-through canvas
+    /// so the user can circle anything on screen; Aria captures just that region
+    /// and explains it. Local-first — the image stays on device when a local
+    /// vision model is configured (see `VisionRouter`). Idempotent: a second
+    /// trigger while the overlay is up is ignored.
+    func startLens() {
+        guard lensOverlay == nil else { return }
+        let overlay = LensOverlayController(mode: .explain,
+                                            accent: islandViewModel.accent,
+                                            glow: islandViewModel.glowColors)
+        overlay.onExplain = { [weak self] _, bbox, _ in
+            self?.dismissLens()
+            self?.runLensExplain(region: bbox)
+        }
+        overlay.onCancel = { [weak self] in self?.dismissLens() }
+        lensOverlay = overlay
+        overlay.present()
+    }
+
+    private func dismissLens() {
+        lensOverlay?.dismiss()
+        lensOverlay = nil
+    }
+
+    /// Capture the circled region and explain it through the blob + voice, the
+    /// same surface every other answer uses.
+    private func runLensExplain(region: CGRect) {
+        islandViewModel.beginThinking()
+        currentTurnTask?.cancel()
+        currentTurnTask = Task { @MainActor in
+            // Let the overlay fully clear the screen before the screenshot so the
+            // scrim/ink never end up in the captured image.
+            try? await Task.sleep(nanoseconds: 140_000_000)
+            let screen = ScreenCaptureEngine()
+            guard let jpeg = try? await screen.captureRegionJPEG(topLeftRect: region) else {
+                self.islandViewModel.showError("I couldn't capture that area.")
+                return
+            }
+            let prompt = """
+            The user circled a region of their Mac screen (this image is just that region). \
+            In 1–3 short sentences, plainly explain what it is and what it does or means. \
+            If it's a UI control, say what tapping it does. If it's text, summarize or define it. \
+            Be concrete and useful; no preamble.
+            """
+            let answer = await VisionRouter.explain(prompt: prompt, jpeg: jpeg)
+                ?? "I couldn't make out what was in that area."
+            guard !Task.isCancelled else { return }
+            self.islandViewModel.showResponse(answer)
+            self.speakAndListen(answer)
+        }
     }
 
     /// System-wide dictation (⌥⇧D): reuse the exact voice-capture path, but flag

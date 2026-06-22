@@ -352,7 +352,11 @@ final class ConnectorStoreActorTests: XCTestCase {
             authorize: { _, _ in
                 XCTFail("should not authorize when not configured")
                 return OAuth2.TokenResponse(accessToken: "", refreshToken: nil, expiresIn: 0, scopes: [], tokenType: "Bearer")
-            })
+            },
+            // Pin "no client ID" hermetically: the real resolver reads the Keychain,
+            // so a developer's stored Google client ID would otherwise satisfy BYO
+            // and skip the .notConfigured contract this test asserts.
+            resolveClientID: { _ in nil })
         do {
             try await store.connect(.google)
             XCTFail("expected notConfigured")

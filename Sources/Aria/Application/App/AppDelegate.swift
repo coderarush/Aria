@@ -101,6 +101,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let typeItem = NSMenuItem(title: "Type to Aria…", action: #selector(typeToAria), keyEquivalent: " ")
         typeItem.keyEquivalentModifierMask = [.option, .shift]
         menu.addItem(typeItem)
+        let lensItem = NSMenuItem(title: "Circle to Explain", action: #selector(circleToExplain), keyEquivalent: "c")
+        lensItem.keyEquivalentModifierMask = [.option, .shift]
+        menu.addItem(lensItem)
 
         menu.addItem(.separator())
 
@@ -169,6 +172,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func summon() { controller.summonAria() }
     @objc private func typeToAria() { controller.showTypePanel() }
+    @objc private func circleToExplain() { controller.startLens() }
     @objc private func quit() { NSApp.terminate(nil) }
 
     /// Open (or front) the full Aria app window.

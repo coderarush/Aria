@@ -33,14 +33,20 @@ actor ConnectorStore {
     private let session: URLSession
     /// Injectable so tests can avoid the real network/browser.
     private let authorizeImpl: @Sendable (OAuth2.AuthConfig, URLSession) async throws -> OAuth2.TokenResponse
+    /// Injectable so tests can pin the "is a client ID configured?" answer without
+    /// touching the real Keychain — otherwise a developer's stored client ID makes
+    /// the BYO "not configured" contract non-hermetic (different result per machine).
+    private let resolveClientID: @Sendable (any ConnectorProvider) -> String?
 
     init(tokenStore: ConnectorTokenStore = .keychain,
          session: URLSession = .shared,
          authorize: @escaping @Sendable (OAuth2.AuthConfig, URLSession) async throws -> OAuth2.TokenResponse =
-            { config, session in try await OAuth2.authorize(config: config, session: session) }) {
+            { config, session in try await OAuth2.authorize(config: config, session: session) },
+         resolveClientID: @escaping @Sendable (any ConnectorProvider) -> String? = { $0.resolvedClientID() }) {
         self.tokenStore = tokenStore
         self.session = session
         self.authorizeImpl = authorize
+        self.resolveClientID = resolveClientID
     }
 
     /// Snapshot of every known provider's status (config + connection).
@@ -87,9 +93,9 @@ actor ConnectorStore {
         let clientID: String
         switch mode {
         case .relay:
-            clientID = provider.resolvedClientID() ?? ""
+            clientID = resolveClientID(provider) ?? ""
         case .bringYourOwn:
-            guard let resolved = provider.resolvedClientID() else {
+            guard let resolved = resolveClientID(provider) else {
                 throw ConnectorError.notConfigured(id)
             }
             clientID = resolved
@@ -119,9 +125,9 @@ actor ConnectorStore {
         let clientID: String
         switch mode {
         case .relay:
-            clientID = provider.resolvedClientID() ?? ""
+            clientID = resolveClientID(provider) ?? ""
         case .bringYourOwn:
-            guard let resolved = provider.resolvedClientID() else { return nil }
+            guard let resolved = resolveClientID(provider) else { return nil }
             clientID = resolved
         }
         do {

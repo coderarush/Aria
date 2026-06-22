@@ -31,6 +31,7 @@ struct DoubleTapDetector {
 final class HotkeyTap {
     nonisolated static let keySpace: Int64 = 49   // kVK_Space
     nonisolated static let keyD: Int64 = 2        // kVK_ANSI_D
+    nonisolated static let keyC: Int64 = 8        // kVK_ANSI_C
 
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -38,6 +39,7 @@ final class HotkeyTap {
     private let onType: () -> Void
     private let onDictate: () -> Void
     private let onQuickCapture: () -> Void
+    private let onLens: () -> Void
 
     // Double-tap-modifier state. Touched only inside `handle`, which runs on the
     // main run loop (the tap is added there), so this is single-threaded in practice.
@@ -48,11 +50,13 @@ final class HotkeyTap {
     init(onTalk: @escaping () -> Void,
          onType: @escaping () -> Void,
          onDictate: @escaping () -> Void,
-         onQuickCapture: @escaping () -> Void = {}) {
+         onQuickCapture: @escaping () -> Void = {},
+         onLens: @escaping () -> Void = {}) {
         self.onTalk = onTalk
         self.onType = onType
         self.onDictate = onDictate
         self.onQuickCapture = onQuickCapture
+        self.onLens = onLens
     }
 
     /// True when the tap is live. False = no Accessibility trust (or tap denied).
@@ -134,6 +138,15 @@ final class HotkeyTap {
                 return Unmanaged.passUnretained(event)
             }
             Task { @MainActor in Log.trace("hotkey: ⌥⇧D dictate"); self.onDictate() }
+            return nil
+        }
+
+        // ⌥⇧C = Lens: circle anything on screen and Aria explains it.
+        if code == Self.keyC {
+            guard option, shift, !command, !control, !isRepeat else {
+                return Unmanaged.passUnretained(event)
+            }
+            Task { @MainActor in Log.trace("hotkey: ⌥⇧C lens"); self.onLens() }
             return nil
         }
 

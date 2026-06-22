@@ -37,6 +37,39 @@ struct OllamaProvider: ModelProvider {
         try await client.generateText(prompt: prompt, temperature: temperature)
     }
 
+    /// Local multimodal: explain/describe an image with a vision-capable local
+    /// model (llava, qwen2.5vl, moondream, …) via Ollama's NATIVE `/api/generate`
+    /// `images` field — the OpenAI-compatible `/v1` path here is text-only. Lets
+    /// the Lens ("circle to explain") stay fully on-device when a vision model is
+    /// pulled; the caller falls back to cloud when this throws.
+    func generateTextWithImage(prompt: String, jpeg: Data, temperature: Double = 0.1) async throws -> String {
+        guard let url = URL(string: "http://localhost:11434/api/generate") else {
+            throw GeminiClient.GeminiError.decodeFailed("bad ollama url")
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 60
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let payload: [String: Any] = [
+            "model": model,
+            "prompt": prompt,
+            "images": [jpeg.base64EncodedString()],
+            "stream": false,
+            "think": false,
+            "options": ["temperature": temperature]
+        ]
+        req.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw GeminiClient.GeminiError.decodeFailed("ollama vision http error")
+        }
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let text = obj["response"] as? String else {
+            throw GeminiClient.GeminiError.decodeFailed("ollama vision decode")
+        }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// Streaming conversation through Ollama's NATIVE /api/chat — not the
     /// OpenAI-compatible /v1 endpoint, because only the native API honors
     /// `think: false`. Without it, thinking models (Qwen 3.5) burn minutes of
