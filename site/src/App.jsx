@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import Blob from "./Blob.jsx";
+import { Magnetic, TiltCard, ScrollProgress, Aurora, WordReveal, useScroll, useTransform } from "./Motion.jsx";
 
 const DOWNLOAD = "/Aria.dmg";
 const GITHUB = "https://github.com/coderarush/Aria";
@@ -103,11 +104,24 @@ function Marquee() {
    the stroke, and the explanation surfacing beside it. Motion is meaning. */
 function LensShowcase() {
   const reduce = useReducedMotion();
-  // Points along the drawn loop (stage-relative %), where the trailing blobs sit.
-  const trail = [
-    { x: 47, y: 43 }, { x: 62, y: 50 }, { x: 65, y: 63 },
-    { x: 60, y: 80 }, { x: 47, y: 83 }, { x: 32, y: 78 }, { x: 29, y: 60 },
-  ];
+  const stageRef = useRef(null);
+  const [pts, setPts] = useState([]);          // user-drawn points, in 0–100 stage coords
+  const [drawing, setDrawing] = useState(false);
+  const [answered, setAnswered] = useState(false);
+  const drew = pts.length > 4;
+
+  const toCoord = (e) => {
+    const r = stageRef.current.getBoundingClientRect();
+    const c = e.touches ? e.touches[0] : e;
+    return { x: ((c.clientX - r.left) / r.width) * 100, y: ((c.clientY - r.top) / r.height) * 100 };
+  };
+  const down = (e) => { e.preventDefault(); setAnswered(false); setPts([toCoord(e)]); setDrawing(true); };
+  const move = (e) => { if (drawing) setPts((p) => [...p, toCoord(e)]); };
+  const up = () => { setDrawing(false); if (pts.length > 4) setTimeout(() => setAnswered(true), 280); };
+
+  const userPath = pts.length > 1 ? "M" + pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" L") : "";
+  const demoLoop = "M50,16 C72,14 84,32 82,52 C80,74 58,80 38,76 C18,72 14,46 22,30 C28,18 38,17 50,16 Z";
+
   return (
     <section id="lens" className="lensSec firstSection">
       <div className="wrap">
@@ -117,13 +131,20 @@ function LensShowcase() {
           <Reveal i={2}>
             <p className="body sub">Hold <span className="mono inline">⌥⇧C</span> and draw a loop
             around whatever you don't understand — an error, a chart, a button, a foreign
-            phrase. Aria reads just that, and tells you what it is and what it does. Or say
-            "draw on my screen" and she hands you the ink.</p>
+            phrase. Aria reads just that, and tells you what it is. <strong>Try it below — draw
+            a circle on the window.</strong></p>
           </Reveal>
         </div>
 
         <Reveal i={2} className="lensStageWrap">
-          <div className="lensStage" aria-hidden="true">
+          <div
+            ref={stageRef}
+            className={`lensStage ${drew ? "lensDrew" : ""}`}
+            onPointerDown={down}
+            onPointerMove={move}
+            onPointerUp={up}
+            onPointerLeave={() => drawing && up()}
+          >
             {/* faux window beneath */}
             <div className="lensWindow">
               <div className="lensTitlebar"><i /><i /><i /></div>
@@ -138,17 +159,11 @@ function LensShowcase() {
               </div>
             </div>
 
-            {/* the drawn loop + trailing blobs */}
-            <svg className="lensLoop" viewBox="0 0 100 92" preserveAspectRatio="none">
-              <motion.path
-                d="M50,16 C72,14 84,32 82,52 C80,74 58,80 38,76 C18,72 14,46 22,30 C28,18 38,17 50,16 Z"
-                fill="none" stroke="url(#lensGrad)" strokeWidth="2.4"
-                strokeLinecap="round"
-                initial={{ pathLength: 0, opacity: 0.2 }}
-                whileInView={reduce ? { pathLength: 1, opacity: 1 } : { pathLength: [0, 1], opacity: 1 }}
-                viewport={{ once: true }}
-                transition={{ duration: 1.6, ease: [0.22, 1, 0.36, 1] }}
-              />
+            {!drew && (
+              <div className="lensHint">✎ draw a circle here</div>
+            )}
+
+            <svg className="lensInk" viewBox="0 0 100 100" preserveAspectRatio="none">
               <defs>
                 <linearGradient id="lensGrad" x1="0" y1="0" x2="1" y2="1">
                   <stop offset="0%" stopColor="#6b8cff" />
@@ -156,27 +171,31 @@ function LensShowcase() {
                   <stop offset="100%" stopColor="#21d4b4" />
                 </linearGradient>
               </defs>
+              {drew ? (
+                <path d={userPath} fill="none" stroke="url(#lensGrad)" strokeWidth="2.2"
+                      strokeLinecap="round" strokeLinejoin="round" />
+              ) : (
+                <motion.path d={demoLoop} fill="none" stroke="url(#lensGrad)" strokeWidth="2.2"
+                  strokeLinecap="round" opacity="0.85"
+                  initial={{ pathLength: 0 }}
+                  whileInView={reduce ? { pathLength: 1 } : { pathLength: [0, 1, 1, 0] }}
+                  viewport={{ once: false }}
+                  transition={{ duration: 5, repeat: Infinity, ease: "easeInOut", times: [0, 0.35, 0.8, 1] }}
+                />
+              )}
             </svg>
-            {trail.map((p, i) => (
-              <motion.span key={i} className="lensTrailBlob"
-                style={{ left: `${p.x}%`, top: `${p.y}%` }}
-                initial={{ scale: 0, opacity: 0 }}
-                whileInView={{ scale: 1, opacity: 1 }}
-                viewport={{ once: true }}
-                transition={{ delay: 0.5 + i * 0.12, duration: 0.5, ease: "backOut" }}
-                animate={reduce ? {} : { y: [0, -3, 0] }}
-              />
-            ))}
 
-            {/* explanation surfacing */}
+            {/* explanation surfacing — after the user draws, or in the auto demo */}
             <motion.div className="lensAnswer"
               initial={{ opacity: 0, y: 16, scale: 0.96 }}
-              whileInView={{ opacity: 1, y: 0, scale: 1 }}
-              viewport={{ once: true }}
-              transition={{ delay: 1.5, duration: 0.7, ease: [0.22, 1, 0.36, 1] }}>
+              animate={answered ? { opacity: 1, y: 0, scale: 1 } : undefined}
+              whileInView={!drew ? { opacity: 1, y: 0, scale: 1 } : undefined}
+              viewport={{ once: false }}
+              transition={{ delay: drew ? 0 : 1.6, duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+              style={drew && !answered ? { opacity: 0 } : undefined}>
               <div className="lensAnswerHead"><span className="lensAnswerOrb"><Blob size={20} mood="thinking" /></span> Aria</div>
-              <p>That's the <strong>Export</strong> menu — it lets you save this as PDF, PNG, or
-              CSV. The ▾ opens the format list.</p>
+              <p>That's the <strong>Export</strong> menu — it saves this as PDF, PNG, or CSV.
+              The ▾ opens the format list.</p>
             </motion.div>
           </div>
         </Reveal>
@@ -195,6 +214,16 @@ export default function App() {
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
+
+  /* Hero scroll parallax — the blob rises and fades, the headline drifts up at a
+     different rate, so the hero has Apple-style layered depth as you scroll out. */
+  const heroRef = useRef(null);
+  const { scrollYProgress: heroP } = useScroll({ target: heroRef, offset: ["start start", "end start"] });
+  const blobY = useTransform(heroP, [0, 1], [0, reduce ? 0 : -160]);
+  const blobScale = useTransform(heroP, [0, 1], [1, reduce ? 1 : 1.18]);
+  const blobOpacity = useTransform(heroP, [0, 0.8], [1, 0.15]);
+  const titleY = useTransform(heroP, [0, 1], [0, reduce ? 0 : -60]);
+  const heroFade = useTransform(heroP, [0, 0.7], [1, 0]);
 
   /* Cursor spotlight for hero */
   const handleHeroMouseMove = (e) => {
@@ -250,10 +279,14 @@ export default function App() {
         </div>
       </nav>
 
+      <ScrollProgress />
+
       {/* ---------- 01 · HERO (dark, full-viewport) ---------- */}
-      <section className="heroDark" onMouseMove={handleHeroMouseMove}>
-        {/* Large centered blob */}
+      <section ref={heroRef} className="heroDark" onMouseMove={handleHeroMouseMove}>
+        <Aurora className="auroraHero" />
+        {/* Large centered blob — rises + fades on scroll */}
         <motion.div className="heroBlobWrap"
+          style={{ y: blobY, scale: blobScale, opacity: blobOpacity }}
           initial={{ opacity: 0, scale: 0.6 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 1.4, ease: [0.22, 1, 0.36, 1] }}
@@ -262,16 +295,13 @@ export default function App() {
           <Blob size={520} mood="idle" />
         </motion.div>
 
-        {/* Headline below blob */}
-        <motion.h1 className="display heroTitle"
-          initial={{ opacity: 0, y: 30 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.9, delay: 0.4, ease: [0.22, 1, 0.36, 1] }}
-        >
-          The assistant<br />that lives on your Mac.
-        </motion.h1>
+        {/* Headline below blob — word-by-word reveal + scroll drift */}
+        <motion.div style={{ y: titleY, opacity: heroFade }}>
+          <WordReveal className="display heroTitle" text={"The assistant\nthat lives on your Mac."} />
+        </motion.div>
 
         <motion.p className="heroSub"
+          style={{ opacity: heroFade }}
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.9, delay: 0.55, ease: [0.22, 1, 0.36, 1] }}
@@ -285,10 +315,10 @@ export default function App() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.9, delay: 0.7, ease: [0.22, 1, 0.36, 1] }}
         >
-          <a className="btnLight" href={DOWNLOAD} download="Aria.dmg">
+          <Magnetic className="btnLight" href={DOWNLOAD} download="Aria.dmg">
             Download for Mac ↓
-          </a>
-          <a className="btnGhost" href="#features">See what she can do</a>
+          </Magnetic>
+          <Magnetic className="btnGhost" href="#features" strength={0.25}>See what she can do</Magnetic>
         </motion.div>
 
         {/* Specs bar at very bottom of hero */}
@@ -337,40 +367,40 @@ export default function App() {
             and get more done.</p>
           </Reveal>
 
-          {/* bento grid */}
+          {/* bento grid — 3D tilt + pointer sheen */}
           <div className="bentoGrid">
-            <motion.div className="bentoCard bentoLarge" whileHover={reduce ? {} : { y: -4 }}
+            <TiltCard className="bentoCard bentoLarge"
               initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }} transition={{ duration: 0.7 }}>
               <span className="bentoNumber">01 · Voice first</span>
               <h3>Natural conversation.<br />No commands.</h3>
               <p>Just speak. Aria understands context, intent, and follow-ups.</p>
               <div className="bentoBlobDeco"><Blob size={180} mood="listening" /></div>
-            </motion.div>
+            </TiltCard>
 
-            <motion.div className="bentoCard" whileHover={reduce ? {} : { y: -4 }}
+            <TiltCard className="bentoCard"
               initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }} transition={{ duration: 0.7, delay: 0.1 }}>
               <span className="bentoNumber">02 · Context aware</span>
               <h3>She sees what you see.</h3>
               <p>Aria reads the window, selection, and field you're in — no explaining needed.</p>
-            </motion.div>
+            </TiltCard>
 
-            <motion.div className="bentoCard bentoWide" whileHover={reduce ? {} : { y: -4 }}
+            <TiltCard className="bentoCard bentoWide"
               initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }} transition={{ duration: 0.7, delay: 0.2 }}>
               <span className="bentoNumber">03 · Takes action</span>
               <h3>Opens apps. Clicks. Types. Sends.</h3>
               <p>From drafting emails to running your morning routine — Aria completes the task.</p>
-            </motion.div>
+            </TiltCard>
 
-            <motion.div className="bentoCard" whileHover={reduce ? {} : { y: -4 }}
+            <TiltCard className="bentoCard"
               initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }} transition={{ duration: 0.7, delay: 0.3 }}>
               <span className="bentoNumber">04 · Runs 100% local</span>
               <h3>Your Mac. Your data.</h3>
               <p>A local model does the thinking by default. Only your voice ever touches the cloud — and only if you let it.</p>
-            </motion.div>
+            </TiltCard>
           </div>
         </div>
       </section>
@@ -577,14 +607,15 @@ export default function App() {
 
       {/* ---------- 09 · DOWNLOAD (dark, mirrors hero) ---------- */}
       <section id="download" className="downloadDark firstSection">
+        <Aurora className="auroraDownload" />
         <div className="wrap downloadInner">
           <Reveal i={0}><span className="mono labelLight">Download</span></Reveal>
           <Reveal i={1}><h2 className="display downloadTitle">Ready to try Aria.</h2></Reveal>
-          <Reveal i={2}><p className="downloadSub">Free to download. No account needed. Just your Mac and a free Gemini key.</p></Reveal>
+          <Reveal i={2}><p className="downloadSub">Free to download. No account needed. Runs on your Mac — local by default.</p></Reveal>
           <Reveal i={3}>
-            <a className="btnLight downloadCta" href={DOWNLOAD} download="Aria.dmg">
+            <Magnetic className="btnLight downloadCta" href={DOWNLOAD} download="Aria.dmg">
               Download for Mac ↓
-            </a>
+            </Magnetic>
           </Reveal>
           <Reveal i={4}>
             <p className="waitlistLabel">Or join the list for launch updates:</p>

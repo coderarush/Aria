@@ -626,3 +626,43 @@ footer a:hover { color: #f7f4ec; }
   .lensAnswer { width: 70%; right: 6%; bottom: 5%; }
   .lensLoop { left: 26%; width: 42%; }
 }
+
+/* ---------- Apple-grade motion layer ---------- */
+.scrollProgress {
+  position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 10000;
+  transform-origin: 0 50%; transform: scaleX(0);
+  background: linear-gradient(90deg, #6b8cff, #7c66f0 50%, #21d4b4);
+}
+
+/* Drifting aurora mesh behind dark sections */
+.heroDark, .downloadDark { position: relative; isolation: isolate; overflow: hidden; }
+.aurora { position: absolute; inset: -10%; z-index: 0; pointer-events: none; overflow: hidden; filter: blur(60px); }
+.heroDark > div, .heroDark > p, .heroDark > h1, .downloadDark > div { position: relative; z-index: 1; }
+.heroDark > .aurora, .downloadDark > .aurora { z-index: 0; }
+.auroraBlob { position: absolute; width: 46vw; height: 46vw; border-radius: 50%; opacity: 0.5; mix-blend-mode: screen; }
+.auroraBlob.ab0 { left: 8%;  top: 6%;  background: radial-gradient(circle, rgba(108,124,240,0.9), transparent 62%); }
+.auroraBlob.ab1 { right: 4%; top: 18%; background: radial-gradient(circle, rgba(33,212,180,0.75), transparent 62%); }
+.auroraBlob.ab2 { left: 34%; bottom: 2%; background: radial-gradient(circle, rgba(124,102,240,0.8), transparent 62%); }
+.auroraDownload { filter: blur(72px); opacity: 0.85; }
+
+/* 3D tilt cards: pointer-tracked specular sheen */
+.bentoCard, .setupCard { position: relative; transform-style: preserve-3d; will-change: transform; }
+.tiltGlow {
+  position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  transition: opacity 0.3s ease; mix-blend-mode: soft-light; z-index: 2;
+}
+.bentoCard > *:not(.tiltGlow), .setupCard > *:not(.tiltGlow) { transform: translateZ(28px); }
+
+/* ---------- interactive Lens: draw your own circle ---------- */
+.lensStage { cursor: crosshair; touch-action: none; }
+.lensInk { position: absolute; inset: 0; z-index: 5; pointer-events: none;
+  filter: drop-shadow(0 4px 14px rgba(108,124,240,0.5)); }
+.lensHint {
+  position: absolute; left: 50%; top: 12%; transform: translateX(-50%); z-index: 6;
+  font-size: 0.82rem; font-weight: 600; letter-spacing: 0.02em; color: #fff;
+  background: rgba(20,18,14,0.6); padding: 7px 16px; border-radius: 999px;
+  pointer-events: none; backdrop-filter: blur(6px);
+  animation: lensHintPulse 2.4s ease-in-out infinite;
+}
+@keyframes lensHintPulse { 0%,100% { opacity: 0.65; } 50% { opacity: 1; } }
+.lensDrew .lensHint { display: none; }
