@@ -178,9 +178,9 @@ final class AriaController {
     /// and explains it. Local-first — the image stays on device when a local
     /// vision model is configured (see `VisionRouter`). Idempotent: a second
     /// trigger while the overlay is up is ignored.
-    func startLens() {
+    func startLens(mode: LensSession.Mode = .explain) {
         guard lensOverlay == nil else { return }
-        let overlay = LensOverlayController(mode: .explain,
+        let overlay = LensOverlayController(mode: mode,
                                             accent: islandViewModel.accent,
                                             glow: islandViewModel.glowColors)
         overlay.onExplain = { [weak self] _, bbox, _ in
@@ -1073,6 +1073,16 @@ final class AriaController {
         // if there isn't one, so no async pre-check is needed on the main actor here.
         if ResumeIntent.matches(command) {
             runAutonomousTask(command, resume: true)
+            return
+        }
+
+        // Lens: "let me circle something" / "draw on my screen" → drop the
+        // see-through canvas. Explicit phrasing only, so ordinary questions
+        // ("what is this error") still route to the agent.
+        if let lensMode = LensIntent.mode(for: command) {
+            streamVoice.stop()
+            session?.end()
+            startLens(mode: lensMode)
             return
         }
 

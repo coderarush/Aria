@@ -30,7 +30,9 @@ enum VisionLocator {
         the right element: {"x":0.42,"y":0.13,"confidence":0.8}. If it isn't visible, \
         reply {"found":false}.
         """
-        let raw = (try? await gemini.generateTextWithImage(prompt: prompt, jpeg: jpeg)) ?? ""
+        // Local-first: a configured local vision model handles this on-device;
+        // Gemini is the fallback. Keeps computer-use targeting private when possible.
+        let raw = await VisionRouter.explain(prompt: prompt, jpeg: jpeg, gemini: gemini) ?? ""
         guard let frac = parseFraction(raw) else { return nil }
         let conf = parseConfidence(raw)
         let point = await MainActor.run { screenPoint(fromFraction: frac) }
