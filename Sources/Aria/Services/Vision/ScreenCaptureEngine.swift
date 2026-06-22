@@ -44,7 +44,7 @@ actor ScreenCaptureEngine {
         config.scalesToFit = true
         config.showsCursor = false
 
-        let filter = SCContentFilter(display: display, excludingWindows: [])
+        let filter = Self.filterExcludingSelf(display: display, content: content)
 
         let cgImage: CGImage
         do {
@@ -92,12 +92,21 @@ actor ScreenCaptureEngine {
         config.height = Int(display.height)
         config.scalesToFit = true
         config.showsCursor = false
-        let filter = SCContentFilter(display: display, excludingWindows: [])
+        let filter = Self.filterExcludingSelf(display: display, content: content)
         do {
             return try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
         } catch {
             throw CaptureError.captureFailed
         }
+    }
+
+    /// A content filter that excludes Aria's OWN windows (HUD blob, Lens canvas,
+    /// stage markers, indicators) so she never "sees" herself in a screenshot —
+    /// which would otherwise confuse vision targeting and the Lens.
+    private static func filterExcludingSelf(display: SCDisplay, content: SCShareableContent) -> SCContentFilter {
+        let myBundle = Bundle.main.bundleIdentifier
+        let mine = content.windows.filter { $0.owningApplication?.bundleIdentifier == myBundle }
+        return SCContentFilter(display: display, excludingWindows: mine)
     }
 
     // MARK: Compression

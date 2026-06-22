@@ -249,6 +249,52 @@ final class AriaController {
         }
     }
 
+    /// Guided walkthrough ("walk me through exporting a PDF"): Aria reads the
+    /// current screen, plans the steps, and then POINTS at each one in turn with a
+    /// labeled blob + spoken instruction — the tutor-beside-you move, on the whole
+    /// desktop and local-first. She guides; you do the clicking.
+    func startWalkthrough(task: String) {
+        islandViewModel.beginThinking()
+        currentTurnTask?.cancel()
+        currentTurnTask = Task { @MainActor in
+            let ocr = (try? await ScreenOCR.live.readAndTruncate(maxChars: 1600)) ?? ""
+            let prompt = """
+            The user wants a step-by-step walkthrough of: "\(task)".
+            Here is text currently visible on their screen:
+            \"\"\"
+            \(ocr)
+            \"\"\"
+            Output ONLY a JSON array of up to 6 ordered steps. Each step is an object:
+            {"element":"the on-screen control to interact with, named so it can be found",
+            "instruction":"a short imperative telling the user what to do"}.
+            No prose, no markdown — just the JSON array.
+            """
+            let raw = (try? await self.orchestrator.geminiClient.generateText(prompt: prompt, temperature: 0.2)) ?? ""
+            let steps = WalkthroughPlan.parse(raw)
+            guard !Task.isCancelled else { return }
+            guard !steps.isEmpty else {
+                let msg = "I couldn't work out the steps for that here."
+                self.islandViewModel.showResponse(msg); self.speakAndListen(msg); return
+            }
+            for (i, step) in steps.enumerated() {
+                if Task.isCancelled { break }
+                AriaStage.shared.clearMarkers()
+                if !step.element.isEmpty, let hit = await VisionLocator.locateScored(step.element) {
+                    AriaStage.shared.point(at: hit.point, label: "\(i + 1). \(step.instruction)", ttl: 14)
+                }
+                guard !Task.isCancelled else { break }
+                self.islandViewModel.showResponse("Step \(i + 1): \(step.instruction)")
+                self.streamVoice.enqueue("Step \(i + 1). \(step.instruction)")
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+            }
+            AriaStage.shared.clearMarkers()
+            guard !Task.isCancelled else { return }
+            let done = "That's the walkthrough — \(steps.count) step\(steps.count == 1 ? "" : "s")."
+            self.islandViewModel.showResponse(done)
+            self.speakAndListen(done)
+        }
+    }
+
     /// System-wide dictation (⌥⇧D): reuse the exact voice-capture path, but flag
     /// the next captured transcript to be cleaned and TYPED into the focused app
     /// instead of routed to the agent (see the divert at the top of handleCommand).
@@ -1104,6 +1150,15 @@ final class AriaController {
         // if there isn't one, so no async pre-check is needed on the main actor here.
         if ResumeIntent.matches(command) {
             runAutonomousTask(command, resume: true)
+            return
+        }
+
+        // Guided walkthrough: "walk me through X" / "show me how to X" → Aria
+        // points at each step on screen. Explicit phrasing so plain how-to
+        // questions she should just answer still route to the agent.
+        if let task = WalkthroughIntent.task(for: command) {
+            streamVoice.stop()
+            startWalkthrough(task: task)
             return
         }
 

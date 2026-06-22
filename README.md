@@ -31,10 +31,13 @@ Google's Gemini free tier with your own key.
 
 - **Circle anything, ask anything (Lens).** Press `⌥⇧C` (or say "let me circle something")
   and draw a loop around whatever you don't understand — an error, a chart, a button, a
-  foreign phrase. Aria captures *just that region* and explains it through the blob + voice.
-  The ink is rendered in her own gooey idiom (the stroke trails small morphing blobs), and a
-  "draw on my screen" mode hands you freeform annotation. On-device when a local vision model
-  is set; cloud fallback otherwise.
+  foreign phrase. Aria reads *just that region* (on-device OCR first) and explains it through
+  the blob + voice. A "draw on my screen" mode hands you freeform annotation.
+- **She points and walks you through it.** "Point at the export button" → Aria pools a
+  guidance blob right onto it. "Walk me through exporting a PDF" → she reads your screen,
+  plans the steps, and points at each one in turn with spoken instructions — a tutor beside
+  you, on the whole desktop. While she runs agentic work, she spawns a worker blob per step
+  (her sub-agents), each dissolving as its step completes.
 - **Acts, doesn't narrate.** A real tool + sub-agent system: open apps, click and type in
   any app (Accessibility tree, with a vision fallback for canvas/Electron UIs), run menus,
   scroll, search and fetch the web, read and write files, calendar and reminders (EventKit),
