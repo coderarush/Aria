@@ -60,35 +60,23 @@ actor ScreenCaptureEngine {
         return jpeg
     }
 
-    /// Capture only a sub-region of the primary display and return it as JPEG.
-    /// `topLeftRect` is in the display's point space with a TOP-LEFT origin (the
-    /// coordinate space SwiftUI/Lens draws in) — the Lens hands us the bounding
-    /// box of what the user circled so the model sees *only* that, not the whole
-    /// desktop. Clamped to the display; an empty intersection falls back to the
-    /// full-frame capture so the caller always gets something usable.
-    func captureRegionJPEG(topLeftRect: CGRect) async throws -> Data {
+    /// Capture only a sub-region given as NORMALIZED fractions (0…1, top-left
+    /// origin) of the primary display. Robust to Retina/scaled-resolution
+    /// mismatches (no points-vs-pixels math — the fraction maps straight onto the
+    /// captured image's own pixel dimensions). Falls back to the full frame if the
+    /// crop is degenerate.
+    func captureRegionJPEG(fraction: CGRect) async throws -> Data {
         let full = try await capturePrimaryCGImage()
-        let imgRect = CGRect(x: 0, y: 0, width: full.width, height: full.height)
-        // Map point-space (top-left) → pixel-space using the captured image's scale.
-        let display = try await primaryDisplaySize()
-        let scaleX = display.width > 0 ? CGFloat(full.width) / display.width : 1
-        let scaleY = display.height > 0 ? CGFloat(full.height) / display.height : 1
-        let pxRect = CGRect(x: topLeftRect.minX * scaleX, y: topLeftRect.minY * scaleY,
-                            width: topLeftRect.width * scaleX, height: topLeftRect.height * scaleY)
+        let w = CGFloat(full.width), h = CGFloat(full.height)
+        let imgRect = CGRect(x: 0, y: 0, width: w, height: h)
+        let px = CGRect(x: fraction.minX * w, y: fraction.minY * h,
+                        width: fraction.width * w, height: fraction.height * h)
             .integral
             .intersection(imgRect)
-        guard !pxRect.isNull, pxRect.width >= 8, pxRect.height >= 8,
-              let cropped = full.cropping(to: pxRect) else {
+        guard !px.isNull, px.width >= 8, px.height >= 8, let cropped = full.cropping(to: px) else {
             return try compress(full)
         }
         return try compress(cropped)
-    }
-
-    /// The primary display's size in points (for region → pixel mapping).
-    private func primaryDisplaySize() async throws -> CGSize {
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-        guard let d = content.displays.first else { throw CaptureError.noDisplay }
-        return CGSize(width: CGFloat(d.width), height: CGFloat(d.height))
     }
 
     private func capturePrimaryCGImage() async throws -> CGImage {

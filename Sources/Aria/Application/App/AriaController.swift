@@ -50,6 +50,7 @@ final class AriaController {
     private var hotkeyTap: HotkeyTap?
     private var typePanel: CommandInputPanel?
     private var lensOverlay: LensOverlayController?
+    private var stageController: AriaStageController?
     private let dictation = DictationController()
     /// Set by startDictation(); the next captured transcript is inserted as text
     /// rather than handled as a command. Reset the instant it's consumed.
@@ -183,9 +184,9 @@ final class AriaController {
         let overlay = LensOverlayController(mode: mode,
                                             accent: islandViewModel.accent,
                                             glow: islandViewModel.glowColors)
-        overlay.onExplain = { [weak self] _, bbox, _ in
+        overlay.onExplain = { [weak self] _, fraction in
             self?.dismissLens()
-            self?.runLensExplain(region: bbox)
+            self?.runLensExplain(fraction: fraction)
         }
         overlay.onCancel = { [weak self] in self?.dismissLens() }
         lensOverlay = overlay
@@ -198,27 +199,50 @@ final class AriaController {
     }
 
     /// Capture the circled region and explain it through the blob + voice, the
-    /// same surface every other answer uses.
-    private func runLensExplain(region: CGRect) {
+    /// same surface every other answer uses. OCR-first: most circled things are
+    /// text/UI, so we read the region on-device (Vision.framework) and explain via
+    /// the local-first text model — no vision model needed, and far more reliable
+    /// than asking a multimodal model to read a tiny crop. Pure images fall back
+    /// to `VisionRouter` (local vision if configured, else Gemini).
+    private func runLensExplain(fraction: CGRect) {
         islandViewModel.beginThinking()
         currentTurnTask?.cancel()
         currentTurnTask = Task { @MainActor in
             // Let the overlay fully clear the screen before the screenshot so the
             // scrim/ink never end up in the captured image.
-            try? await Task.sleep(nanoseconds: 140_000_000)
+            try? await Task.sleep(nanoseconds: 160_000_000)
             let screen = ScreenCaptureEngine()
-            guard let jpeg = try? await screen.captureRegionJPEG(topLeftRect: region) else {
+            guard let jpeg = try? await screen.captureRegionJPEG(fraction: fraction) else {
                 self.islandViewModel.showError("I couldn't capture that area.")
+                self.speakAndListen("I couldn't capture that area.")
                 return
             }
-            let prompt = """
-            The user circled a region of their Mac screen (this image is just that region). \
-            In 1–3 short sentences, plainly explain what it is and what it does or means. \
-            If it's a UI control, say what tapping it does. If it's text, summarize or define it. \
-            Be concrete and useful; no preamble.
-            """
-            let answer = await VisionRouter.explain(prompt: prompt, jpeg: jpeg)
-                ?? "I couldn't make out what was in that area."
+            let ocr = (await ScreenOCR.text(inJPEG: jpeg) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !Task.isCancelled else { return }
+
+            var answer: String
+            if ocr.count >= 10 {
+                // Text-bearing region — explain locally from the recognized text.
+                let prompt = """
+                The user circled this on their Mac screen. Recognized content:
+                \"\"\"
+                \(String(ocr.prefix(1400)))
+                \"\"\"
+                In 1–3 short, plain sentences, explain what it is or means and what to do with \
+                it. If it's a control/label, say what it does. No preamble.
+                """
+                answer = (try? await self.orchestrator.geminiClient.generateText(prompt: prompt, temperature: 0.2)) ?? ""
+                if answer.isEmpty { answer = "It says: \(String(ocr.prefix(280)))" }
+            } else {
+                // Little/no text (a diagram, photo, icon) — use the vision path.
+                let prompt = """
+                The user circled a region of their Mac screen (this image is just that region). \
+                In 1–3 short sentences, plainly explain what it is and what it does or means. \
+                Be concrete and useful; no preamble.
+                """
+                answer = await VisionRouter.explain(prompt: prompt, jpeg: jpeg)
+                    ?? "I couldn't read anything in that area. Try circling a bit wider, or add a Gemini key / local vision model in Settings for images."
+            }
             guard !Task.isCancelled else { return }
             self.islandViewModel.showResponse(answer)
             self.speakAndListen(answer)
@@ -740,6 +764,13 @@ final class AriaController {
         panel.contentView = host
         self.panel = panel
 
+        // Aria's on-screen stage: guidance markers + the agentic worker swarm,
+        // in a separate passive (click-through) overlay so it never fights the
+        // draggable blob for mouse events.
+        let stage = AriaStageController(accent: islandViewModel.accent)
+        stage.start()
+        self.stageController = stage
+
         // Keep the overlay (and its screen-edge border) fitted to the active
         // display if the screen arrangement changes mid-session.
         NotificationCenter.default.addObserver(
@@ -1233,6 +1264,11 @@ final class AriaController {
                     switch event {
                     case .planReady(let plan):
                         self.taskViewModel.show(plan)
+                        // Summon a worker blob per step — Aria's sub-agents, visibly
+                        // doing the work on screen. They dissolve one-by-one as steps
+                        // finish (and all clear when the task ends).
+                        AriaStage.shared.setWorkers(count: plan.steps.count,
+                                                    labels: plan.steps.map { $0.summary })
                     case .stepStarted(let i):
                         // First real step → she splashes to the bottom and becomes
                         // the working border. Simple chat answers never reach here.
@@ -1248,6 +1284,8 @@ final class AriaController {
                         }
                     case .stepFinished(let i, let ok, let result):
                         self.taskViewModel.markFinished(i, ok: ok, result: result)
+                        // One sub-agent done → one worker blob squishes away.
+                        AriaStage.shared.setWorkers(count: max(0, AriaStage.shared.workers.count - 1))
                     case .narrate(let line):
                         // While executing she stays the screen-edge border and just
                         // speaks the play-by-play; appending text would consolidate her
@@ -1258,6 +1296,7 @@ final class AriaController {
                         self.streamVoice.enqueue(line)
                     case .finished(let ok, let summary):
                         self.taskActive = false   // now the next queue-drain re-arms wake
+                        AriaStage.shared.clearWorkers()   // swarm disperses
                         // She consolidates from the border back into the blob and
                         // explains what she did (then the existing drain re-arms / dismisses).
                         self.islandViewModel.showResponse(summary)

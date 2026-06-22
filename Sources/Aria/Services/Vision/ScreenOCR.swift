@@ -2,6 +2,7 @@ import Foundation
 import Vision
 import AppKit
 import CoreGraphics
+import ImageIO
 
 /// Errors from ScreenOCR.
 enum ScreenOCRError: Error, Equatable {
@@ -68,5 +69,15 @@ struct ScreenOCR: Sendable {
     func readAndTruncate(maxChars: Int = 1000) async throws -> String {
         let result = try await read()
         return String(result.prefix(maxChars))
+    }
+
+    /// OCR an arbitrary JPEG region (e.g. a Lens crop) fully on-device. Returns
+    /// nil on decode/recognition failure. This is what lets "circle to explain"
+    /// work locally with no vision model: most circled things are text/UI, and
+    /// the recognized text can be explained by the (local-first) text model.
+    static func text(inJPEG data: Data) async -> String? {
+        guard let src = CGImageSourceCreateWithData(data as CFData, nil),
+              let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return nil }
+        return try? await live.recognizeText(img)
     }
 }

@@ -21,6 +21,9 @@ struct IslandView: View {
     @State private var showBurstParticles = false
     // 2f: State transition color flash
     @State private var flashIntensity: Double = 0
+    // Thinking: the body splits into a ring of small blobs that orbit, then
+    // squish back together when she's done. 0 = whole blob, 1 = fully split.
+    @State private var thinkingSplit: Double = 0
 
     /// Reported up to the hosting panel so it can make ONLY the blob interactive.
     var onBlobFrameChange: ((CGRect?) -> Void)?
@@ -82,12 +85,18 @@ struct IslandView: View {
             .overlay(alignment: .bottom) { caption }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onChange(of: viewModel.state) { _, _ in
+        .onChange(of: viewModel.state) { _, newState in
             pulse = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.34) { pulse = false }
             // 2f: Flash the blob white briefly on every state transition.
             flashIntensity = 0.4
             withAnimation(.easeOut(duration: 0.35)) { flashIntensity = 0 }
+            // Split into orbiting blobs while thinking; merge back otherwise. A
+            // springy response with a touch of overshoot gives the "pull apart /
+            // snap together" feel.
+            withAnimation(.spring(response: 0.62, dampingFraction: 0.66)) {
+                thinkingSplit = newState == .thinking ? 1 : 0
+            }
         }
         .onChange(of: choreographer.kind) { _, kind in
             // The blob is only draggable when fully settled; the instant she
@@ -218,22 +227,28 @@ struct IslandView: View {
                 )
                 .frame(width: 150, height: 150)
                 .scaleEffect(x: envScale, y: envScale * squash)
-                .scaleEffect(combinedScale)
-                .shadow(color: .black.opacity(0.22), radius: 10, y: 7)
-                .shadow(color: c0.opacity(0.28 + (suggesting ? 0.25 * breathe : 0)),
+                .scaleEffect(combinedScale * (1 - 0.30 * thinkingSplit))
+                // As she splits, the whole body dissolves into the orbiting blobs.
+                .opacity(1 - thinkingSplit)
+                .shadow(color: .black.opacity(0.22 * (1 - thinkingSplit)), radius: 10, y: 7)
+                .shadow(color: c0.opacity((0.28 + (suggesting ? 0.25 * breathe : 0)) * (1 - thinkingSplit)),
                         radius: 16 + (suggesting ? 10 * breathe : 0))
 
-            // 2c: Rotating shimmer ring while thinking.
-            if thinking {
+            // The thinking constellation: the body pulled apart into a ring of
+            // small morphing blobs that orbit (and gently bob against) each other.
+            thinkingConstellation(t: t, split: thinkingSplit, combinedScale: combinedScale)
+
+            // 2c: Rotating shimmer ring while thinking — fades in with the split.
+            if thinkingSplit > 0.02 {
                 Circle()
                     .stroke(
                         AngularGradient(colors: [.clear, (palette.first ?? .purple).opacity(0.6), .clear],
                                        center: .center),
                         lineWidth: 2
                     )
-                    .frame(width: 170, height: 170)
+                    .frame(width: 176, height: 176)
                     .rotationEffect(.degrees(t * 120))
-                    .opacity(0.7)
+                    .opacity(0.6 * thinkingSplit)
                     .blendMode(.plusLighter)
             }
 
@@ -256,6 +271,45 @@ struct IslandView: View {
         // 2e: Snappier spring physics.
         .animation(.spring(response: 0.38, dampingFraction: 0.62), value: pulse)
         .animation(.spring(response: 0.35, dampingFraction: 0.65), value: isDragging)
+    }
+
+    /// The orbiting small blobs she becomes while thinking. Each starts at the
+    /// center (split 0, scale 0) and spirals out to its place on a slowly rotating
+    /// ring (split 1), morphing and bobbing so the cluster looks alive — then
+    /// reverses back into the body when thinking ends. Pure function of `t`+`split`.
+    @ViewBuilder
+    private func thinkingConstellation(t: Double, split: Double, combinedScale: Double) -> some View {
+        if split > 0.001 {
+            let n = 6
+            let c0 = palette.first ?? viewModel.accent
+            ZStack {
+                ForEach(0..<n, id: \.self) { i in
+                    let fi = Double(i)
+                    // Ring rotation + per-blob bob makes them weave around each other.
+                    let angle = fi / Double(n) * 2 * .pi + t * 0.85
+                    let ringR = (50.0 + 9.0 * sin(t * 1.4 + fi * 1.7)) * split
+                    // A short spiral as they emerge: more spin when less split.
+                    let dx = cos(angle) * ringR
+                    let dy = sin(angle) * ringR
+                    let radii = BlobMath.radii(t: t * 1.25 + fi * 0.9, n: 10, amp: 0.32, speed: 1.15)
+                    let sz = (16.0 + 26.0 * split) * combinedScale
+                    let col = palette.count > 1 ? palette[i % palette.count] : c0
+                    BlobShape(radii: radii)
+                        .fill(LinearGradient(colors: [col, col.opacity(0.62)],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .overlay(
+                            BlobShape(radii: radii)
+                                .fill(RadialGradient(colors: [.white.opacity(0.5), .clear],
+                                                     center: .init(x: 0.36, y: 0.30), startRadius: 1, endRadius: sz * 0.5))
+                        )
+                        .frame(width: sz, height: sz)
+                        .shadow(color: col.opacity(0.55), radius: 7)
+                        .offset(x: dx, y: dy)
+                        .opacity(min(1, split * 1.3))
+                }
+            }
+            .blur(radius: 2.2 * (1 - split))   // soft "un-resolving" as they split off
+        }
     }
 
     // MARK: - Positioning

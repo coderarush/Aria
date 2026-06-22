@@ -16,26 +16,20 @@ struct LensCanvasView: View {
     private var allStrokes: [[CGPoint]] { session.strokes + (session.current.isEmpty ? [] : [session.current]) }
 
     var body: some View {
-        TimelineView(.animation) { tl in
-            let t = tl.date.timeIntervalSinceReferenceDate
-            ZStack {
-                // Faint scrim: signals "you're in Lens" without hiding what's beneath.
-                LinearGradient(colors: [.black.opacity(0.10), .black.opacity(0.16)],
-                               startPoint: .top, endPoint: .bottom)
-                    .ignoresSafeArea()
+        ZStack {
+            // Faint scrim: signals "you're in Lens" without hiding what's beneath.
+            LinearGradient(colors: [.black.opacity(0.10), .black.opacity(0.16)],
+                           startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
 
-                ForEach(Array(allStrokes.enumerated()), id: \.offset) { _, stroke in
-                    strokeInk(stroke)
-                    ForEach(Array(trailBlobs(for: stroke, t: t).enumerated()), id: \.offset) { _, b in
-                        smallBlob(at: b.point, seed: b.seed, t: t)
-                    }
-                }
-
-                hint
+            ForEach(Array(allStrokes.enumerated()), id: \.offset) { _, stroke in
+                strokeInk(stroke)
             }
-            .contentShape(Rectangle())
-            .gesture(drawGesture)
+
+            hint
         }
+        .contentShape(Rectangle())
+        .gesture(drawGesture)
     }
 
     // MARK: Ink
@@ -54,28 +48,6 @@ struct LensCanvasView: View {
                 .shadow(color: session.accent.opacity(0.30), radius: 28)
                 .allowsHitTesting(false)
         }
-    }
-
-    /// A few small blobs riding the stroke. Capped so a long scribble doesn't
-    /// spawn hundreds.
-    private func trailBlobs(for stroke: [CGPoint], t: Double) -> [(point: CGPoint, seed: Int)] {
-        guard stroke.count >= 2 else { return [] }
-        let n = min(7, max(2, stroke.count / 6))
-        return LensGeometry.sampleAlong(stroke, count: n).enumerated().map { (i, p) in (p, i) }
-    }
-
-    private func smallBlob(at point: CGPoint, seed: Int, t: Double) -> some View {
-        let phase = t * 1.4 + Double(seed) * 0.9
-        let radii = BlobMath.radii(t: phase, n: 12, amp: 0.34, speed: 1.0)
-        let size = 30.0 + 8.0 * sin(phase * 1.3)
-        let color = session.palette[seed % session.palette.count]
-        return BlobShape(radii: radii)
-            .fill(RadialGradient(colors: [color.opacity(0.95), color.opacity(0.35)],
-                                 center: .center, startRadius: 1, endRadius: size / 2))
-            .frame(width: size, height: size)
-            .shadow(color: color.opacity(0.6), radius: 8)
-            .position(point)
-            .allowsHitTesting(false)
     }
 
     // MARK: Hint

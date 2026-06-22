@@ -13,9 +13,10 @@ final class LensOverlayController {
     private var keyMonitor: Any?
     private let session: LensSession
 
-    /// Called with (stroke points, bounding box in top-left screen points, screen
-    /// size in points) when the user finishes circling in explain mode.
-    var onExplain: (([CGPoint], CGRect, CGSize) -> Void)?
+    /// Called with (stroke points, normalized fraction rect 0…1 of the screen)
+    /// when the user finishes circling in explain mode. A fraction (not points)
+    /// so capture is robust to Retina/scaled-resolution mismatches.
+    var onExplain: (([CGPoint], CGRect) -> Void)?
     /// Called when the user cancels (Esc, or a bare tap with no circle).
     var onCancel: (() -> Void)?
 
@@ -34,7 +35,8 @@ final class LensOverlayController {
                 let bbox = LensGeometry.clamp(
                     LensGeometry.boundingBox(of: points, padding: 14),
                     to: CGRect(origin: .zero, size: screenSize))
-                self.onExplain?(points, bbox, screenSize)
+                let fraction = LensGeometry.fractionRect(bbox, in: screenSize)
+                self.onExplain?(points, fraction)
             },
             onCancel: { [weak self] in self?.onCancel?() })
 
