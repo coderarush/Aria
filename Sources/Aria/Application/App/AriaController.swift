@@ -1110,12 +1110,9 @@ final class AriaController {
             return
         }
 
-        // Lens follow-up: if the user just circled something and now says "translate
-        // that" / "fix this", fold the circled content into the command so the agent
-        // acts on it. Consumed once; leaves non-deictic commands untouched.
-        let command: String = LensFollowUp.fold(command: rawCommand, capture: LensMemory.shared.last)
-            .map { folded in LensMemory.shared.clear(); return folded } ?? rawCommand
-
+        // Control phrases (dismiss / brief / walkthrough / lens / focus) match on the
+        // raw words; only the agent paths below fold in any circled Lens content.
+        let command = rawCommand
         let lower = command.lowercased()
 
 
@@ -1196,6 +1193,12 @@ final class AriaController {
             return
         }
 
+        // Lens follow-up: only now (the agent paths) do we fold just-circled content
+        // into a deictic action — "translate that", "fix this error" — so control
+        // phrases above stay untouched. Consumed once.
+        let agentCommand = LensFollowUp.fold(command: command, capture: LensMemory.shared.last)
+            .map { folded in LensMemory.shared.clear(); return folded } ?? command
+
         // V11 P8: "run my morning startup" — recipe-style phrasing goes down
         // the task path, where the recipe store gets first claim on the goal.
         if Recipe.invocationLikely(command) {
@@ -1204,7 +1207,7 @@ final class AriaController {
         }
 
         if IntentRouter.isTask(command) {
-            runAutonomousTask(command)
+            runAutonomousTask(agentCommand)
             return
         }
 
@@ -1233,7 +1236,7 @@ final class AriaController {
         }
         currentTurnTask = Task { [weak self] in
             guard let self else { return }
-            await self.orchestrator.handleStreaming(command: command, privacyMode: AppSettings.shared.privacyMode) { delta in
+            await self.orchestrator.handleStreaming(command: agentCommand, privacyMode: AppSettings.shared.privacyMode) { delta in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
                     // Play confirm on the first delta of each streaming turn.
