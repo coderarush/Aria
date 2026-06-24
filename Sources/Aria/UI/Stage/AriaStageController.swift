@@ -17,11 +17,26 @@ final class AriaStageController {
         self.accent = accent
     }
 
+    private var screenObserver: NSObjectProtocol?
+
     func start() {
         // React to stage changes on the main actor; show/hide the panel to match.
         cancellable = stage.objectWillChange
             .receive(on: RunLoop.main)
             .sink { [weak self] in self?.sync() }
+        // Re-fit the overlay (and re-render at the new size) if the display
+        // arrangement or resolution changes mid-session.
+        screenObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let panel = self.panel,
+                      let screen = NSScreen.main ?? NSScreen.screens.first else { return }
+                panel.setFrame(screen.frame, display: true)
+                self.rebuildContent()
+            }
+        }
         sync()
     }
 
@@ -65,6 +80,7 @@ final class AriaStageController {
 
     func stop() {
         cancellable?.cancel()
+        if let screenObserver { NotificationCenter.default.removeObserver(screenObserver); self.screenObserver = nil }
         panel?.orderOut(nil)
         panel = nil
     }

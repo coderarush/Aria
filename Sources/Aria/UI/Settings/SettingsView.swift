@@ -300,6 +300,9 @@ struct GeneralSettingsTab: View {
                         Text($0.label).tag($0)
                     }
                 }
+                Toggle("Split into orbiting blobs while thinking", isOn: $settings.expressiveThinking)
+                Text("When she's thinking, the blob splits into a ring of small blobs that orbit, then squish back together. Turn off for a calmer shimmer.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
             SSection("Personality") {

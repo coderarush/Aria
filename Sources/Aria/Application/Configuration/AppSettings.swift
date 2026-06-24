@@ -84,6 +84,9 @@ final class AppSettings: ObservableObject {
     @Published var localChatEnabled: Bool { didSet { defaults.set(localChatEnabled, forKey: K.localChatEnabled) } }
     /// Speak a short play-by-play line as each autonomous step starts (alive + transparent).
     @Published var spokenStepNarration: Bool { didSet { defaults.set(spokenStepNarration, forKey: K.spokenStepNarration) } }
+    /// Whether the HUD blob splits into orbiting blobs while thinking (default on).
+    /// Off → the calmer shimmer ring only, for users who prefer less ambient motion.
+    @Published var expressiveThinking: Bool { didSet { defaults.set(expressiveThinking, forKey: K.expressiveThinking) } }
     /// Soft interaction chimes (wake, task done). Synthesized, AEC-cancelled.
     @Published var uiSoundsEnabled: Bool { didSet { defaults.set(uiSoundsEnabled, forKey: K.uiSoundsEnabled) } }
     /// Orb size multiplier (0.7 small … 1.3 large).
@@ -188,6 +191,7 @@ final class AppSettings: ObservableObject {
         // model server is alive (else it transparently falls back to fast cloud).
         localChatEnabled = defaults.object(forKey: K.localChatEnabled) as? Bool ?? true
         spokenStepNarration = defaults.object(forKey: K.spokenStepNarration) as? Bool ?? true
+        expressiveThinking = defaults.object(forKey: K.expressiveThinking) as? Bool ?? true
         uiSoundsEnabled = defaults.object(forKey: K.uiSoundsEnabled) as? Bool ?? true
         orbScale = defaults.object(forKey: K.orbScale) as? Double ?? 1.0
         personaStyle = defaults.string(forKey: PersonaStyle.key) ?? "balanced"
@@ -247,6 +251,7 @@ final class AppSettings: ObservableObject {
         static let localFirstEnabled = "app.localFirst"
         static let localChatEnabled = "app.localChat"
         static let spokenStepNarration = "app.spokenStepNarration"
+        static let expressiveThinking = "app.expressiveThinking"
         static let uiSoundsEnabled = "app.uiSounds"
         static let orbScale = "app.orbScale"
         static let briefingSpoken = "app.briefingSpoken"

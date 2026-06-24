@@ -93,9 +93,9 @@ struct IslandView: View {
             withAnimation(.easeOut(duration: 0.35)) { flashIntensity = 0 }
             // Split into orbiting blobs while thinking; merge back otherwise. A
             // springy response with a touch of overshoot gives the "pull apart /
-            // snap together" feel.
+            // snap together" feel. Opt-out via Settings → calmer shimmer only.
             withAnimation(.spring(response: 0.62, dampingFraction: 0.66)) {
-                thinkingSplit = newState == .thinking ? 1 : 0
+                thinkingSplit = (newState == .thinking && settings.expressiveThinking) ? 1 : 0
             }
         }
         .onChange(of: choreographer.kind) { _, kind in
@@ -238,8 +238,9 @@ struct IslandView: View {
             // small morphing blobs that orbit (and gently bob against) each other.
             thinkingConstellation(t: t, split: thinkingSplit, combinedScale: combinedScale)
 
-            // 2c: Rotating shimmer ring while thinking — fades in with the split.
-            if thinkingSplit > 0.02 {
+            // 2c: Rotating shimmer ring while thinking. With the split animation on
+            // it fades in with the split; with it off it's the sole thinking cue.
+            if thinking {
                 Circle()
                     .stroke(
                         AngularGradient(colors: [.clear, (palette.first ?? .purple).opacity(0.6), .clear],
@@ -248,7 +249,7 @@ struct IslandView: View {
                     )
                     .frame(width: 176, height: 176)
                     .rotationEffect(.degrees(t * 120))
-                    .opacity(0.6 * thinkingSplit)
+                    .opacity(settings.expressiveThinking ? 0.6 * thinkingSplit : 0.65)
                     .blendMode(.plusLighter)
             }
 
