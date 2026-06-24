@@ -219,6 +219,9 @@ final class AriaController {
             }
             let ocr = (await ScreenOCR.text(inJPEG: jpeg) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !Task.isCancelled else { return }
+            // Remember what was circled so a follow-up ("translate that", "fix this")
+            // can act on it without re-circling.
+            LensMemory.shared.record(text: ocr)
 
             var answer: String
             if ocr.count >= 10 {
@@ -285,7 +288,11 @@ final class AriaController {
                 guard !Task.isCancelled else { break }
                 self.islandViewModel.showResponse("Step \(i + 1): \(step.instruction)")
                 self.streamVoice.enqueue("Step \(i + 1). \(step.instruction)")
-                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                // Pace by how much there is to read/do: longer instructions get
+                // more time. Clamped so it never drags or rushes.
+                let words = step.instruction.split(separator: " ").count
+                let secs = min(max(3.0 + Double(words) * 0.45, 4.0), 9.0)
+                try? await Task.sleep(nanoseconds: UInt64(secs * 1_000_000_000))
             }
             AriaStage.shared.clearMarkers()
             guard !Task.isCancelled else { return }
@@ -1073,7 +1080,7 @@ final class AriaController {
 
     // MARK: Command handling
 
-    private func handleCommand(_ command: String, unattended: Bool = false) {
+    private func handleCommand(_ rawCommand: String, unattended: Bool = false) {
         // Track whether a user is present for this command, so a destructive
         // confirmation during an unattended (proactive/auto) run is declined
         // rather than blocking on a modal. User-initiated commands default false.
@@ -1084,7 +1091,7 @@ final class AriaController {
         if dictationPending {
             dictationPending = false
             islandViewModel.isDictating = false
-            let raw = command
+            let raw = rawCommand
             let useAI = AppSettings.shared.dictationAICleanup
             endConversation()
             Task { [weak self] in
@@ -1102,6 +1109,12 @@ final class AriaController {
             }
             return
         }
+
+        // Lens follow-up: if the user just circled something and now says "translate
+        // that" / "fix this", fold the circled content into the command so the agent
+        // acts on it. Consumed once; leaves non-deictic commands untouched.
+        let command: String = LensFollowUp.fold(command: rawCommand, capture: LensMemory.shared.last)
+            .map { folded in LensMemory.shared.clear(); return folded } ?? rawCommand
 
         let lower = command.lowercased()
 
