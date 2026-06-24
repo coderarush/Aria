@@ -67,21 +67,33 @@ Limits: most-advanced on-device model needs 12 GB RAM (iPhone Air / 17 Pro /
 - **Execution-first**: Objective → Understand → Plan → Execute → Verify → Report,
   with receipts + undo. Siri is still primarily request/response.
 
-## What we built this pass (runtime-os)
-1. **Lens** — circle-to-explain + draw-on-screen via spawned blobs (⌥⇧C / menu /
-   "let me circle something"). Region-only capture; explained via blob + voice.
-2. **Local-first vision** — vision was Gemini-only; now routes on-device first
-   (`VisionRouter`, `OllamaProvider.generateTextWithImage`), cloud as fallback.
-   Applied to both Lens and computer-use targeting (`VisionLocator`).
-3. **Hardening** — made `ConnectorStore` client-ID resolution injectable so the
-   BYO "not configured" contract is hermetic (fixed 2 environment-fragile test
-   failures). Full suite green (1420 tests).
+## What we built (runtime-os)
+1. **Lens** — circle-to-explain (⌥⇧C / menu / "let me circle something") + draw-on-
+   screen. Region-only capture (fraction-based, scaling-proof); **OCR-first**
+   (on-device Vision.framework → local text model), vision fallback for images.
+2. **Lens-to-action** — after circling, "translate that" / "fix this error" folds
+   the circled content into the next command so the agent acts on it (`LensFollowUp`,
+   whole-word deictic match, 120s freshness, consumed once).
+3. **She points & teaches** — `show_me` pools a guidance blob onto a located element;
+   **guided walkthroughs** ("walk me through exporting a PDF") point at each step in
+   turn with spoken instructions (whole-desktop, local-first). Beats Clicky's tutor.
+4. **Worker swarm** — agentic plans spawn one worker blob per step (visible sub-
+   agents), dissolving as steps finish.
+5. **Thinking constellation** — the HUD blob splits into orbiting small blobs and
+   squishes back together (spring-driven).
+6. **Local-first vision** — was Gemini-only; now routes on-device first
+   (`VisionRouter`, `OllamaProvider.generateTextWithImage`), cloud fallback. Applied
+   to Lens, `show_me`, walkthroughs, and computer-use targeting (`VisionLocator`).
+7. **Hardening** — screen capture excludes Aria's OWN windows (she never sees her own
+   overlays); `ConnectorStore` client-ID resolution injectable (fixed 2 env-fragile
+   tests). Site got an Apple-grade motion pass + interactive Lens demo. Suite 1433
+   green; release build concurrency-clean.
 
 ## Still open (honest)
-- Lens visual/interaction polish needs on-device runtime validation (GUI can't be
-  exercised headless): drag fidelity across displays, Esc/finish ergonomics,
-  multi-monitor coordinate mapping (currently primary-display assumed).
-- Local vision model isn't auto-installed — needs a `app.localVisionModel` setting
-  + one-click pull in `ModelInstaller`/Settings to match the text-model setup flow.
-- Lens "explain" could feed the orchestrator (act on what's circled), not just
-  describe it.
+- All Lens/stage/walkthrough/thinking GUI is **unrun headless** — feel, marker
+  alignment, drag fidelity, and pacing need on-device validation.
+- Multi-monitor: capture + overlays assume the primary display.
+- Local vision model still manual-install (`app.localVisionModel` Settings field
+  exists; no one-click pull yet).
+- Walkthrough advances on a length-scaled timer; a "say next to advance" mode would
+  be better.
