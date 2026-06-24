@@ -51,6 +51,8 @@ final class AriaController {
     private var typePanel: CommandInputPanel?
     private var lensOverlay: LensOverlayController?
     private var stageController: AriaStageController?
+    /// Latest HUD blob center in screen points, for anchoring the worker swarm.
+    private var lastBlobCenter: CGPoint?
     private let dictation = DictationController()
     /// Set by startDictation(); the next captured transcript is inserted as text
     /// rather than handled as a command. Reset the instant it's consumed.
@@ -225,15 +227,11 @@ final class AriaController {
 
             var answer: String
             if ocr.count >= 10 {
-                // Text-bearing region — explain locally from the recognized text.
-                let prompt = """
-                The user circled this on their Mac screen. Recognized content:
-                \"\"\"
-                \(String(ocr.prefix(1400)))
-                \"\"\"
-                In 1–3 short, plain sentences, explain what it is or means and what to do with \
-                it. If it's a control/label, say what it does. No preamble.
-                """
+                // Text-bearing region — explain locally from the recognized text, with
+                // a prompt tailored to what was circled (error → fix, code → explain,
+                // math → solve, else plain explanation).
+                let kind = LensClassifier.kind(of: ocr)
+                let prompt = LensClassifier.prompt(for: kind, ocr: ocr)
                 answer = (try? await self.orchestrator.geminiClient.generateText(prompt: prompt, temperature: 0.2)) ?? ""
                 if answer.isEmpty { answer = "It says: \(String(ocr.prefix(280)))" }
             } else {
@@ -810,7 +808,13 @@ final class AriaController {
     private func setupPanel() {
         let panel = IslandPanel()
         let island = IslandView(viewModel: islandViewModel,
-                                onBlobFrameChange: { [weak panel] rect in panel?.setBlobFrame(rect) })
+                                onBlobFrameChange: { [weak self, weak panel] rect in
+                                    panel?.setBlobFrame(rect)
+                                    // Track the live blob center so the worker swarm
+                                    // clusters at the blob (wherever the user parked it),
+                                    // not always bottom-right. Plain var → no @Published churn.
+                                    self?.lastBlobCenter = rect.map { CGPoint(x: $0.midX, y: $0.midY) }
+                                })
         let host = NSHostingView(rootView: island)
         host.frame = panel.contentLayoutRect
         host.autoresizingMask = [.width, .height]
@@ -1339,7 +1343,8 @@ final class AriaController {
                         // doing the work on screen. They dissolve one-by-one as steps
                         // finish (and all clear when the task ends).
                         AriaStage.shared.setWorkers(count: plan.steps.count,
-                                                    labels: plan.steps.map { $0.summary })
+                                                    labels: plan.steps.map { $0.summary },
+                                                    anchor: self.lastBlobCenter)
                     case .stepStarted(let i):
                         // First real step → she splashes to the bottom and becomes
                         // the working border. Simple chat answers never reach here.
