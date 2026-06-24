@@ -176,7 +176,9 @@ struct ScreenVisionTool: AriaTool {
         let question = (input["question"] ?? input["prompt"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let ask = question.isEmpty ? "Describe what's on the screen." : question
         let prompt = "Look at this screenshot and answer concisely: \(ask)"
-        let answer = ((try? await gemini.generateTextWithImage(prompt: prompt, jpeg: jpeg)) ?? "")
+        // Local-first: an on-device vision model answers when configured; Gemini
+        // is the fallback (same routing as the Lens + computer-use targeting).
+        let answer = (await VisionRouter.explain(prompt: prompt, jpeg: jpeg, gemini: gemini) ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return answer.isEmpty
             ? .fail("I captured the screen but couldn't make out an answer just now.")

@@ -211,6 +211,11 @@ Keychain and sent only to the provider you configured.
 | “Undo that.” | rolls back her last reversible change |
 | “Resume.” | picks up an interrupted task where it left off |
 | “Find the export button and click it.” | sees the screen and clicks it |
+| `⌥⇧C`, circle an error → “fix this” | reads just that region (on-device OCR), then acts on it |
+| “Point at the share button.” | pools a guidance blob onto it — she shows, you click |
+| “Walk me through exporting a PDF.” | reads the screen and points through each step |
+| “Watch this.” (after circling) | pings you when that region changes |
+| “Draw on my screen.” | freeform annotation in her gooey ink |
 
 ## Architecture
 
