@@ -53,6 +53,8 @@ final class AriaController {
     private var stageController: AriaStageController?
     /// Latest HUD blob center in screen points, for anchoring the worker swarm.
     private var lastBlobCenter: CGPoint?
+    /// Independent of `currentTurnTask` so it survives other commands.
+    private var regionWatchTask: Task<Void, Never>?
     private let dictation = DictationController()
     /// Set by startDictation(); the next captured transcript is inserted as text
     /// rather than handled as a command. Reset the instant it's consumed.
@@ -221,9 +223,9 @@ final class AriaController {
             }
             let ocr = (await ScreenOCR.text(inJPEG: jpeg) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !Task.isCancelled else { return }
-            // Remember what was circled so a follow-up ("translate that", "fix this")
-            // can act on it without re-circling.
-            LensMemory.shared.record(text: ocr)
+            // Remember what was circled (text + region) so a follow-up ("translate
+            // that", "fix this", "watch this") can act on it without re-circling.
+            LensMemory.shared.record(text: ocr, fraction: fraction)
 
             var answer: String
             if ocr.count >= 10 {
@@ -297,6 +299,39 @@ final class AriaController {
             let done = "That's the walkthrough — \(steps.count) step\(steps.count == 1 ? "" : "s")."
             self.islandViewModel.showResponse(done)
             self.speakAndListen(done)
+        }
+    }
+
+    /// "Watch this" — after circling a region, poll just that region and notify
+    /// when its content meaningfully changes (a build finishes, a number updates).
+    /// Runs independently of the conversation so other commands don't cancel it;
+    /// fires once, then stops. Capped at 20 minutes.
+    func startRegionWatch(fraction: CGRect) {
+        regionWatchTask?.cancel()
+        regionWatchTask = Task { @MainActor in
+            let screen = ScreenCaptureEngine()
+            guard let baseShot = try? await screen.captureRegionJPEG(fraction: fraction) else {
+                let m = "I couldn't capture that area to watch."
+                self.islandViewModel.showResponse(m); self.speakAndListen(m); return
+            }
+            let baseline = (await ScreenOCR.text(inJPEG: baseShot)) ?? ""
+            let ack = "Watching that — I'll let you know when it changes."
+            self.islandViewModel.showResponse(ack); self.speakAndListen(ack)
+
+            let started = Date()
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 12_000_000_000)
+                if Task.isCancelled { break }
+                if Date().timeIntervalSince(started) > 1200 { break }   // 20-min cap
+                guard let shot = try? await screen.captureRegionJPEG(fraction: fraction) else { continue }
+                let now = (await ScreenOCR.text(inJPEG: shot)) ?? ""
+                if RegionChange.changed(from: baseline, to: now) {
+                    Notifier.notify(title: "That changed", body: String(now.prefix(120)))
+                    let line = "Heads up — the part you circled just changed."
+                    self.islandViewModel.showResponse(line); self.speakAndListen(line)
+                    break
+                }
+            }
         }
     }
 
@@ -1183,6 +1218,17 @@ final class AriaController {
             streamVoice.stop()
             session?.end()
             startLens(mode: lensMode)
+            return
+        }
+
+        // "Watch this" — poll the just-circled region and ping when it changes.
+        if RegionWatchIntent.matches(command) {
+            if let f = LensMemory.shared.freshFraction() {
+                startRegionWatch(fraction: f)
+            } else {
+                let m = "Circle something first with ⌥⇧C, then say \"watch this\"."
+                islandViewModel.showResponse(m); speakAndListen(m)
+            }
             return
         }
 

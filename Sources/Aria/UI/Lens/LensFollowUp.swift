@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// What Aria last read out of a circled region — kept briefly so a follow-up like
@@ -7,18 +8,29 @@ struct LensCapture: Equatable {
     let at: Date
 }
 
-/// Remembers the most recently circled (Lens) content so a deictic follow-up can
-/// resolve "this"/"that" to it. Single shared instance; main-actor since the Lens
-/// flow and command handling both touch it on the main actor.
+/// Remembers the most recently circled (Lens) content + region so a deictic
+/// follow-up can resolve "this"/"that" to it. Single shared instance; main-actor
+/// since the Lens flow and command handling both touch it on the main actor.
 @MainActor
 final class LensMemory {
     static let shared = LensMemory()
     private(set) var last: LensCapture?
+    /// The normalized (0…1) region that was circled, for "watch this".
+    private(set) var lastFraction: CGRect?
 
-    func record(text: String, at: Date = Date()) {
+    func record(text: String, fraction: CGRect? = nil, at: Date = Date()) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         last = t.isEmpty ? nil : LensCapture(text: t, at: at)
+        if let fraction { lastFraction = fraction }
     }
+
+    /// The just-circled region if still fresh — used by "watch this" to know
+    /// which region to poll.
+    func freshFraction(within: TimeInterval = 120, now: Date = Date()) -> CGRect? {
+        guard let cap = last, let f = lastFraction, now.timeIntervalSince(cap.at) <= within else { return nil }
+        return f
+    }
+
     func clear() { last = nil }
 }
 
