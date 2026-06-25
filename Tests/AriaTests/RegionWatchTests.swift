@@ -32,4 +32,12 @@ final class RegionWatchTests: XCTestCase {
         XCTAssertFalse(RegionWatchIntent.matches("watch the keynote later"))
         XCTAssertFalse(RegionWatchIntent.matches("what is this"))
     }
+
+    func testStopActivityIntent() {
+        XCTAssertTrue(StopActivityIntent.matches("stop watching"))
+        XCTAssertTrue(StopActivityIntent.matches("stop the walkthrough"))
+        XCTAssertTrue(StopActivityIntent.matches("clear the screen"))
+        XCTAssertFalse(StopActivityIntent.matches("stop"))            // generic dismiss, not this
+        XCTAssertFalse(StopActivityIntent.matches("what should I watch"))
+    }
 }

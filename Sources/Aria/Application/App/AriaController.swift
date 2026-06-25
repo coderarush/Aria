@@ -55,6 +55,8 @@ final class AriaController {
     private var lastBlobCenter: CGPoint?
     /// Independent of `currentTurnTask` so it survives other commands.
     private var regionWatchTask: Task<Void, Never>?
+    /// True while a guided walkthrough is mid-flight (its loop is `currentTurnTask`).
+    private var walkthroughActive = false
     private let dictation = DictationController()
     /// Set by startDictation(); the next captured transcript is inserted as text
     /// rather than handled as a command. Reset the instant it's consumed.
@@ -259,7 +261,9 @@ final class AriaController {
     func startWalkthrough(task: String) {
         islandViewModel.beginThinking()
         currentTurnTask?.cancel()
+        walkthroughActive = true
         currentTurnTask = Task { @MainActor in
+            defer { self.walkthroughActive = false; AriaStage.shared.clearMarkers() }
             let ocr = (try? await ScreenOCR.live.readAndTruncate(maxChars: 1600)) ?? ""
             let prompt = """
             The user wants a step-by-step walkthrough of: "\(task)".
@@ -333,6 +337,17 @@ final class AriaController {
                 }
             }
         }
+    }
+
+    /// Call off any on-screen activity Aria is driving — a region watch, a guided
+    /// walkthrough, and any guidance markers / worker blobs — so the screen is left
+    /// clean. Safe to call any time; only touches the conversation turn if it's a
+    /// walkthrough.
+    private func cancelOnScreenActivity() {
+        regionWatchTask?.cancel(); regionWatchTask = nil
+        if walkthroughActive { currentTurnTask?.cancel(); walkthroughActive = false }
+        AriaStage.shared.clearMarkers()
+        AriaStage.shared.clearWorkers()
     }
 
     /// System-wide dictation (⌥⇧D): reuse the exact voice-capture path, but flag
@@ -1169,12 +1184,24 @@ final class AriaController {
             // fall through — process `command` as an ordinary turn
         }
 
+        // "Stop watching / stop the walkthrough" — call off on-screen activity but
+        // keep the conversation going. Checked before dismiss so it doesn't end the
+        // session.
+        if StopActivityIntent.matches(command) {
+            cancelOnScreenActivity()
+            streamVoice.stop()
+            let m = "Okay, stopped."
+            islandViewModel.showResponse(m); speakAndListen(m)
+            return
+        }
+
         let dismissPhrases = [
             "dismiss", "thanks aria", "never mind", "bye", "bye aria",
             "goodbye", "go away", "okay go away", "that's all", "that's it",
             "you can go", "stop", "get out of here", "see you", "later aria"
         ]
         if dismissPhrases.contains(where: lower.contains) {
+            cancelOnScreenActivity()   // leave the screen clean; stop any watch/walkthrough
             streamVoice.stop(); session?.end(); return
         }
 

@@ -26,6 +26,21 @@ enum RegionChange {
     }
 }
 
+/// Matches "stop watching / stop the walkthrough" — lets the user call off any
+/// on-screen activity (region watch, guided walkthrough, markers) without ending
+/// the whole conversation. Pure.
+enum StopActivityIntent {
+    private static let phrases = [
+        "stop watching", "stop the watch", "stop watch", "stop the walkthrough",
+        "stop the walk through", "cancel the walkthrough", "stop pointing",
+        "stop guiding", "stop showing me", "clear the screen", "stop the markers"
+    ]
+    static func matches(_ command: String) -> Bool {
+        let c = command.lowercased()
+        return phrases.contains { c.contains($0) }
+    }
+}
+
 /// Matches an explicit "watch this region" request. Explicit phrasing so it never
 /// hijacks a normal sentence containing "watch". Pure.
 enum RegionWatchIntent {
