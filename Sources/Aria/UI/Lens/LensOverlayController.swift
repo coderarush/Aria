@@ -12,6 +12,8 @@ final class LensOverlayController {
     private var panel: LensPanel?
     private var keyMonitor: Any?
     private let session: LensSession
+    /// The app that was frontmost before Lens stole focus, so we can hand it back.
+    private var previousApp: NSRunningApplication?
 
     /// Called with (stroke points, normalized fraction rect 0…1 of the screen)
     /// when the user finishes circling in explain mode. A fraction (not points)
@@ -40,6 +42,9 @@ final class LensOverlayController {
             },
             onCancel: { [weak self] in self?.onCancel?() })
 
+        // Remember who had focus so we can restore it — circling shouldn't leave the
+        // user's app unfocused after Aria answers.
+        previousApp = NSWorkspace.shared.frontmostApplication
         let panel = LensPanel(contentRect: screen.frame)
         panel.contentView = NSHostingView(rootView: view)
         panel.makeKeyAndOrderFront(nil)
@@ -67,6 +72,11 @@ final class LensOverlayController {
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor); self.keyMonitor = nil }
         panel?.orderOut(nil)
         panel = nil
+        // Hand focus back to whatever the user was using (unless it was Aria itself).
+        if let prev = previousApp, prev.processIdentifier != ProcessInfo.processInfo.processIdentifier {
+            prev.activate()
+        }
+        previousApp = nil
     }
 
     deinit {
