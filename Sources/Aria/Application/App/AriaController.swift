@@ -343,11 +343,15 @@ final class AriaController {
     /// walkthrough, and any guidance markers / worker blobs — so the screen is left
     /// clean. Safe to call any time; only touches the conversation turn if it's a
     /// walkthrough.
-    private func cancelOnScreenActivity() {
+    @discardableResult
+    private func cancelOnScreenActivity() -> Bool {
+        let wasActive = regionWatchTask != nil || walkthroughActive
+            || !AriaStage.shared.markers.isEmpty || !AriaStage.shared.workers.isEmpty
         regionWatchTask?.cancel(); regionWatchTask = nil
         if walkthroughActive { currentTurnTask?.cancel(); walkthroughActive = false }
         AriaStage.shared.clearMarkers()
         AriaStage.shared.clearWorkers()
+        return wasActive
     }
 
     /// System-wide dictation (⌥⇧D): reuse the exact voice-capture path, but flag
@@ -1188,9 +1192,9 @@ final class AriaController {
         // keep the conversation going. Checked before dismiss so it doesn't end the
         // session.
         if StopActivityIntent.matches(command) {
-            cancelOnScreenActivity()
+            let wasActive = cancelOnScreenActivity()
             streamVoice.stop()
-            let m = "Okay, stopped."
+            let m = wasActive ? "Okay, stopped." : "Nothing's running right now."
             islandViewModel.showResponse(m); speakAndListen(m)
             return
         }
