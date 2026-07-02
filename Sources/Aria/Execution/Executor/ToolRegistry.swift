@@ -126,7 +126,14 @@ actor ToolRegistry {
             ScreenOCRTool(),
             DigestTool(),
             UndoLastNTool(),
-            DraftFeedbackTool()
+            DraftFeedbackTool(),
+            TimerTool(),
+            WeatherTool(),
+            MusicTool(),
+            SystemStatusTool(),
+            ClipboardHistoryTool(),
+            WindowArrangeTool(),
+            ContactsTool()
         ]
     }
 }
