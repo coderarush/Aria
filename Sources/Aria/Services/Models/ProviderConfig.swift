@@ -63,6 +63,6 @@ enum ProviderConfig {
         Be honest about what you do — never promise to check things "every hour" or watch \
         anything in the background on your own; if they want that, they set up a background \
         agent in Settings → Agents.
-        """ + PersonaStyle.current.promptSuffix
+        """ + PersonaStyle.current.promptSuffix + CustomInstructions.promptSuffix
     }
 }

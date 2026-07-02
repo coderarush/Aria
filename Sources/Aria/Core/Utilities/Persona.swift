@@ -37,3 +37,26 @@ enum PersonaStyle: String, CaseIterable {
         }
     }
 }
+
+/// Free-form standing instructions the user writes once and Aria honors in
+/// every conversation ("always answer in metric", "call me Cap", "no emoji").
+/// Read straight from UserDefaults so prompt assembly (actors, any thread)
+/// never needs a MainActor hop — same pattern as `PersonaStyle`.
+enum CustomInstructions {
+    static let key = "app.customInstructions"
+    /// Generous but bounded — the prompt budget is shared with tools + context.
+    static let maxLength = 1200
+
+    static var current: String {
+        let raw = UserDefaults.standard.string(forKey: key) ?? ""
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return String(trimmed.prefix(maxLength))
+    }
+
+    /// Appended to every system prompt after the persona style. Empty when unset.
+    static var promptSuffix: String {
+        let text = current
+        guard !text.isEmpty else { return "" }
+        return "\nThe user's standing instructions (always honor these): \(text)"
+    }
+}

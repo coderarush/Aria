@@ -1,5 +1,48 @@
 import Foundation
 
+/// A sonic personality for the interaction chimes. Same musical gestures,
+/// different voicing — all still synthesized (no asset files), all still
+/// AEC-cancelled. Read from UserDefaults so any thread can pick the theme.
+enum SoundTheme: String, CaseIterable {
+    /// The original voicing: soft pure sines.
+    case aurora
+    /// Brighter and glassier: up a fourth, a shimmer overtone, quicker decay.
+    case crystal
+    /// Darker and rounder: down a fourth, softer, longer tails.
+    case calm
+
+    static let key = "app.soundTheme"
+
+    static var current: SoundTheme {
+        SoundTheme(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .aurora
+    }
+
+    var label: String {
+        switch self {
+        case .aurora: return "Aurora"
+        case .crystal: return "Crystal"
+        case .calm: return "Calm"
+        }
+    }
+
+    /// Frequency multiplier applied to every note.
+    var freqScale: Double {
+        switch self { case .aurora: return 1.0; case .crystal: return 4.0 / 3.0; case .calm: return 3.0 / 4.0 }
+    }
+    /// Loudness trim so brighter voicings don't read as louder.
+    var ampScale: Double {
+        switch self { case .aurora: return 1.0; case .crystal: return 0.85; case .calm: return 0.9 }
+    }
+    /// How much first-octave overtone is mixed in (0 = pure sine).
+    var overtoneMix: Double {
+        switch self { case .aurora: return 0.0; case .crystal: return 0.35; case .calm: return 0.10 }
+    }
+    /// Exponential release rate — higher decays faster.
+    var decayRate: Double {
+        switch self { case .aurora: return 3.2; case .crystal: return 4.4; case .calm: return 2.3 }
+    }
+}
+
 /// Aria's interaction sounds — tiny synthesized chimes, generated in code so
 /// there are no asset files and the character is exactly hers: soft sine tones
 /// with gentle attack/decay, quiet enough to feel ambient. Played through
@@ -30,8 +73,19 @@ enum UISounds {
         case dismiss
     }
 
-    /// 16-bit mono PCM at `sampleRate`. Deterministic.
+    /// 16-bit mono PCM at `sampleRate`, voiced by the user's sound theme.
     static func pcm(for kind: Kind) -> [Int16] {
+        pcm(for: kind, theme: .current)
+    }
+
+    /// Deterministic per (kind, theme) — themable + testable.
+    static func pcm(for kind: Kind, theme: SoundTheme) -> [Int16] {
+        // Local voicing wrapper: the gesture recipes below stay theme-agnostic.
+        func note(freq: Double, secs: Double, amp: Double) -> [Int16] {
+            Self.note(freq: freq * theme.freqScale, secs: secs,
+                      amp: amp * theme.ampScale,
+                      overtone: theme.overtoneMix, decay: theme.decayRate)
+        }
         switch kind {
         case .wake:
             // A5 → E6, short and airy.
@@ -83,8 +137,11 @@ enum UISounds {
         return VoiceEngine.wavData(fromPCM: data, sampleRate: Int(sampleRate))
     }
 
-    /// One sine note with a fast attack and exponential release — no clicks.
-    private static func note(freq: Double, secs: Double, amp: Double) -> [Int16] {
+    /// One note with a fast attack and exponential release — no clicks.
+    /// `overtone` mixes in a first-octave partial (0 = pure sine); `decay`
+    /// shapes the release (higher = faster).
+    private static func note(freq: Double, secs: Double, amp: Double,
+                             overtone: Double = 0, decay: Double = 3.2) -> [Int16] {
         let n = Int(secs * sampleRate)
         var out = [Int16](repeating: 0, count: n)
         let attack = max(1, Int(0.012 * sampleRate))
@@ -95,9 +152,16 @@ enum UISounds {
                 env = Double(i) / Double(attack)
             } else {
                 let rel = Double(i - attack) / Double(max(1, n - attack))
-                env = exp(-3.2 * rel)
+                env = exp(-decay * rel)
             }
-            let v = sin(2 * .pi * freq * t) * env * amp
+            var v = sin(2 * .pi * freq * t)
+            if overtone > 0 {
+                // The overtone decays faster than the fundamental, so the
+                // sparkle is in the onset and the tail stays soft.
+                v += overtone * env * sin(2 * .pi * freq * 2 * t)
+                v /= (1 + overtone)
+            }
+            v *= env * amp
             out[i] = Int16(max(-1, min(1, v)) * 32_000)
         }
         // Hard-zero the final samples so back-to-back notes can't click.

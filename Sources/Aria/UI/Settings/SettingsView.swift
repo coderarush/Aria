@@ -313,6 +313,16 @@ struct GeneralSettingsTab: View {
                 }
                 Text("How Aria talks — same brain, different manner. Takes effect on the next conversation.")
                     .font(.caption).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Standing instructions")
+                    TextEditor(text: $settings.customInstructions)
+                        .font(.body)
+                        .frame(minHeight: 60, maxHeight: 110)
+                        .overlay(RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.secondary.opacity(0.25)))
+                    Text("Things Aria should always keep in mind — “call me Cap”, “answer in metric”, “never use emoji”. Honored in every conversation.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
 
             SSection("Behavior") {
@@ -1400,6 +1410,15 @@ struct VoiceSettingsTab: View {
             SSection("Voice") {
                 Toggle("Speak responses aloud", isOn: $settings.voiceEnabled)
                 Toggle("Interaction sounds (wake & done chimes)", isOn: $settings.uiSoundsEnabled)
+                if settings.uiSoundsEnabled {
+                    Picker("Sound theme", selection: $settings.soundTheme) {
+                        ForEach(SoundTheme.allCases, id: \.rawValue) {
+                            Text($0.label).tag($0.rawValue)
+                        }
+                    }
+                    Text("Same gestures, different voicing — Aurora is soft sine, Crystal is bright glass, Calm is low and round.")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
                 Picker("Voice", selection: $settings.geminiVoiceName) {
                     ForEach(geminiVoices, id: \.self) { Text($0).tag($0) }
                 }

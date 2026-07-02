@@ -89,6 +89,12 @@ final class AppSettings: ObservableObject {
     @Published var expressiveThinking: Bool { didSet { defaults.set(expressiveThinking, forKey: K.expressiveThinking) } }
     /// Soft interaction chimes (wake, task done). Synthesized, AEC-cancelled.
     @Published var uiSoundsEnabled: Bool { didSet { defaults.set(uiSoundsEnabled, forKey: K.uiSoundsEnabled) } }
+    /// Sonic voicing for the interaction chimes (SoundTheme raw value).
+    @Published var soundTheme: String { didSet { defaults.set(soundTheme, forKey: SoundTheme.key) } }
+    /// Standing instructions honored in every conversation (CustomInstructions).
+    @Published var customInstructions: String {
+        didSet { defaults.set(customInstructions, forKey: CustomInstructions.key) }
+    }
     /// Orb size multiplier (0.7 small … 1.3 large).
     @Published var orbScale: Double { didSet { defaults.set(orbScale, forKey: K.orbScale) } }
     /// Personality flavor (PersonaStyle raw value).
@@ -193,6 +199,8 @@ final class AppSettings: ObservableObject {
         spokenStepNarration = defaults.object(forKey: K.spokenStepNarration) as? Bool ?? true
         expressiveThinking = defaults.object(forKey: K.expressiveThinking) as? Bool ?? true
         uiSoundsEnabled = defaults.object(forKey: K.uiSoundsEnabled) as? Bool ?? true
+        soundTheme = defaults.string(forKey: SoundTheme.key) ?? SoundTheme.aurora.rawValue
+        customInstructions = defaults.string(forKey: CustomInstructions.key) ?? ""
         orbScale = defaults.object(forKey: K.orbScale) as? Double ?? 1.0
         personaStyle = defaults.string(forKey: PersonaStyle.key) ?? "balanced"
         briefingSpoken = defaults.bool(forKey: K.briefingSpoken)

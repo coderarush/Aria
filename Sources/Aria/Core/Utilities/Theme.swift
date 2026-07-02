@@ -75,6 +75,18 @@ enum Theme {
         ("mono", "Mono", [
             Color(red: 0.95, green: 0.96, blue: 1.0), Color(red: 0.62, green: 0.66, blue: 0.78),
             Color(red: 0.85, green: 0.88, blue: 0.96)]),
+        ("ember", "Ember", [
+            Color(red: 1.0, green: 0.45, blue: 0.20), Color(red: 0.95, green: 0.25, blue: 0.25),
+            Color(red: 1.0, green: 0.65, blue: 0.20), Color(red: 0.85, green: 0.30, blue: 0.40)]),
+        ("orchid", "Orchid", [
+            Color(red: 0.80, green: 0.40, blue: 0.95), Color(red: 0.95, green: 0.45, blue: 0.75),
+            Color(red: 0.55, green: 0.35, blue: 0.95), Color(red: 0.90, green: 0.60, blue: 0.95)]),
+        ("forest", "Forest", [
+            Color(red: 0.20, green: 0.75, blue: 0.40), Color(red: 0.55, green: 0.85, blue: 0.35),
+            Color(red: 0.10, green: 0.55, blue: 0.45), Color(red: 0.75, green: 0.90, blue: 0.50)]),
+        ("starlight", "Starlight", [
+            Color(red: 0.85, green: 0.90, blue: 1.0), Color(red: 0.60, green: 0.70, blue: 1.0),
+            Color(red: 1.0, green: 0.95, blue: 0.80), Color(red: 0.70, green: 0.80, blue: 1.0)]),
     ]
 
     /// Resolve the blob colors for a palette id; "accent" → the single accent.

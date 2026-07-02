@@ -671,7 +671,7 @@ actor GeminiClient {
         if jsonMode { generationConfig["response_mime_type"] = "application/json" }
         var payload: [String: Any] = [
             "system_instruction": [
-                "parts": [["text": Self.systemPrompt + PersonaStyle.current.promptSuffix]]
+                "parts": [["text": Self.systemPrompt + PersonaStyle.current.promptSuffix + CustomInstructions.promptSuffix]]
             ],
             "contents": [["role": "user", "parts": parts]],
             "generationConfig": generationConfig
