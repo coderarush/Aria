@@ -497,12 +497,34 @@ struct ConversationSettingsTab: View {
 
 struct ProactiveSettingsTab: View {
     @State private var s = ProactiveSettings.load()
+    @State private var live = LiveLoopSettings.load()
 
     var body: some View {
         TabHead(title: "Proactive Presence", subtitle: "Aria anticipates and gently offers \u{2014} before you ask.")
         SForm {
             SSection("Anticipation") {
                 Toggle("Let Aria be proactive", isOn: $s.enabled)
+            }
+
+            SSection("Live Loop") {
+                Toggle("Run the Live Loop", isOn: Binding(
+                    get: { live.enabled },
+                    set: { live.enabled = $0; live.save() }))
+                Text("Aria's always-on cycle: she watches your calendar, mail, and workflow, and steps in at the right moment. \u{201C}Act automatically\u{201D} is only ever read-only prep \u{2014} anything outward always asks first.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if live.enabled {
+                    tierPicker("Meeting prep", PlaybookLibrary.meetingPrep,
+                               "A spoken brief just before each meeting.")
+                    tierPicker("Morning brief", PlaybookLibrary.dailyBrief,
+                               "Calendar, mail, reminders \u{2014} first thing.")
+                    tierPicker("Inbox triage", PlaybookLibrary.inboxTriage,
+                               "New mail lands \u{2192} she offers a drafted reply.")
+                    tierPicker("Screen co-pilot", PlaybookLibrary.screenCoPilot,
+                               "Repetitive app-hopping \u{2192} she offers a shortcut.")
+                    Toggle("Pause in Low Power Mode", isOn: Binding(
+                        get: { live.pauseInLowPower },
+                        set: { live.pauseInLowPower = $0; live.save() }))
+                }
             }
 
             if s.enabled {
@@ -550,6 +572,20 @@ struct ProactiveSettingsTab: View {
             Toggle(title, isOn: Binding(
                 get: { s.isSourceEnabled(source) },
                 set: { s.sourceEnabled[source] = $0; s.save() }))
+            Text(help).font(.caption2).foregroundStyle(.tertiary)
+        }
+    }
+
+    private func tierPicker(_ title: String, _ playbookID: String, _ help: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Picker(title, selection: Binding(
+                get: { live.tier(for: playbookID) },
+                set: { live.tiers[playbookID] = $0; live.save() })) {
+                ForEach(AutonomyTier.allCases, id: \.self) { tier in
+                    Text(tier.label).tag(tier)
+                }
+            }
+            .pickerStyle(.menu)
             Text(help).font(.caption2).foregroundStyle(.tertiary)
         }
     }

@@ -96,6 +96,27 @@ struct GoogleConnector: ConnectorProvider {
         return out
     }
 
+    /// Cheap unread-inbox count for the Live Loop's mail signal: one GET, no
+    /// per-message fetches. Uses Gmail's `resultSizeEstimate` (capped by
+    /// `maxResults`, which is fine — the signal only needs "did new mail land",
+    /// not an exact census).
+    func unreadInboxCount(accessToken: String,
+                          session: URLSession = .shared) async throws -> Int {
+        var comps = URLComponents(
+            string: "https://gmail.googleapis.com/gmail/v1/users/me/messages")!
+        comps.queryItems = [
+            URLQueryItem(name: "maxResults", value: "50"),
+            URLQueryItem(name: "q", value: "is:unread in:inbox")
+        ]
+        let data = try await authorizedGET(comps.url!, accessToken: accessToken,
+                                           session: session)
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return 0
+        }
+        return obj["resultSizeEstimate"] as? Int
+            ?? (obj["messages"] as? [[String: Any]])?.count ?? 0
+    }
+
     /// Fetch upcoming Calendar events from the primary calendar. An optional
     /// `within` window bounds the search with `timeMax` (e.g. 7 days out); nil
     /// means unbounded-forward (the original behavior).

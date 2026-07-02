@@ -46,6 +46,13 @@ final class AriaController {
     /// Background agents (v9): recurring workflows + folder watchers, run
     /// silently through the same autonomy engine + safety gates.
     private var agentCoordinator: AgentCoordinator?
+    /// Live Loop: the always-on perceive → anticipate → act → remember cycle
+    /// (design 2026-06-24). Auto tier preps/briefs; confirm tier rides the same
+    /// SuggestionPresenter card as Proactive Presence.
+    private var liveLoop: LiveLoop?
+    /// Feeds frontmost-app switches into the Live Loop's friction signal.
+    private var liveScreenSignal: ScreenActivitySignal?
+    private var liveLoopActivationObserver: NSObjectProtocol?
     /// Push-to-talk (⌥Space) and type-to-Aria (⌥⇧Space) global hotkeys.
     private var hotkeyTap: HotkeyTap?
     private var typePanel: CommandInputPanel?
@@ -110,6 +117,7 @@ final class AriaController {
         // Bisect kill-switches: `defaults write com.aria.agent app.disableX -bool true`
         let d = UserDefaults.standard
         if !d.bool(forKey: "app.disableAgents") { configureBackgroundAgents(); Log.trace("start: agents") }
+        if !d.bool(forKey: "app.disableLiveLoop") { configureLiveLoop(); Log.trace("start: liveloop") }
         if !d.bool(forKey: "app.disableHotkeys") { configureHotkeys() }
         configureDebugHooks()
         warmLocalModel()
@@ -742,6 +750,87 @@ final class AriaController {
                 Log.trace("proactive: suggestion expired untouched")
             }
         }
+    }
+
+    // MARK: Live Loop
+
+    /// Wire the always-on perceive → anticipate → act → remember cycle. All
+    /// detection is local and event-driven + a low-frequency tick; the LLM only
+    /// runs inside a fired playbook. Auto tier = read-only prep (meeting brief,
+    /// daily brief); confirm tier surfaces through the SAME SuggestionPresenter
+    /// card as Proactive Presence, so there is never more than one live card.
+    private func configureLiveLoop() {
+        let screenSignal = ScreenActivitySignal(idleSeconds: {
+            CGEventSource.secondsSinceLastEventType(.combinedSessionState,
+                                                    eventType: CGEventType(rawValue: ~0)!)
+        })
+        liveScreenSignal = screenSignal
+
+        let signals: [any LiveSignal] = [
+            ClockSignal(briefAlreadyRan: { LiveLoopStore().briefAlreadyRan(on: $0) }),
+            CalendarSignal(fetchUpcoming: { now in
+                await Self.upcomingCalendarEvents(now: now, window: 3600)
+            }),
+            MailSignal(fetchUnreadCount: {
+                guard let token = await ConnectorStore.shared.validAccessToken(.google) else {
+                    return nil
+                }
+                return try? await GoogleConnector().unreadInboxCount(accessToken: token)
+            }),
+            screenSignal,
+        ]
+        let rules: [any OpportunityRule] = [
+            MeetingPrepRule(), InboxTriageRule(), ScreenCoPilotRule(), DailyBriefRule(),
+        ]
+
+        let loop = LiveLoop(deps: .init(
+            signals: signals,
+            rules: rules,
+            canSurface: { [weak self] in
+                await MainActor.run { [weak self] in
+                    guard let self else { return false }
+                    return self.idleForProactive && self.proactivePresenter?.pending == nil
+                }
+            },
+            act: { [weak self] command, narration in
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    Log.trace("liveloop: auto-acting — \(narration)")
+                    Notifier.notify(title: "Aria", body: narration)
+                    self.handleCommand(command, unattended: true)
+                }
+            },
+            offer: { [weak self] suggestion in
+                await MainActor.run { [weak self] in
+                    guard let self, let presenter = self.proactivePresenter,
+                          presenter.pending == nil else { return }
+                    presenter.present(suggestion)
+                    self.scheduleProactiveExpiry(at: suggestion.expiry)
+                    Log.trace("liveloop: offered \(suggestion.dedupeKey)")
+                }
+            },
+            remember: { line in
+                await LongTermMemory.shared.remember(line, kind: "event")
+            }))
+        liveLoop = loop
+
+        // Event-driven perception: frontmost-app switches feed the friction
+        // signal and nudge an evaluation (cheap — all local, no LLM).
+        liveLoopActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil, queue: .main
+        ) { [weak self] note in
+            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  app.bundleIdentifier != Bundle.main.bundleIdentifier,
+                  let name = app.localizedName else { return }
+            Task { [weak self] in
+                guard let self else { return }
+                await self.liveScreenSignal?.noteActivation(app: name, at: Date())
+                await self.liveLoop?.nudge()
+            }
+        }
+
+        Task { await loop.start() }
     }
 
     /// Called when the user wakes Aria while a suggestion is glowing — speak it
