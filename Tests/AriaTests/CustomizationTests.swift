@@ -34,6 +34,36 @@ final class SoundThemeTests: XCTestCase {
     }
 }
 
+final class LocalVoiceTests: XCTestCase {
+
+    private func candidate(_ name: String, _ lang: String, _ quality: Int) -> LocalVoice.Candidate {
+        LocalVoice.Candidate(id: name.lowercased(), language: lang, quality: quality, name: name)
+    }
+
+    func testPersonalBeatsPremiumBeatsEnhancedBeatsDefault() {
+        let best = LocalVoice.best([
+            candidate("Samantha", "en-US", 0),
+            candidate("Ava", "en-US", 2),
+            candidate("Evan", "en-US", 1),
+            candidate("Me", "en-US", 3),
+        ])
+        XCTAssertEqual(best?.name, "Me")
+    }
+
+    func testEnUSPreferredWithinSameQuality() {
+        let best = LocalVoice.best([
+            candidate("Karen", "en-AU", 2),
+            candidate("Ava", "en-US", 2),
+        ])
+        XCTAssertEqual(best?.name, "Ava")
+    }
+
+    func testNonEnglishFilteredOutAndEmptySafe() {
+        XCTAssertNil(LocalVoice.best([candidate("Yuna", "ko-KR", 2)]))
+        XCTAssertNil(LocalVoice.best([]))
+    }
+}
+
 final class CustomInstructionsTests: XCTestCase {
 
     override func tearDown() {

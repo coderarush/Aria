@@ -1403,6 +1403,19 @@ struct CrewSettingsTab: View {
 struct VoiceSettingsTab: View {
     @StateObject private var settings = AppSettings.shared
     private let geminiVoices = ["Kore", "Puck", "Charon", "Fenrir", "Aoede", "Leda", "Orus", "Zephyr"]
+    /// Installed offline voices, best first (computed once per body pass).
+    private var offlineVoices: [LocalVoice.Candidate] {
+        LocalVoice.installedCandidates().sorted { a, b in
+            if a.quality != b.quality { return a.quality > b.quality }
+            return a.name < b.name
+        }
+    }
+
+    private static func voiceLabel(_ candidate: LocalVoice.Candidate) -> String {
+        if candidate.quality >= 2 { return "\(candidate.name) ★" }
+        if candidate.quality == 1 { return "\(candidate.name) ✦" }
+        return candidate.name
+    }
 
     var body: some View {
         TabHead(title: "How Aria Speaks", subtitle: "Aria speaks with a natural Gemini voice.")
@@ -1423,6 +1436,14 @@ struct VoiceSettingsTab: View {
                     ForEach(geminiVoices, id: \.self) { Text($0).tag($0) }
                 }
                 Text("Aria uses Gemini's natural cloud voice (your Gemini key). If it's momentarily busy she stays quiet for that line — the caption always shows the reply.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Picker("Offline voice", selection: $settings.localVoiceID) {
+                    Text("Best installed (automatic)").tag("")
+                    ForEach(offlineVoices, id: \.id) { candidate in
+                        Text(Self.voiceLabel(candidate)).tag(candidate.id)
+                    }
+                }
+                Text("Used when the cloud voice is unavailable or out of quota — Aria never goes silent. ★ premium, ✦ enhanced. Download more natural voices in System Settings → Accessibility → Spoken Content → System Voice → Manage Voices.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

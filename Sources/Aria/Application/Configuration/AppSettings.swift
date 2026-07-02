@@ -91,6 +91,8 @@ final class AppSettings: ObservableObject {
     @Published var uiSoundsEnabled: Bool { didSet { defaults.set(uiSoundsEnabled, forKey: K.uiSoundsEnabled) } }
     /// Sonic voicing for the interaction chimes (SoundTheme raw value).
     @Published var soundTheme: String { didSet { defaults.set(soundTheme, forKey: SoundTheme.key) } }
+    /// Preferred offline TTS voice identifier ("" = best installed, automatic).
+    @Published var localVoiceID: String { didSet { defaults.set(localVoiceID, forKey: LocalVoice.key) } }
     /// Standing instructions honored in every conversation (CustomInstructions).
     @Published var customInstructions: String {
         didSet { defaults.set(customInstructions, forKey: CustomInstructions.key) }
@@ -200,6 +202,7 @@ final class AppSettings: ObservableObject {
         expressiveThinking = defaults.object(forKey: K.expressiveThinking) as? Bool ?? true
         uiSoundsEnabled = defaults.object(forKey: K.uiSoundsEnabled) as? Bool ?? true
         soundTheme = defaults.string(forKey: SoundTheme.key) ?? SoundTheme.aurora.rawValue
+        localVoiceID = defaults.string(forKey: LocalVoice.key) ?? ""
         customInstructions = defaults.string(forKey: CustomInstructions.key) ?? ""
         orbScale = defaults.object(forKey: K.orbScale) as? Double ?? 1.0
         personaStyle = defaults.string(forKey: PersonaStyle.key) ?? "balanced"

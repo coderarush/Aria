@@ -90,8 +90,12 @@ final class VoiceEngine: NSObject {
         appleSynth.delegate = self
         let utt = AVSpeechUtterance(string: text)
         utt.rate = 0.52          // slightly faster than default (0.5) — feels more natural
-        utt.pitchMultiplier = 1.1
-        utt.voice = AVSpeechSynthesisVoice(language: "en-US")
+        // Best installed voice (personal > premium > enhanced) so the offline
+        // path stays natural. Pitch tricks only help the compact default voice —
+        // neural voices sound best untouched.
+        let voice = LocalVoice.resolve()
+        utt.voice = voice
+        utt.pitchMultiplier = LocalVoice.isNeural(voice) ? 1.0 : 1.1
         appleSynth.speak(utt)
     }
 
