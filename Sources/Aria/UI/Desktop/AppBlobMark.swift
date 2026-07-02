@@ -24,8 +24,10 @@ struct AppBlobMark: View {
 
     var body: some View {
         Group {
-            if animated {
-                TimelineView(.animation) { tl in
+            // Honor Reduce Motion; and a slow breathe needs 30 fps, not the
+            // display's 120 — quarter the render work for identical feel.
+            if animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { tl in
                     let t = tl.date.timeIntervalSinceReferenceDate
                     let breathe = 0.5 + 0.5 * sin(t * 1.2)
                     let amp = 0.085 + breathe * 0.045

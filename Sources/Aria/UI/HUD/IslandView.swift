@@ -17,6 +17,7 @@ struct IslandView: View {
     @State private var displayedCaption = ""
     @State private var captionTask: Task<Void, Never>? = nil
     @State private var cursorVisible = false
+    @State private var cursorTimer: Timer?
     // 2b: Blob entrance burst particles
     @State private var showBurstParticles = false
     // 2f: State transition color flash
@@ -134,11 +135,24 @@ struct IslandView: View {
                 displayedCaption = ""
             }
         }
-        .onAppear {
-            // Blinking cursor for typewriter effect.
-            Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
-                cursorVisible.toggle()
+        // Blinking cursor for the typewriter effect — runs ONLY while a
+        // response is on screen. A repeats-forever timer here kept the whole
+        // HUD invalidating at 2 Hz even when idle (and leaked one timer per
+        // onAppear); scoping it to the responding states costs nothing at rest.
+        .onChange(of: viewModel.state) { _, state in
+            cursorTimer?.invalidate()
+            cursorTimer = nil
+            if state == .responding || state == .error {
+                cursorTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+                    Task { @MainActor in cursorVisible.toggle() }
+                }
+            } else {
+                cursorVisible = false
             }
+        }
+        .onDisappear {
+            cursorTimer?.invalidate()
+            cursorTimer = nil
         }
     }
 
