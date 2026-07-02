@@ -408,6 +408,61 @@ export default function App() {
       {/* ---------- 03 · LENS (circle to explain) ---------- */}
       <LensShowcase />
 
+      {/* ---------- 03.2 · WHAT'S NEW — the Live Loop update ---------- */}
+      <section id="whatsnew">
+        <div className="wrap">
+          <Label n="03">What's new</Label>
+          <Reveal i={1}><h2 className="display">The Live Loop update.<br />She acts before you ask.</h2></Reveal>
+          <Reveal i={2}>
+            <p className="body sub">Aria now runs an always-on loop — perceive, anticipate,
+            act, remember. A brief before every meeting. Your morning, spoken. New mail,
+            triaged with a reply drafted in your voice. All local detection, all under
+            your control.</p>
+          </Reveal>
+
+          <div className="bentoGrid">
+            <TiltCard className="bentoCard bentoLarge"
+              initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }} transition={{ duration: 0.7 }}>
+              <span className="bentoNumber">New · Live Loop</span>
+              <h3>Meeting prep. Morning brief.<br />Inbox triage. Screen co-pilot.</h3>
+              <p>Four always-on instincts, each with its own leash: “act automatically”
+              is only ever read-only prep — anything outward asks first. Quiet hours,
+              Low Power pause, snooze, and never are all one word away.</p>
+              <div className="bentoBlobDeco"><Blob size={180} mood="calm" /></div>
+            </TiltCard>
+
+            <TiltCard className="bentoCard"
+              initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }} transition={{ duration: 0.7, delay: 0.1 }}>
+              <span className="bentoNumber">New · Everyday superpowers</span>
+              <h3>The little things, instantly.</h3>
+              <p>Timers, weather, music control, real Contacts lookup, window tiling,
+              clipboard history, battery &amp; disk at a glance — no app-switching, just ask.</p>
+            </TiltCard>
+
+            <TiltCard className="bentoCard"
+              initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }} transition={{ duration: 0.7, delay: 0.2 }}>
+              <span className="bentoNumber">New · Truly yours</span>
+              <h3>Standing instructions.<br />Her look. Her sound.</h3>
+              <p>Tell her once — “call me Cap, metric only” — and she never forgets.
+              Eight aurora palettes, three chime voicings, your pick of voices.</p>
+            </TiltCard>
+
+            <TiltCard className="bentoCard bentoWide"
+              initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }} transition={{ duration: 0.7, delay: 0.3 }}>
+              <span className="bentoNumber">New · Never silent, never loud</span>
+              <h3>A voice that can't run out. Fans that never spin.</h3>
+              <p>If the cloud voice is busy or out of quota, Aria glides to the most
+              natural voice installed on your Mac — never robotic, never silent. And at
+              rest she now costs your Mac exactly nothing.</p>
+            </TiltCard>
+          </div>
+        </div>
+      </section>
+
       {/* ---------- 03.5 · HOW IT WORKS ---------- */}
       <section>
         <div className="wrap">

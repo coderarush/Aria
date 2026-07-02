@@ -167,3 +167,26 @@ migration tooling. ~1386 tests, all green except the pre-existing
 - **Storage**: SQLite-backed `KeyValueStore`/`MemoryStore` (in-memory seam today).
 - **Config**: Experiments + Policies beyond `FeatureFlags`.
 - **Glass / hardware**: out of scope by spec (§67).
+
+## Live Loop (2026-07-02)
+
+The approved 2026-06-24 design is now built and wired (`Presence/Live/`):
+
+| Piece | Type(s) |
+|---|---|
+| Playbooks | `PlaybookRef`, `Playbook`, `PlaybookLibrary` (bind-or-fail templates), `AutonomyTier` (auto/confirm/off) |
+| Signals | `ClockSignal`, `CalendarSignal` (EventKit), `MailSignal` (Gmail unread delta, ≥5-min cadence), `ScreenActivitySignal` (event-driven app ping-pong) |
+| Recognizers | `MeetingPrepRule`, `InboxTriageRule`, `ScreenCoPilotRule`, `DailyBriefRule` — pure `OpportunityRule`s carrying a `PlaybookRef` |
+| Runtime | `LiveLoop` actor (events + idle tick, quiet-hours + Low Power + cooldown/snooze/never gates), `LiveLoopSettings`, `LiveLoopStore` |
+
+Auto tier dispatches through `AriaController.handleCommand(unattended:)` (the
+existing orchestrator + Safety); confirm tier rides the existing
+`SuggestionPresenter` card — one live card ever. Outcomes land in
+`LongTermMemory`. Settings → Proactive hosts the master toggle + per-recognizer
+tier pickers. Kill switch: `defaults write com.aria.agent app.disableLiveLoop -bool true`.
+
+Also shipped alongside: 7 everyday tools (timer, weather, music_control,
+contacts_search, window_arrange, clipboard_history, system_status), standing
+instructions (`CustomInstructions`), `SoundTheme` chime voicings, 4 new glow
+palettes, `LocalVoice` offline-voice ranking + picker, and idle-energy fixes
+(HUD cursor timer scoped, hero blob 30 fps + Reduce Motion).
