@@ -22,6 +22,7 @@ final class VoiceEngine: NSObject {
 
     var geminiVoiceName = "Kore"
     var ttsEngine: TTSEngine = .edge
+    /// Female neural voice by default — Aria is a she.
     var edgeVoiceName = EdgeTTS.defaultVoice
     var elevenLabsVoiceID = ElevenLabsTTS.defaultVoiceID
     /// Aria's TTS plays through the shared AudioBus (so the echo canceller has her
@@ -97,11 +98,11 @@ final class VoiceEngine: NSObject {
         ttsTask?.cancel()
         ttsTask = Task { [weak self] in
             do {
-                let pcm = try await provider.synthesizePCM(text: text)
+                let (pcm, rate) = try await provider.synthesizePCM(text: text)
                 try Task.checkCancellation()
                 await MainActor.run { [weak self] in
                     guard let self else { return }
-                    do { try self.playPCM(pcm) }
+                    do { try self.playPCM(pcm, rate: rate) }
                     catch { self.speakWithApple(text) }
                 }
             } catch is CancellationError {
@@ -146,11 +147,11 @@ final class VoiceEngine: NSObject {
         }
     }
 
-    /// Play raw 24 kHz mono 16-bit PCM through the AudioBus (AEC far-end ref).
-    private func playPCM(_ pcm: Data) throws {
+    /// Play raw mono 16-bit PCM at its true rate through the AudioBus (AEC ref).
+    private func playPCM(_ pcm: Data, rate: Double) throws {
         guard let bus = audioBus else { throw NSError(domain: "AriaTTS", code: -2) }
         guard !pcm.isEmpty else { throw NSError(domain: "AriaTTS", code: -4) }
-        bus.playReference(pcm: pcm, pcmRate: 24000) { [weak self] in
+        bus.playReference(pcm: pcm, pcmRate: rate) { [weak self] in
             Task { @MainActor in self?.onFinish?(); self?.onChunkFinished?() }
         }
     }

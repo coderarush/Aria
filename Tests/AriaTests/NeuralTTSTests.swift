@@ -42,6 +42,21 @@ final class AudioWAVTests: XCTestCase {
         XCTAssertEqual(extracted, pcm)
     }
 
+    func testExtractsSampleRateFromHeader() {
+        let pcm = Data([0xAA, 0xBB, 0xCC, 0xDD])
+        // A 48 kHz WAV must report 48000, so playback doesn't pitch it down.
+        let wav = VoiceEngine.wavData(fromPCM: pcm, sampleRate: 48000)
+        let parsed = AudioWAV.pcm(fromWAV: wav)
+        XCTAssertEqual(parsed?.data, pcm)
+        XCTAssertEqual(parsed?.sampleRate, 48000)
+    }
+
+    func testDefaultEdgeVoiceIsFemale() {
+        // Aria is a she — the default must be a female voice (Ava), not Andrew.
+        XCTAssertEqual(EdgeTTS.defaultVoice, "en-US-AvaMultilingualNeural")
+        XCTAssertEqual(EdgeTTS.voices.first?.id, EdgeTTS.defaultVoice)
+    }
+
     func testToleratesChunkBeforeData() {
         // RIFF + WAVE, then a LIST chunk (odd size → padded), then data.
         var wav = Data()

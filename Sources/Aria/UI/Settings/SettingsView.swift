@@ -339,9 +339,14 @@ struct GeneralSettingsTab: View {
             }
 
             SSection("Autonomy") {
-                Toggle("Let Aria act on her own anticipations", isOn: $settings.autonomousActions)
-                Text("When she's very confident and the action is reversible, she'll just do it (e.g. open your standup doc at 9am) and notify you — everything is logged in Receipts and one “undo” away. Important or irreversible things always ask first.")
+                Toggle("Autonomous mode — just do it, don't ask", isOn: $settings.autonomousMode)
+                Text("Aria acts without pausing for “Approve?” — including sending, deleting, and other big actions. Everything is still recorded in the Activity log and one “undo” away. Turn this off to have her confirm before anything irreversible.")
                     .font(.caption).foregroundStyle(.secondary)
+                if !settings.autonomousMode {
+                    Toggle("Let Aria act on her own anticipations", isOn: $settings.autonomousActions)
+                    Text("When she's very confident and the action is reversible, she'll just do it (e.g. open your standup doc at 9am) and notify you. Important or irreversible things still ask first.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
 
             SSection("Connectors") {

@@ -708,15 +708,16 @@ final class AriaController {
         // Phase D — anticipation that ACTS: a very-high-confidence, reversible
         // suggestion runs on its own (receipted + undoable) instead of waiting to
         // be accepted. Anything important-irreversible still surfaces to ask.
-        if let cmd = AnticipationPolicy.autoActCommand(for: suggestion,
-                                                       enabled: AppSettings.shared.autonomousActions) {
+        if let cmd = AnticipationPolicy.autoActCommand(
+            for: suggestion,
+            enabled: AppSettings.shared.autonomousActions || AppSettings.shared.autonomousMode) {
             // Defense-in-depth (P5): the unified trust decision must also say "auto".
             // If Safety classifies the command as important-irreversible (something
             // AnticipationPolicy's text check missed), surface it to ask instead of
             // firing it silently.
             let importance = Safety.importance(tool: "", input: [:], summary: cmd)
             let level = TrustProfile.advisedLevel(importance: importance,
-                                                  confirmsDestructive: ConfirmationPolicy.confirmsDestructive())
+                                                  confirmsDestructive: effectiveConfirmsDestructive())
             if level == .auto {
                 Log.trace("proactive: auto-acting on \(suggestion.dedupeKey)")
                 await engine.record(.accepted, for: suggestion, now: Date())
@@ -924,9 +925,16 @@ final class AriaController {
     /// a second confirmation while one is open is declined rather than stacked.
     /// Only an attended, first-in-flight request presents the modal — where the
     /// safe choice (Cancel) is the default button so a stray Return can't approve.
+    /// The confirm gate, folding in Autonomous mode: when the user has turned
+    /// Aria loose, she never pauses to ask — everything still lands in the
+    /// Activity log and is undoable.
+    private func effectiveConfirmsDestructive() -> Bool {
+        !AppSettings.shared.autonomousMode && ConfirmationPolicy.confirmsDestructive()
+    }
+
     @MainActor
     private func confirmDestructiveAction(_ prompt: String) async -> Bool {
-        switch ConfirmationPolicy.decision(confirmsDestructive: ConfirmationPolicy.confirmsDestructive(),
+        switch ConfirmationPolicy.decision(confirmsDestructive: effectiveConfirmsDestructive(),
                                            unattended: unattendedActive,
                                            alreadyConfirming: isConfirming) {
         case .autoApprove: return true

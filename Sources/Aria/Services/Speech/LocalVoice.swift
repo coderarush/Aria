@@ -16,15 +16,20 @@ enum LocalVoice {
         /// 0 default, 1 enhanced, 2 premium, 3 personal (user's own trained voice).
         let quality: Int
         let name: String
+        /// True when the system reports this as a female voice — preferred,
+        /// since Aria is a she.
+        var isFemale: Bool = false
     }
 
-    /// Rank candidates: personal > premium > enhanced > default; en-US ahead of
-    /// other English; stable by name for determinism.
+    /// Rank candidates: personal > premium > enhanced > default; then FEMALE
+    /// (Aria is a she) ahead of male at equal quality; en-US ahead of other
+    /// English; stable by name for determinism.
     static func best(_ candidates: [Candidate]) -> Candidate? {
         candidates
             .filter { $0.language.hasPrefix("en") }
             .sorted {
                 if $0.quality != $1.quality { return $0.quality > $1.quality }
+                if $0.isFemale != $1.isFemale { return $0.isFemale }
                 let a = $0.language == "en-US", b = $1.language == "en-US"
                 if a != b { return a }
                 return $0.name < $1.name
@@ -44,10 +49,13 @@ enum LocalVoice {
             }
             // Personal Voice (macOS 14+) outranks everything — it IS the user.
             let isPersonal = voice.voiceTraits.contains(.isPersonalVoice)
+            var female = false
+            if #available(macOS 14.0, *) { female = voice.gender == .female }
             return Candidate(id: voice.identifier,
                              language: voice.language,
                              quality: isPersonal ? 3 : quality,
-                             name: voice.name)
+                             name: voice.name,
+                             isFemale: female)
         }
     }
 

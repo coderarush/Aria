@@ -7,8 +7,11 @@ import CryptoKit
 /// AEC/barge-in pipeline as Gemini, so the user can talk over Aria mid-sentence
 /// even on the free cloud voices — something a plain AVAudioPlayer can't do.
 protocol PCMSpeechProvider: Sendable {
-    /// Synthesize `text` to 24 kHz mono 16-bit LE PCM, or throw.
-    func synthesizePCM(text: String) async throws -> Data
+    /// Synthesize `text` to mono 16-bit LE PCM plus its true sample rate, or
+    /// throw. Returning the rate (not assuming 24 kHz) is what keeps the voice
+    /// from ever pitching down into a slow, "demonic" artifact if an endpoint
+    /// hands back a different rate than requested.
+    func synthesizePCM(text: String) async throws -> (pcm: Data, sampleRate: Double)
 }
 
 // MARK: - Edge (Microsoft neural voices — free, no API key, effectively unlimited)
@@ -19,22 +22,23 @@ protocol PCMSpeechProvider: Sendable {
 struct EdgeTTS: PCMSpeechProvider {
     let voice: String
 
-    static let defaultVoice = "en-US-AndrewMultilingualNeural"
+    /// Aria is a she — the default is a natural female neural voice (Ava).
+    static let defaultVoice = "en-US-AvaMultilingualNeural"
 
-    /// A curated set of the most natural en-US Edge neural voices (there are
-    /// hundreds; these are the ones worth offering in a picker).
+    /// A curated set of the most natural en-US Edge neural voices, female first
+    /// (there are hundreds; these are the ones worth offering in a picker).
     static let voices: [(id: String, label: String)] = [
-        ("en-US-AndrewMultilingualNeural", "Andrew — warm, natural (default)"),
-        ("en-US-AvaMultilingualNeural", "Ava — bright, friendly"),
+        ("en-US-AvaMultilingualNeural", "Ava — warm, natural (default)"),
         ("en-US-EmmaMultilingualNeural", "Emma — calm, clear"),
-        ("en-US-BrianMultilingualNeural", "Brian — easygoing"),
-        ("en-US-AndrewNeural", "Andrew (classic)"),
+        ("en-US-JennyNeural", "Jenny — soft, friendly"),
         ("en-US-AriaNeural", "Aria — expressive"),
-        ("en-US-GuyNeural", "Guy — steady"),
-        ("en-US-JennyNeural", "Jenny — soft"),
-        ("en-GB-RyanNeural", "Ryan — British"),
+        ("en-US-MichelleNeural", "Michelle — bright"),
         ("en-GB-SoniaNeural", "Sonia — British"),
         ("en-AU-NatashaNeural", "Natasha — Australian"),
+        ("en-US-AndrewMultilingualNeural", "Andrew — male, warm"),
+        ("en-US-BrianMultilingualNeural", "Brian — male, easygoing"),
+        ("en-US-GuyNeural", "Guy — male, steady"),
+        ("en-GB-RyanNeural", "Ryan — male, British"),
     ]
 
     private static let trustedToken = "6A5AA1D4EAFF4E9FB37E23D68491D6F4"
@@ -42,7 +46,7 @@ struct EdgeTTS: PCMSpeechProvider {
     /// edge-tts project's constant if Microsoft tightens validation.
     private static let gecVersion = "1-143.0.3650.75"
 
-    func synthesizePCM(text: String) async throws -> Data {
+    func synthesizePCM(text: String) async throws -> (pcm: Data, sampleRate: Double) {
         let connectionID = UUID().uuidString.replacingOccurrences(of: "-", with: "")
         let gec = Self.gecToken(now: Date())
         guard let url = URL(string:
@@ -96,8 +100,13 @@ struct EdgeTTS: PCMSpeechProvider {
             }
         }
         guard !riff.isEmpty else { throw URLError(.cannotParseResponse) }
-        // The concatenated audio payloads form a RIFF/WAV stream; hand back its PCM.
-        return AudioWAV.pcmData(fromWAV: riff) ?? riff
+        // The concatenated audio payloads form a RIFF/WAV stream; hand back its
+        // PCM AND the header's real sample rate (defensive against a rate other
+        // than the 24 kHz we requested — a mismatch is what makes it "scary").
+        if let parsed = AudioWAV.pcm(fromWAV: riff) {
+            return (parsed.data, Double(parsed.sampleRate))
+        }
+        return (riff, 24000)
     }
 
     /// Sec-MS-GEC: SHA256 of Windows file-time ticks (floored to a 5-minute
@@ -148,7 +157,7 @@ struct ElevenLabsTTS: PCMSpeechProvider {
         self.modelID = modelID
     }
 
-    func synthesizePCM(text: String) async throws -> Data {
+    func synthesizePCM(text: String) async throws -> (pcm: Data, sampleRate: Double) {
         guard !apiKey.isEmpty else { throw NSError(domain: "AriaTTS.eleven", code: 401) }
         // pcm_24000 → raw 24 kHz 16-bit mono PCM, no container to strip.
         guard let url = URL(string:
@@ -167,37 +176,48 @@ struct ElevenLabsTTS: PCMSpeechProvider {
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         guard status == 200 else { throw NSError(domain: "AriaTTS.eleven", code: status) }
         guard !data.isEmpty else { throw URLError(.cannotParseResponse) }
-        return data
+        return (data, 24000)
     }
 }
 
 // MARK: - WAV parsing
 
 enum AudioWAV {
-    /// Extract the PCM payload from a RIFF/WAV stream by walking its chunks to
-    /// the `data` subchunk. Tolerant of extra chunks (fmt/LIST/fact) before it;
-    /// returns nil if the stream isn't a WAV we recognize.
-    static func pcmData(fromWAV wav: Data) -> Data? {
+    /// Extract just the PCM payload (back-compat helper).
+    static func pcmData(fromWAV wav: Data) -> Data? { pcm(fromWAV: wav)?.data }
+
+    /// Walk a RIFF/WAV stream's chunks and return its PCM payload plus the
+    /// sample rate declared in the `fmt ` chunk. Tolerant of extra chunks
+    /// (fmt/LIST/fact) in any order; returns nil if it isn't a WAV we recognize.
+    static func pcm(fromWAV wav: Data) -> (data: Data, sampleRate: Int)? {
         let bytes = [UInt8](wav)
         guard bytes.count > 12,
               bytes[0] == 0x52, bytes[1] == 0x49, bytes[2] == 0x46, bytes[3] == 0x46, // "RIFF"
               bytes[8] == 0x57, bytes[9] == 0x41, bytes[10] == 0x56, bytes[11] == 0x45 // "WAVE"
         else { return nil }
 
+        var sampleRate = 24000
+        var payload: Data?
         var offset = 12
         while offset + 8 <= bytes.count {
             let id = String(bytes: bytes[offset..<offset + 4], encoding: .ascii) ?? ""
             let size = Int(bytes[offset + 4]) | Int(bytes[offset + 5]) << 8
                 | Int(bytes[offset + 6]) << 16 | Int(bytes[offset + 7]) << 24
-            let dataStart = offset + 8
-            if id == "data" {
-                let end = min(dataStart + size, bytes.count)
-                guard dataStart <= end else { return nil }
-                return Data(bytes[dataStart..<end])
+            let chunkStart = offset + 8
+            if id == "fmt ", chunkStart + 8 <= bytes.count {
+                // fmt: audioFormat(2) numChannels(2) sampleRate(4) …
+                let rate = Int(bytes[chunkStart + 4]) | Int(bytes[chunkStart + 5]) << 8
+                    | Int(bytes[chunkStart + 6]) << 16 | Int(bytes[chunkStart + 7]) << 24
+                if rate > 0 { sampleRate = rate }
             }
-            // Chunks are word-aligned: skip the payload plus any pad byte.
-            offset = dataStart + size + (size & 1)
+            if id == "data" {
+                let end = min(chunkStart + size, bytes.count)
+                guard chunkStart <= end else { return nil }
+                payload = Data(bytes[chunkStart..<end])
+            }
+            offset = chunkStart + size + (size & 1)   // word-aligned
         }
-        return nil
+        guard let data = payload else { return nil }
+        return (data, sampleRate)
     }
 }

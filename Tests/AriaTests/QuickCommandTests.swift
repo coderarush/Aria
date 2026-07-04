@@ -99,3 +99,23 @@ final class QuickCommandTests: XCTestCase {
         XCTAssertNil(QuickCommand.numberWord("banana"))
     }
 }
+
+final class AutonomousModeTests: XCTestCase {
+    // Autonomous mode maps onto the existing trust primitive: when the user is
+    // NOT confirming destructive actions, important-irreversible ones auto-run.
+    func testConfirmOffAutoApprovesImportantIrreversible() {
+        XCTAssertEqual(
+            TrustProfile.advisedLevel(importance: .importantIrreversible, confirmsDestructive: false),
+            .auto)
+    }
+    func testConfirmOnStillAsks() {
+        XCTAssertEqual(
+            TrustProfile.advisedLevel(importance: .importantIrreversible, confirmsDestructive: true),
+            .ask)
+    }
+    func testReversibleAlwaysAuto() {
+        XCTAssertEqual(
+            TrustProfile.advisedLevel(importance: .reversible, confirmsDestructive: true),
+            .auto)
+    }
+}
