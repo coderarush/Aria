@@ -126,4 +126,5 @@ enum KeychainKey {
     static let groqAPIKey = "groq_api_key"
     static let cerebrasAPIKey = "cerebras_api_key"
     static let openRouterAPIKey = "openrouter_api_key"
+    static let elevenLabsAPIKey = "elevenlabs_api_key"
 }

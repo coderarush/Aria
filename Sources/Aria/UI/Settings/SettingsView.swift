@@ -1402,6 +1402,7 @@ struct CrewSettingsTab: View {
 
 struct VoiceSettingsTab: View {
     @StateObject private var settings = AppSettings.shared
+    @State private var elevenKey = ""
     private let geminiVoices = ["Kore", "Puck", "Charon", "Fenrir", "Aoede", "Leda", "Orus", "Zephyr"]
     /// Installed offline voices, best first (computed once per body pass).
     private var offlineVoices: [LocalVoice.Candidate] {
@@ -1418,7 +1419,7 @@ struct VoiceSettingsTab: View {
     }
 
     var body: some View {
-        TabHead(title: "How Aria Speaks", subtitle: "Aria speaks with a natural Gemini voice.")
+        TabHead(title: "How Aria Speaks", subtitle: "Natural neural voice — free and unlimited by default.")
         SForm {
             SSection("Voice") {
                 Toggle("Speak responses aloud", isOn: $settings.voiceEnabled)
@@ -1432,20 +1433,55 @@ struct VoiceSettingsTab: View {
                     Text("Same gestures, different voicing — Aurora is soft sine, Crystal is bright glass, Calm is low and round.")
                         .font(.caption2).foregroundStyle(.tertiary)
                 }
-                Picker("Voice", selection: $settings.geminiVoiceName) {
-                    ForEach(geminiVoices, id: \.self) { Text($0).tag($0) }
+            }
+
+            SSection("Engine") {
+                Picker("Voice engine", selection: $settings.ttsEngine) {
+                    ForEach(VoiceEngine.TTSEngine.allCases, id: \.rawValue) {
+                        Text($0.label).tag($0.rawValue)
+                    }
                 }
-                Text("Aria uses Gemini's natural cloud voice (your Gemini key). If it's momentarily busy she stays quiet for that line — the caption always shows the reply.")
+                Text("Edge is free, needs no key, and never hits a quota — natural Microsoft neural voices, unlimited. Gemini and ElevenLabs use your own key. Whatever's picked, Aria falls back so she's never silent.")
                     .font(.caption).foregroundStyle(.secondary)
+
+                if settings.ttsEngine == "edge" {
+                    Picker("Edge voice", selection: $settings.edgeVoiceName) {
+                        ForEach(EdgeTTS.voices, id: \.id) { Text($0.label).tag($0.id) }
+                    }
+                }
+                if settings.ttsEngine == "gemini" {
+                    Picker("Gemini voice", selection: $settings.geminiVoiceName) {
+                        ForEach(geminiVoices, id: \.self) { Text($0).tag($0) }
+                    }
+                    Text("Uses your Gemini key (Settings → API Key). Metered — falls back to Edge/system if a line is rate-limited.")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
+                if settings.ttsEngine == "elevenlabs" {
+                    Picker("ElevenLabs voice", selection: $settings.elevenLabsVoiceID) {
+                        ForEach(ElevenLabsTTS.voices, id: \.id) { Text($0.label).tag($0.id) }
+                    }
+                    SecureField("ElevenLabs API key (elevenlabs.io — free tier)", text: $elevenKey)
+                        .onChange(of: elevenKey) { _, v in
+                            let t = v.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if t.isEmpty { KeychainManager.delete(account: KeychainKey.elevenLabsAPIKey) }
+                            else { try? KeychainManager.save(t, account: KeychainKey.elevenLabsAPIKey) }
+                        }
+                    Text("Best-in-class quality, 10k characters/month free. Without a key, Aria uses the free Edge voice.")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
+            }
+
+            SSection("Offline fallback") {
                 Picker("Offline voice", selection: $settings.localVoiceID) {
                     Text("Best installed (automatic)").tag("")
                     ForEach(offlineVoices, id: \.id) { candidate in
                         Text(Self.voiceLabel(candidate)).tag(candidate.id)
                     }
                 }
-                Text("Used when the cloud voice is unavailable or out of quota — Aria never goes silent. ★ premium, ✦ enhanced. Download more natural voices in System Settings → Accessibility → Spoken Content → System Voice → Manage Voices.")
+                Text("Used when there's no network at all — Aria never goes silent. ★ premium, ✦ enhanced. Download more natural voices in System Settings → Accessibility → Spoken Content → System Voice → Manage Voices.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
+        .onAppear { elevenKey = KeychainManager.read(account: KeychainKey.elevenLabsAPIKey) ?? "" }
     }
 }

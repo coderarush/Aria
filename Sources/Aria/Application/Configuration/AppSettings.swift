@@ -56,6 +56,13 @@ final class AppSettings: ObservableObject {
     }
     @Published var voiceEnabled: Bool { didSet { defaults.set(voiceEnabled, forKey: K.voiceEnabled) } }
     @Published var geminiVoiceName: String { didSet { defaults.set(geminiVoiceName, forKey: K.geminiVoiceName) } }
+    /// TTS engine (VoiceEngine.TTSEngine raw value): edge | gemini | elevenlabs | apple.
+    /// Default "edge" — free, keyless, unlimited neural voices.
+    @Published var ttsEngine: String { didSet { defaults.set(ttsEngine, forKey: K.ttsEngine) } }
+    /// Selected Edge neural voice id (e.g. en-US-AndrewMultilingualNeural).
+    @Published var edgeVoiceName: String { didSet { defaults.set(edgeVoiceName, forKey: K.edgeVoiceName) } }
+    /// Selected ElevenLabs voice id.
+    @Published var elevenLabsVoiceID: String { didSet { defaults.set(elevenLabsVoiceID, forKey: K.elevenLabsVoiceID) } }
     @Published var accentChoiceRaw: String { didSet { defaults.set(accentChoiceRaw, forKey: K.accentChoice) } }
     @Published var glowPaletteID: String { didSet { defaults.set(glowPaletteID, forKey: K.glowPaletteID) } }
     @Published var bargeInEnabled: Bool { didSet { defaults.set(bargeInEnabled, forKey: K.bargeInEnabled) } }
@@ -181,6 +188,9 @@ final class AppSettings: ObservableObject {
         disabledTools = Set(defaults.stringArray(forKey: K.disabledTools) ?? [])
         voiceEnabled = defaults.object(forKey: K.voiceEnabled) as? Bool ?? true
         geminiVoiceName = defaults.string(forKey: K.geminiVoiceName) ?? "Kore"
+        ttsEngine = defaults.string(forKey: K.ttsEngine) ?? "edge"
+        edgeVoiceName = defaults.string(forKey: K.edgeVoiceName) ?? EdgeTTS.defaultVoice
+        elevenLabsVoiceID = defaults.string(forKey: K.elevenLabsVoiceID) ?? ElevenLabsTTS.defaultVoiceID
         accentChoiceRaw = defaults.string(forKey: K.accentChoice) ?? "system"
         glowPaletteID = defaults.string(forKey: K.glowPaletteID) ?? "accent"
         // Barge-in + echo cancellation re-enabled (experimental). If AEC ever breaks
@@ -248,6 +258,9 @@ final class AppSettings: ObservableObject {
         static let disabledTools = "app.disabledTools"
         static let voiceEnabled = "app.voiceEnabled"
         static let geminiVoiceName = "app.geminiVoiceName"
+        static let ttsEngine = "app.ttsEngine"
+        static let edgeVoiceName = "app.edgeVoiceName"
+        static let elevenLabsVoiceID = "app.elevenLabsVoiceID"
         static let accentChoice = "app.accentChoice"
         static let glowPaletteID = "app.glowPaletteID"
         static let bargeInEnabled = "app.bargeInEnabled"

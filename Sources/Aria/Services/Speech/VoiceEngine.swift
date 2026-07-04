@@ -6,7 +6,24 @@ import AVFoundation
 /// AVSpeechSynthesizer so Aria always speaks rather than going silent.
 @MainActor
 final class VoiceEngine: NSObject {
+    /// Which text-to-speech source to use. Edge is the default: free, keyless,
+    /// and effectively unlimited, so Aria never hits a voice quota.
+    enum TTSEngine: String, CaseIterable {
+        case edge, gemini, elevenlabs, apple
+        var label: String {
+            switch self {
+            case .edge: return "Edge Neural — free, unlimited"
+            case .gemini: return "Gemini — natural (your key)"
+            case .elevenlabs: return "ElevenLabs — premium (your key)"
+            case .apple: return "System — offline"
+            }
+        }
+    }
+
     var geminiVoiceName = "Kore"
+    var ttsEngine: TTSEngine = .edge
+    var edgeVoiceName = EdgeTTS.defaultVoice
+    var elevenLabsVoiceID = ElevenLabsTTS.defaultVoiceID
     /// Aria's TTS plays through the shared AudioBus (so the echo canceller has her
     /// exact audio as its far-end reference and can be stopped instantly on barge-in).
     weak var audioBus: AudioBus?
@@ -17,6 +34,12 @@ final class VoiceEngine: NSObject {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .first { !$0.isEmpty }
     }
+    private let elevenKeyProvider: () -> String? = {
+        (KeychainManager.read(account: KeychainKey.elevenLabsAPIKey) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    /// In-flight network-TTS task, cancelled on stop()/barge-in.
+    private var ttsTask: Task<Void, Never>?
 
     var enabled = true
 
@@ -33,7 +56,7 @@ final class VoiceEngine: NSObject {
         let clean = Self.spokenText(from: message)
         guard !clean.isEmpty else { return }
         onStart?()
-        speakWithGemini(clean)
+        route(clean)
     }
 
     /// Speak a single chunk (no onStart). Completion routes to onChunkFinished.
@@ -41,19 +64,70 @@ final class VoiceEngine: NSObject {
         guard enabled else { onChunkFinished?(); return }   // respect the Settings toggle
         let clean = Self.spokenText(from: text)
         guard !clean.isEmpty else { onChunkFinished?(); return }
-        speakWithGemini(clean)
+        route(clean)
+    }
+
+    /// Dispatch to the selected engine. Every network engine falls back so Aria
+    /// is never left silent: selected → Apple system voice.
+    private func route(_ text: String) {
+        switch ttsEngine {
+        case .apple:
+            speakWithApple(text)
+        case .gemini:
+            speakWithGemini(text)
+        case .edge:
+            speakWithPCMProvider(EdgeTTS(voice: edgeVoiceName), text: text, label: "edge")
+        case .elevenlabs:
+            let key = elevenKeyProvider() ?? ""
+            guard !key.isEmpty else {
+                // No key yet — don't fail silently, use the free Edge voice.
+                Log.trace("elevenlabs selected but no key; using Edge")
+                speakWithPCMProvider(EdgeTTS(voice: edgeVoiceName), text: text, label: "edge")
+                return
+            }
+            speakWithPCMProvider(ElevenLabsTTS(apiKey: key, voiceID: elevenLabsVoiceID),
+                                 text: text, label: "elevenlabs")
+        }
+    }
+
+    /// Synthesize through a PCM provider (Edge/ElevenLabs) and play the result
+    /// on the AudioBus — same AEC/barge-in path as Gemini. On any failure, fall
+    /// back to the Apple system voice so a reply is never dropped.
+    private func speakWithPCMProvider(_ provider: PCMSpeechProvider, text: String, label: String) {
+        ttsTask?.cancel()
+        ttsTask = Task { [weak self] in
+            do {
+                let pcm = try await provider.synthesizePCM(text: text)
+                try Task.checkCancellation()
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    do { try self.playPCM(pcm) }
+                    catch { self.speakWithApple(text) }
+                }
+            } catch is CancellationError {
+                // Superseded/barge-in — the new utterance owns completion.
+            } catch {
+                Log.trace("\(label) TTS unavailable (\(error)); falling back to Apple TTS")
+                await MainActor.run { [weak self] in self?.speakWithApple(text) }
+            }
+        }
     }
 
     private func speakWithGemini(_ text: String) {
-        Task { [weak self] in
+        ttsTask?.cancel()
+        ttsTask = Task { [weak self] in
             guard let self else { return }
             let key = self.keyProvider() ?? ""
             // Up to 3 attempts, pacing on a momentary 429, so the natural voice wins
             // under normal use instead of going silent on a transient rate-limit.
             for attempt in 0..<3 {
+                if Task.isCancelled { return }
                 do {
                     let wav = try await Self.synthesizeGemini(text: text, voice: self.geminiVoiceName, apiKey: key)
-                    try self.play(wav)            // onFinish/onChunkFinished fire from the player delegate
+                    try Task.checkCancellation()
+                    try await MainActor.run { try self.play(wav) }   // onFinish/onChunkFinished fire from the player delegate
+                    return
+                } catch is CancellationError {
                     return
                 } catch {
                     let is429 = (error as NSError).code == 429
@@ -65,10 +139,19 @@ final class VoiceEngine: NSObject {
                     }
                     // Gemini unavailable — fall back to Apple TTS so Aria always speaks.
                     Log.trace("gemini TTS unavailable (\(error)); falling back to Apple TTS")
-                    self.speakWithApple(text)
+                    await MainActor.run { self.speakWithApple(text) }
                     return
                 }
             }
+        }
+    }
+
+    /// Play raw 24 kHz mono 16-bit PCM through the AudioBus (AEC far-end ref).
+    private func playPCM(_ pcm: Data) throws {
+        guard let bus = audioBus else { throw NSError(domain: "AriaTTS", code: -2) }
+        guard !pcm.isEmpty else { throw NSError(domain: "AriaTTS", code: -4) }
+        bus.playReference(pcm: pcm, pcmRate: 24000) { [weak self] in
+            Task { @MainActor in self?.onFinish?(); self?.onChunkFinished?() }
         }
     }
 
@@ -82,6 +165,8 @@ final class VoiceEngine: NSObject {
     }
 
     func stop() {
+        ttsTask?.cancel()
+        ttsTask = nil
         audioBus?.stopPlayback()
         appleSynth.stopSpeaking(at: .immediate)
     }

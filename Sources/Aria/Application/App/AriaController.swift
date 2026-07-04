@@ -1077,6 +1077,9 @@ final class AriaController {
         let s = AppSettings.shared
         voice.enabled = s.voiceEnabled
         voice.geminiVoiceName = s.geminiVoiceName
+        voice.ttsEngine = VoiceEngine.TTSEngine(rawValue: s.ttsEngine) ?? .edge
+        voice.edgeVoiceName = s.edgeVoiceName
+        voice.elevenLabsVoiceID = s.elevenLabsVoiceID
     }
 
     private func wireEngine() {
