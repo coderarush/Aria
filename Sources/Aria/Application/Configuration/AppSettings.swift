@@ -63,6 +63,9 @@ final class AppSettings: ObservableObject {
     @Published var edgeVoiceName: String { didSet { defaults.set(edgeVoiceName, forKey: K.edgeVoiceName) } }
     /// Selected ElevenLabs voice id.
     @Published var elevenLabsVoiceID: String { didSet { defaults.set(elevenLabsVoiceID, forKey: K.elevenLabsVoiceID) } }
+    /// Instant commands: run everyday one-shots (open app, volume, timer, URL)
+    /// with zero model calls for near-instant response. Default on.
+    @Published var instantCommandsEnabled: Bool { didSet { defaults.set(instantCommandsEnabled, forKey: K.instantCommandsEnabled) } }
     @Published var accentChoiceRaw: String { didSet { defaults.set(accentChoiceRaw, forKey: K.accentChoice) } }
     @Published var glowPaletteID: String { didSet { defaults.set(glowPaletteID, forKey: K.glowPaletteID) } }
     @Published var bargeInEnabled: Bool { didSet { defaults.set(bargeInEnabled, forKey: K.bargeInEnabled) } }
@@ -213,6 +216,7 @@ final class AppSettings: ObservableObject {
         uiSoundsEnabled = defaults.object(forKey: K.uiSoundsEnabled) as? Bool ?? true
         soundTheme = defaults.string(forKey: SoundTheme.key) ?? SoundTheme.aurora.rawValue
         localVoiceID = defaults.string(forKey: LocalVoice.key) ?? ""
+        instantCommandsEnabled = defaults.object(forKey: K.instantCommandsEnabled) as? Bool ?? true
         customInstructions = defaults.string(forKey: CustomInstructions.key) ?? ""
         orbScale = defaults.object(forKey: K.orbScale) as? Double ?? 1.0
         personaStyle = defaults.string(forKey: PersonaStyle.key) ?? "balanced"
@@ -261,6 +265,7 @@ final class AppSettings: ObservableObject {
         static let ttsEngine = "app.ttsEngine"
         static let edgeVoiceName = "app.edgeVoiceName"
         static let elevenLabsVoiceID = "app.elevenLabsVoiceID"
+        static let instantCommandsEnabled = "app.instantCommands"
         static let accentChoice = "app.accentChoice"
         static let glowPaletteID = "app.glowPaletteID"
         static let bargeInEnabled = "app.bargeInEnabled"

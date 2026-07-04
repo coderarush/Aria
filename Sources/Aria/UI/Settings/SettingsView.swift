@@ -331,6 +331,9 @@ struct GeneralSettingsTab: View {
                     Slider(value: $settings.responseDuration, in: 3...20, step: 1)
                     Text("\(Int(settings.responseDuration))s").monospacedDigit()
                 }
+                Toggle("Instant commands (skip the model for simple actions)", isOn: $settings.instantCommandsEnabled)
+                Text("Everyday one-shots — open an app, set the volume, start a timer, open a site — run immediately with no model call, so they finish the moment you stop speaking. Anything else still goes to the full agent.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Toggle("Privacy mode (disable screen capture)", isOn: $settings.privacyMode)
                 Toggle("Launch at login", isOn: $settings.launchAtLogin)
             }

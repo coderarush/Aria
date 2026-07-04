@@ -1366,6 +1366,27 @@ final class AriaController {
             return
         }
 
+        // Instant commands: everyday one-shots (open an app, set the volume, start
+        // a timer, open a site) execute directly with ZERO model calls — no
+        // planning round-trip, so they finish the moment you stop speaking, just
+        // like biscuit's recipes. Conservative matcher: anything ambiguous falls
+        // through to the full agent below. Skipped for unattended/proactive runs
+        // (those already carry a resolved command) and when the user turns it off.
+        if !unattended, AppSettings.shared.instantCommandsEnabled,
+           let quick = QuickCommand.match(command) {
+            streamVoice.stop()
+            playChime(.confirm)
+            currentTurnTask = Task { [weak self] in
+                let confirmation = await QuickCommand.run(quick)
+                await MainActor.run {
+                    guard let self else { return }
+                    self.islandViewModel.showResponse(confirmation)
+                    self.speakAndListen(confirmation)
+                }
+            }
+            return
+        }
+
         // Lens follow-up: only now (the agent paths) do we fold just-circled content
         // into a deictic action — "translate that", "fix this error" — so control
         // phrases above stay untouched. Consumed once.
