@@ -8,8 +8,6 @@ final class ConversationSession {
     private let onTurn: (String) -> Void
     private(set) var hasEnded = false
 
-    private static let dismissPhrases = ["thanks aria", "that's all", "dismiss", "never mind", "goodbye aria"]
-
     init(onEnd: @escaping () -> Void, onTurn: @escaping (String) -> Void = { _ in }) {
         self.onEnd = onEnd
         self.onTurn = onTurn
@@ -22,7 +20,7 @@ final class ConversationSession {
         guard !hasEnded else { return }
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
-        if Self.dismissPhrases.contains(where: { t.lowercased().contains($0) }) { end(); return }
+        if DismissIntent.matches(t) { end(); return }
         onTurn(t)
     }
 
@@ -30,5 +28,24 @@ final class ConversationSession {
         guard !hasEnded else { return }
         hasEnded = true
         onEnd()
+    }
+}
+
+/// Matches only a complete dismissal utterance. Substring matching here would
+/// swallow legitimate requests such as "how do I stop Safari from reloading?".
+enum DismissIntent {
+    private static let phrases: Set<String> = [
+        "dismiss", "thanks aria", "never mind", "bye", "bye aria", "goodbye",
+        "goodbye aria", "go away", "okay go away", "thats all", "thats it",
+        "you can go", "stop", "get out of here", "see you", "later aria",
+    ]
+
+    static func matches(_ text: String) -> Bool {
+        let words = text.lowercased()
+            .replacingOccurrences(of: "'", with: "")
+            .replacingOccurrences(of: "\u{2019}", with: "")
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+        return phrases.contains(words.joined(separator: " "))
     }
 }

@@ -516,6 +516,9 @@ final class AriaController {
             func set(_ v: (Bool, String)) { if value == nil { value = v } }
         }
         let box = ResultBox()
+        let priorUnattended = unattendedActive
+        unattendedActive = true
+        defer { unattendedActive = priorUnattended }
         await orchestrator.runTask(goal: goal, silent: true) { event in
             if case .finished(let ok, let summary) = event {
                 Task { await box.set((ok, summary)) }
@@ -925,9 +928,8 @@ final class AriaController {
     /// a second confirmation while one is open is declined rather than stacked.
     /// Only an attended, first-in-flight request presents the modal — where the
     /// safe choice (Cancel) is the default button so a stray Return can't approve.
-    /// The confirm gate, folding in Autonomous mode: when the user has turned
-    /// Aria loose, she never pauses to ask — everything still lands in the
-    /// Activity log and is undoable.
+    /// Autonomous mode skips the modal only for attended commands. The policy
+    /// still declines important irreversible work from background runs.
     private func effectiveConfirmsDestructive() -> Bool {
         !AppSettings.shared.autonomousMode && ConfirmationPolicy.confirmsDestructive()
     }
@@ -1299,12 +1301,7 @@ final class AriaController {
             return
         }
 
-        let dismissPhrases = [
-            "dismiss", "thanks aria", "never mind", "bye", "bye aria",
-            "goodbye", "go away", "okay go away", "that's all", "that's it",
-            "you can go", "stop", "get out of here", "see you", "later aria"
-        ]
-        if dismissPhrases.contains(where: lower.contains) {
+        if DismissIntent.matches(command) {
             cancelOnScreenActivity()   // leave the screen clean; stop any watch/walkthrough
             streamVoice.stop(); session?.end(); return
         }

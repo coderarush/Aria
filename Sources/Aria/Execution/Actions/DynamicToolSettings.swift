@@ -17,8 +17,8 @@ struct DynamicToolSettings {
 
     static func load(_ defaults: UserDefaults = .standard) -> DynamicToolSettings {
         DynamicToolSettings(
-            allowCodeExecution: defaults.object(forKey: Key.allow) as? Bool ?? true,
-            showCodeBeforeRun: defaults.object(forKey: Key.show) as? Bool ?? false,
+            allowCodeExecution: defaults.object(forKey: Key.allow) as? Bool ?? false,
+            showCodeBeforeRun: defaults.object(forKey: Key.show) as? Bool ?? true,
             askBeforeSaving: defaults.object(forKey: Key.ask) as? Bool ?? true,
             syncCommunityTools: defaults.object(forKey: Key.sync) as? Bool ?? false)
     }

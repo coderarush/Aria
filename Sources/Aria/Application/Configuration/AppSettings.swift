@@ -66,10 +66,9 @@ final class AppSettings: ObservableObject {
     /// Instant commands: run everyday one-shots (open app, volume, timer, URL)
     /// with zero model calls for near-instant response. Default on.
     @Published var instantCommandsEnabled: Bool { didSet { defaults.set(instantCommandsEnabled, forKey: K.instantCommandsEnabled) } }
-    /// Autonomous mode: Aria just does it — no "Approve?" prompts before
-    /// sending/deleting/paying, and she acts on her own high-confidence
-    /// anticipations. Everything is still receipted in the Activity log and
-    /// undoable. Default ON (this is a personal JARVIS, not a cautious assistant).
+    /// Autonomous mode skips "Approve?" prompts for attended commands and lets
+    /// Aria act on high-confidence anticipations. Background runs still fail
+    /// closed for important irreversible actions, and this is off by default.
     @Published var autonomousMode: Bool { didSet { defaults.set(autonomousMode, forKey: K.autonomousMode) } }
     @Published var accentChoiceRaw: String { didSet { defaults.set(accentChoiceRaw, forKey: K.accentChoice) } }
     @Published var glowPaletteID: String { didSet { defaults.set(glowPaletteID, forKey: K.glowPaletteID) } }
@@ -222,7 +221,7 @@ final class AppSettings: ObservableObject {
         soundTheme = defaults.string(forKey: SoundTheme.key) ?? SoundTheme.aurora.rawValue
         localVoiceID = defaults.string(forKey: LocalVoice.key) ?? ""
         instantCommandsEnabled = defaults.object(forKey: K.instantCommandsEnabled) as? Bool ?? true
-        autonomousMode = defaults.object(forKey: K.autonomousMode) as? Bool ?? true
+        autonomousMode = defaults.object(forKey: K.autonomousMode) as? Bool ?? false
         customInstructions = defaults.string(forKey: CustomInstructions.key) ?? ""
         orbScale = defaults.object(forKey: K.orbScale) as? Double ?? 1.0
         personaStyle = defaults.string(forKey: PersonaStyle.key) ?? "balanced"

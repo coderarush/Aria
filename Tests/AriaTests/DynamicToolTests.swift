@@ -82,8 +82,8 @@ final class DynamicToolTests: XCTestCase {
     func testDynamicSettingsDefaults() {
         let suite = UserDefaults(suiteName: "aria-test-\(UUID().uuidString)")!
         let s = DynamicToolSettings.load(suite)
-        XCTAssertTrue(s.allowCodeExecution)
-        XCTAssertFalse(s.showCodeBeforeRun)
+        XCTAssertFalse(s.allowCodeExecution)
+        XCTAssertTrue(s.showCodeBeforeRun)
         XCTAssertTrue(s.askBeforeSaving)
         XCTAssertFalse(s.syncCommunityTools)
     }

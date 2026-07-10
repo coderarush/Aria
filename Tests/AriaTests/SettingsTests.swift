@@ -12,6 +12,7 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(s.responseDuration, 8, accuracy: 0.001)
         XCTAssertFalse(s.privacyMode)
         XCTAssertFalse(s.onboardingComplete)
+        XCTAssertFalse(s.autonomousMode)
 
         s.privacyMode = true
         s.orbSize = .large

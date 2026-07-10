@@ -38,6 +38,12 @@ final class ConfirmationPolicyTests: XCTestCase {
             .decline)
     }
 
+    func testDecisionDeclinesUnattendedEvenWhenConfirmationOff() {
+        XCTAssertEqual(
+            ConfirmationPolicy.decision(confirmsDestructive: false, unattended: true, alreadyConfirming: false),
+            .decline)
+    }
+
     func testDecisionDeclinesReentrantConfirmation() {
         // A second confirmation while one is open must not stack.
         XCTAssertEqual(

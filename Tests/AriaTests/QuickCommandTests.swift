@@ -36,6 +36,11 @@ final class QuickCommandTests: XCTestCase {
         XCTAssertNil(QuickCommand.match("why is the volume so quiet on this laptop"))
     }
 
+    func testCompoundVolumeRequestFallsThrough() {
+        XCTAssertNil(QuickCommand.match("turn the volume up and play music"))
+        XCTAssertNil(QuickCommand.match("set volume to half then open Spotify"))
+    }
+
     // MARK: Timer
 
     func testTimerVariants() {

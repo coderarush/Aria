@@ -340,7 +340,7 @@ struct GeneralSettingsTab: View {
 
             SSection("Autonomy") {
                 Toggle("Autonomous mode — just do it, don't ask", isOn: $settings.autonomousMode)
-                Text("Aria acts without pausing for “Approve?” — including sending, deleting, and other big actions. Everything is still recorded in the Activity log and one “undo” away. Turn this off to have her confirm before anything irreversible.")
+                Text("For commands you give directly, Aria can act without pausing for “Approve?” — including irreversible actions that cannot be undone. Background automations never send, delete, pay, or run raw code unattended. Everything is recorded in the Activity log.")
                     .font(.caption).foregroundStyle(.secondary)
                 if !settings.autonomousMode {
                     Toggle("Let Aria act on her own anticipations", isOn: $settings.autonomousActions)

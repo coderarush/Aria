@@ -35,7 +35,7 @@ enum QuickCommand {
         let compound = [" and ", " then ", ", then ", " after that ", " also "]
         let isCompound = compound.contains { lower.contains($0) }
 
-        if let v = matchVolume(lower) { return v }              // "set volume to 40", "mute"
+        if !isCompound, let v = matchVolume(lower) { return v } // "set volume to 40", "mute"
         if !isCompound, let t = matchTimer(lower) { return t }  // "timer for 10 minutes"
         if !isCompound, let u = matchURL(lower) { return u }    // "open github.com"
         if !isCompound, let a = matchOpenApp(lower, original: text) { return a }  // "open Spotify"

@@ -167,7 +167,8 @@ actor AgentOrchestrator {
     /// routed to dynamic generation for now (static registry comes next pass).
     private func execute(_ action: AgentAction,
                          priorOutput: String,
-                         context: GeminiClient.SystemContext) async -> ToolResult {
+                         context: GeminiClient.SystemContext,
+                         allowDynamicCode: Bool = true) async -> ToolResult {
         // Sub-agent dispatch: tool name matches an agent, or tool == "agent".
         let agentName = action.tool == "agent" ? (action.input["name"] ?? "") : action.tool
         if let agent = await subAgents.agent(named: agentName) {
@@ -184,7 +185,8 @@ actor AgentOrchestrator {
                             tool: act.tool, detail: "blocked: outside \(agentName) scope", result: denied)
                         return denied
                     }
-                    return await self?.execute(act, priorOutput: prior, context: context)
+                    return await self?.execute(act, priorOutput: prior, context: context,
+                                               allowDynamicCode: allowDynamicCode)
                         ?? .fail("orchestrator gone")
                 })
             let result = await agent.execute(task: task, context: ctx)
@@ -231,6 +233,9 @@ actor AgentOrchestrator {
         }
 
         // Otherwise fall back to dynamic code generation.
+        guard allowDynamicCode else {
+            return .fail("Dynamic code execution is disabled for unattended/background runs.")
+        }
         let settings = DynamicToolSettings.load()
         guard settings.allowCodeExecution else {
             return .fail("Code execution is disabled in settings.")
@@ -250,17 +255,16 @@ actor AgentOrchestrator {
             return .fail("Couldn't generate a tool: \(error.localizedDescription)")
         }
 
-        // Confirmation gate: destructive intent or "show code before run".
-        if Safety.isDestructive(summary: task) || settings.showCodeBeforeRun {
-            let prompt = settings.showCodeBeforeRun
-                ? "Aria wants to run this \(language.rawValue):\n\n\(tool.code)"
-                : "This may modify or send data. Run it?"
-            let approved = await (confirmationHandler?(prompt) ?? false)
-            guard approved else {
-                let declined = ToolResult.cancelled()
-                await ActivityLog.shared.record(tool: action.tool, detail: describe(action), result: declined)
-                return declined
-            }
+        // Generated code always requires an explicit approval. Keyword heuristics
+        // are not a sufficient safety boundary for executable code.
+        let prompt = settings.showCodeBeforeRun
+            ? "Aria wants to run this \(language.rawValue):\n\n\(tool.code)"
+            : "Aria wants to generate and run \(language.rawValue) for: \(task)\n\nRun it?"
+        let approved = await (confirmationHandler?(prompt) ?? false)
+        guard approved else {
+            let declined = ToolResult.cancelled()
+            await ActivityLog.shared.record(tool: action.tool, detail: describe(action), result: declined)
+            return declined
         }
 
         let result = await factory.execute(tool, timeout: 60)
@@ -297,7 +301,8 @@ actor AgentOrchestrator {
             subAgents: subAgents,
             context: context,
             runAction: { [weak self] act, prior in
-                await self?.execute(act, priorOutput: prior, context: context) ?? .fail("orchestrator gone")
+                await self?.execute(act, priorOutput: prior, context: context,
+                                    allowDynamicCode: !silent) ?? .fail("orchestrator gone")
             },
             confirm: { [weak self] prompt in
                 await self?.confirmationHandler?(prompt) ?? false
