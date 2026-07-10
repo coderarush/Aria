@@ -1,7 +1,14 @@
 import React from "react";
 import {
-  AbsoluteFill, Sequence, Audio, staticFile, interpolate, spring, Easing,
-  useCurrentFrame, useVideoConfig,
+  AbsoluteFill,
+  Audio,
+  Easing,
+  Sequence,
+  interpolate,
+  spring,
+  staticFile,
+  useCurrentFrame,
+  useVideoConfig,
 } from "remotion";
 import { loadFont as loadSerif } from "@remotion/google-fonts/Newsreader";
 import { loadFont as loadSans } from "@remotion/google-fonts/HankenGrotesk";
@@ -11,77 +18,201 @@ const serif = loadSerif();
 const sans = loadSans();
 
 export const FPS = 30;
-export const DURATION_FRAMES = 58 * FPS; // 58s — v3 adds Memory / Timeline / Focus beats
+export const DURATION_FRAMES = 46 * FPS;
 
-const INK = "#15130d";
-const SOFT = "#5b5648";
-const FAINT = "#958f7e";
-const BG = "#f1ede2";
-const PAPER = "#f7f4ec";
-const LINE = "#ddd6c4";
+const INK = "#15120e";
+const SOFT = "#5f574b";
+const FAINT = "#9a8e7d";
+const CREAM = "#f2e7d7";
+const PAPER = "#fff8ec";
+const GOLD = "#c38332";
+const MOSS = "#526b45";
+const CLAY = "#a45e3e";
+const LINE = "rgba(60,43,25,0.16)";
 
 const fill: React.CSSProperties = {
-  backgroundColor: BG,
+  background:
+    "radial-gradient(circle at 16% 12%, rgba(255,248,226,0.9), transparent 520px), radial-gradient(circle at 84% 12%, rgba(195,131,50,0.18), transparent 560px), linear-gradient(180deg,#f5ecde,#eee0cc)",
   fontFamily: sans.fontFamily,
   color: INK,
+  overflow: "hidden",
 };
 
-/* ============================================================
-   The blob is the main character: ONE blob, choreographed across
-   the whole film. Keyframes in seconds; positions relative to
-   screen center (1920x1080), scale on a 560px base sprite.
-   ============================================================ */
 type BlobKey = { t: number; x: number; y: number; s: number; amp: number; speed: number };
 const BLOB_PATH: BlobKey[] = [
-  { t: 0.0,  x: 0,    y: 0,    s: 0.0,  amp: 0.10, speed: 0.70 },  // born
-  { t: 1.2,  x: 0,    y: 0,    s: 1.25, amp: 0.10, speed: 0.70 },  // arrive (wake chime)
-  { t: 4.6,  x: 0,    y: 0,    s: 1.25, amp: 0.10, speed: 0.70 },
-  { t: 6.0,  x: 470,  y: 0,    s: 0.86, amp: 0.11, speed: 0.80 },  // claim: settles right
-  { t: 10.6, x: 470,  y: 0,    s: 0.86, amp: 0.11, speed: 0.80 },
-  { t: 12.0, x: 0,    y: 318,  s: 0.42, amp: 0.16, speed: 0.95 },  // conversation: orb, listening
-  { t: 14.0, x: 0,    y: 318,  s: 0.42, amp: 0.13, speed: 1.60 },  // thinking
-  { t: 17.6, x: 0,    y: 318,  s: 0.42, amp: 0.12, speed: 0.80 },
-  { t: 19.0, x: -640, y: -250, s: 0.14, amp: 0.10, speed: 0.70 },  // cards: tucks by the label
-  { t: 23.6, x: -640, y: -250, s: 0.14, amp: 0.10, speed: 0.70 },
-  { t: 25.0, x: 0,    y: 318,  s: 0.42, amp: 0.14, speed: 1.05 },  // memory: listening orb again
-  { t: 29.6, x: 0,    y: 318,  s: 0.42, amp: 0.12, speed: 0.80 },
-  { t: 31.0, x: -640, y: -250, s: 0.14, amp: 0.10, speed: 0.70 },  // timeline: tucks by the label
-  { t: 35.6, x: -640, y: -250, s: 0.14, amp: 0.10, speed: 0.70 },
-  { t: 37.0, x: 470,  y: 0,    s: 0.60, amp: 0.06, speed: 0.50 },  // focus: steady, settled right
-  { t: 41.6, x: 470,  y: 0,    s: 0.60, amp: 0.06, speed: 0.50 },
-  { t: 43.0, x: 0,    y: -60,  s: 0.30, amp: 0.05, speed: 0.45 },  // privacy: calm, ringed
-  { t: 47.6, x: 0,    y: -60,  s: 0.30, amp: 0.05, speed: 0.45 },
-  { t: 49.0, x: 0,    y: -340, s: 0.20, amp: 0.10, speed: 0.80 },  // roll: watches from above
-  { t: 52.0, x: 0,    y: -340, s: 0.20, amp: 0.10, speed: 0.80 },
-  { t: 53.4, x: 0,    y: -205, s: 0.62, amp: 0.12, speed: 0.80 },  // endcard: confident
+  { t: 0, x: 0, y: 0, s: 0.05, amp: 0.08, speed: 0.55 },
+  { t: 1.4, x: 0, y: -8, s: 1.25, amp: 0.11, speed: 0.72 },
+  { t: 5.2, x: 455, y: -10, s: 0.82, amp: 0.12, speed: 0.82 },
+  { t: 11.2, x: 0, y: 290, s: 0.38, amp: 0.16, speed: 1.1 },
+  { t: 15.8, x: -625, y: -260, s: 0.15, amp: 0.12, speed: 1.45 },
+  { t: 22.0, x: 520, y: 28, s: 0.52, amp: 0.18, speed: 1.16 },
+  { t: 28.5, x: -520, y: -58, s: 0.44, amp: 0.13, speed: 0.82 },
+  { t: 34.8, x: 0, y: -88, s: 0.34, amp: 0.055, speed: 0.45 },
+  { t: 39.2, x: 0, y: -198, s: 0.62, amp: 0.12, speed: 0.78 },
+  { t: 46, x: 0, y: -198, s: 0.62, amp: 0.12, speed: 0.78 },
 ];
 
+function mix(a: number, b: number, p: number) {
+  return a + (b - a) * p;
+}
+
 function blobAt(sec: number) {
-  const ease = Easing.bezier(0.22, 1, 0.36, 1);
-  const last = BLOB_PATH[BLOB_PATH.length - 1];
-  if (sec >= last.t) {
-    return { x: last.x, y: last.y, s: last.s, amp: last.amp, speed: last.speed };
-  }
+  const ease = Easing.bezier(0.23, 1, 0.32, 1);
   let a = BLOB_PATH[0];
-  let b = BLOB_PATH[1];
+  let b = BLOB_PATH[BLOB_PATH.length - 1];
   for (let i = 0; i < BLOB_PATH.length - 1; i++) {
     if (sec >= BLOB_PATH[i].t && sec <= BLOB_PATH[i + 1].t) {
-      a = BLOB_PATH[i]; b = BLOB_PATH[i + 1]; break;
+      a = BLOB_PATH[i];
+      b = BLOB_PATH[i + 1];
+      break;
     }
   }
-  const p = interpolate(sec, [a.t, Math.max(b.t, a.t + 0.0001)], [0, 1],
-    { easing: ease, extrapolateLeft: "clamp", extrapolateRight: "clamp" });
-  const mix = (ka: number, kb: number) => ka + (kb - ka) * p;
-  return { x: mix(a.x, b.x), y: mix(a.y, b.y), s: mix(a.s, b.s),
-           amp: mix(a.amp, b.amp), speed: mix(a.speed, b.speed) };
+  const p = interpolate(sec, [a.t, Math.max(a.t + 0.001, b.t)], [0, 1], {
+    easing: ease,
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  return {
+    x: mix(a.x, b.x, p),
+    y: mix(a.y, b.y, p),
+    s: mix(a.s, b.s, p),
+    amp: mix(a.amp, b.amp, p),
+    speed: mix(a.speed, b.speed, p),
+  };
 }
+
+function sceneOpacity(frame: number, start: number, end: number, fade = 18) {
+  const enter = interpolate(frame, [start, start + fade], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const exit = interpolate(frame, [end - fade, end], [1, 0], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  return Math.min(enter, exit);
+}
+
+const Mono: React.FC<{ children: React.ReactNode; style?: React.CSSProperties }> = ({ children, style }) => (
+  <div
+    style={{
+      fontFamily: "SF Mono, JetBrains Mono, ui-monospace, monospace",
+      color: MOSS,
+      fontSize: 21,
+      fontWeight: 800,
+      letterSpacing: "0.18em",
+      textTransform: "uppercase",
+      ...style,
+    }}
+  >
+    {children}
+  </div>
+);
+
+const Kinetic: React.FC<{
+  text: string;
+  size?: number;
+  delay?: number;
+  align?: "left" | "center";
+  maxWidth?: number;
+}> = ({ text, size = 112, delay = 0, align = "left", maxWidth = 1180 }) => {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  return (
+    <div
+      style={{
+        fontFamily: sans.fontFamily,
+        fontSize: size,
+        lineHeight: 0.88,
+        letterSpacing: "-0.085em",
+        fontWeight: 900,
+        textAlign: align,
+        maxWidth,
+      }}
+    >
+      {text.split(" ").map((word, index) => {
+        const s = spring({
+          frame: frame - delay - index * 4,
+          fps,
+          config: { damping: 15, mass: 0.62 },
+        });
+        return (
+          <span
+            key={`${word}-${index}`}
+            style={{
+              display: "inline-block",
+              marginRight: "0.22em",
+              opacity: s,
+              transform: `translateY(${interpolate(s, [0, 1], [52, 0])}px) scale(${interpolate(s, [0, 1], [1.04, 1])})`,
+            }}
+          >
+            {word}
+          </span>
+        );
+      })}
+    </div>
+  );
+};
+
+const Rise: React.FC<{ children: React.ReactNode; delay?: number; style?: React.CSSProperties }> = ({
+  children,
+  delay = 0,
+  style,
+}) => {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const s = spring({ frame: frame - delay, fps, config: { damping: 18, mass: 0.75 } });
+  return (
+    <div
+      style={{
+        opacity: s,
+        transform: `translateY(${interpolate(s, [0, 1], [34, 0])}px)`,
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  );
+};
+
+const Grain: React.FC = () => {
+  const frame = useCurrentFrame();
+  return (
+    <AbsoluteFill style={{ pointerEvents: "none" }}>
+      <svg width="100%" height="100%">
+        <filter id="grain">
+          <feTurbulence type="fractalNoise" baseFrequency="0.72" numOctaves="2" seed={frame % 5} stitchTiles="stitch" />
+          <feColorMatrix type="matrix" values="0 0 0 0 0.08 0 0 0 0 0.07 0 0 0 0 0.05 0 0 0 0.04 0" />
+        </filter>
+        <rect width="100%" height="100%" filter="url(#grain)" />
+      </svg>
+      <AbsoluteFill
+        style={{
+          background: "radial-gradient(ellipse at center, transparent 62%, rgba(21,18,14,0.10) 100%)",
+        }}
+      />
+    </AbsoluteFill>
+  );
+};
 
 const BlobLayer: React.FC = () => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const k = blobAt(frame / fps);
+  const glow = interpolate(k.s, [0.05, 1.25], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
   return (
     <AbsoluteFill style={{ justifyContent: "center", alignItems: "center", pointerEvents: "none" }}>
+      <div
+        style={{
+          position: "absolute",
+          width: 620,
+          height: 620,
+          borderRadius: "50%",
+          background: `radial-gradient(circle, rgba(21,18,14,${0.12 * glow}), transparent 62%)`,
+          filter: "blur(20px)",
+          transform: `translate(${k.x}px, ${k.y + 18}px) scale(${Math.max(0.001, k.s)})`,
+        }}
+      />
       <div style={{ transform: `translate(${k.x}px, ${k.y}px) scale(${Math.max(0.001, k.s)})` }}>
         <Blob size={560} amp={k.amp} speed={k.speed} />
       </div>
@@ -89,127 +220,68 @@ const BlobLayer: React.FC = () => {
   );
 };
 
-/* ---------- shared pieces ---------- */
-
-const Rise: React.FC<{ delay?: number; children: React.ReactNode; style?: React.CSSProperties }> =
-  ({ delay = 0, children, style }) => {
-    const frame = useCurrentFrame();
-    const { fps } = useVideoConfig();
-    const s = spring({ frame: frame - delay, fps, config: { damping: 16, mass: 0.7 } });
-    return (
-      <div style={{ opacity: s, transform: `translateY(${interpolate(s, [0, 1], [44, 0])}px)`, ...style }}>
-        {children}
-      </div>
-    );
-  };
-
-/** Kinetic headline: words land one by one with a soft settle. */
-const Kinetic: React.FC<{ text: string; size?: number; startDelay?: number; perWord?: number; align?: "left" | "center" }> =
-  ({ text, size = 104, startDelay = 0, perWord = 4, align = "left" }) => {
-    const frame = useCurrentFrame();
-    const { fps } = useVideoConfig();
-    const words = text.split(" ");
-    return (
-      <div style={{
-        fontFamily: serif.fontFamily, fontWeight: 500, fontSize: size,
-        lineHeight: 1.06, letterSpacing: "-0.015em",
-        textAlign: align, maxWidth: 1500,
-      }}>
-        {words.map((w, i) => {
-          const s = spring({ frame: frame - startDelay - i * perWord, fps, config: { damping: 14, mass: 0.6 } });
-          return (
-            <span key={i} style={{
-              display: "inline-block",
-              opacity: s,
-              transform: `translateY(${interpolate(s, [0, 1], [40, 0])}px) scale(${interpolate(s, [0, 1], [1.06, 1])})`,
-              marginRight: "0.26em",
-            }}>{w}</span>
-          );
-        })}
-      </div>
-    );
-  };
-
-const Mono: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div style={{
-    fontFamily: "JetBrains Mono, SF Mono, monospace", fontSize: 19,
-    letterSpacing: "0.2em", textTransform: "uppercase", color: FAINT,
-  }}>{children}</div>
+const Card: React.FC<{ children: React.ReactNode; style?: React.CSSProperties }> = ({ children, style }) => (
+  <div
+    style={{
+      border: `1.5px solid ${LINE}`,
+      borderRadius: 34,
+      background: "rgba(255,248,236,0.72)",
+      boxShadow: "0 28px 90px rgba(57,42,24,0.13)",
+      ...style,
+    }}
+  >
+    {children}
+  </div>
 );
 
-/** Type-on text (the user's spoken line in the demo scene). */
-const TypeOn: React.FC<{ text: string; startDelay: number; cps?: number; style?: React.CSSProperties }> =
-  ({ text, startDelay, cps = 22, style }) => {
-    const frame = useCurrentFrame();
-    const { fps } = useVideoConfig();
-    const chars = Math.max(0, Math.floor(((frame - startDelay) / fps) * cps));
-    const shown = text.slice(0, chars);
-    const caret = chars < text.length && chars > 0;
-    return <span style={style}>{shown}{caret ? "▏" : ""}</span>;
-  };
-
-/** Filmic finish: fine grain + soft vignette over everything. */
-const Finish: React.FC = () => {
+const SceneIntro: React.FC<{ start: number; end: number }> = ({ start, end }) => {
   const frame = useCurrentFrame();
-  return (
-    <AbsoluteFill style={{ pointerEvents: "none" }}>
-      <svg width="100%" height="100%">
-        <filter id="grain">
-          <feTurbulence type="fractalNoise" baseFrequency="0.9"
-            numOctaves="2" seed={frame % 7} stitchTiles="stitch" />
-          <feColorMatrix type="matrix" values="0 0 0 0 0.08 0 0 0 0 0.07 0 0 0 0 0.05 0 0 0 0.05 0" />
-        </filter>
-        <rect width="100%" height="100%" filter="url(#grain)" />
-      </svg>
-      <AbsoluteFill style={{
-        background: "radial-gradient(ellipse at center, transparent 62%, rgba(21,19,13,0.10) 100%)",
-      }} />
-    </AbsoluteFill>
-  );
-};
-
-/* ---------- scenes (text/cards only — the blob lives on its own layer) ---------- */
-
-// 0–5s · arrival: echo rings + Introducing
-const SceneArrive: React.FC = () => {
-  const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const op = sceneOpacity(frame, start, end, 24);
   const ring = (delay: number) => {
-    const p = interpolate(frame - delay, [0, 1.6 * fps], [0, 1],
-      { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: Easing.out(Easing.cubic) });
-    return { scale: 0.6 + p * 1.5, opacity: (1 - p) * 0.35 };
+    const p = interpolate(frame - start - delay, [0, 56], [0, 1], {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+      easing: Easing.out(Easing.cubic),
+    });
+    return { opacity: (1 - p) * 0.28 * op, scale: 0.72 + p * 1.55 };
   };
   return (
-    <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
-      {[1.2, 1.55].map((d) => {
-        const r = ring(Math.round(d * fps));
+    <AbsoluteFill style={{ opacity: op, justifyContent: "center", alignItems: "center" }}>
+      {[38, 54, 70].map((d) => {
+        const r = ring(d);
         return (
-          <div key={d} style={{
-            position: "absolute", width: 560, height: 560, borderRadius: "50%",
-            border: `2px solid ${INK}`, opacity: r.opacity, transform: `scale(${r.scale})`,
-          }} />
+          <div
+            key={d}
+            style={{
+              position: "absolute",
+              width: 560,
+              height: 560,
+              borderRadius: "50%",
+              border: `2px solid ${INK}`,
+              opacity: r.opacity,
+              transform: `scale(${r.scale})`,
+            }}
+          />
         );
       })}
-      <Rise delay={Math.round(2.2 * fps)} style={{ position: "absolute", bottom: 220 }}>
+      <Rise delay={70} style={{ position: "absolute", bottom: 170, textAlign: "center" }}>
         <Mono>Introducing Aria</Mono>
       </Rise>
     </AbsoluteFill>
   );
 };
 
-// 5–11s · the claim, kinetic
-const SceneClaim: React.FC = () => {
+const SceneClaim: React.FC<{ start: number; end: number }> = ({ start, end }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
-  const fadeOut = interpolate(frame, [5.2 * fps, 6 * fps], [1, 0], { extrapolateLeft: "clamp" });
+  const op = sceneOpacity(frame, start, end, 20);
   return (
-    <AbsoluteFill style={{ opacity: fadeOut, justifyContent: "center", paddingLeft: 150 }}>
-      <div style={{ maxWidth: 900 }}>
-        <Kinetic text="The assistant that lives on your Mac." size={108} startDelay={Math.round(0.9 * fps)} />
-        <Rise delay={Math.round(2.4 * fps)}>
-          <div style={{ fontSize: 32, color: SOFT, marginTop: 34, maxWidth: 620, lineHeight: 1.5 }}>
-            Say it, and it's done. She hears you, sees your screen,
-            and operates your apps — so you stay in flow.
+    <AbsoluteFill style={{ opacity: op, justifyContent: "center", paddingLeft: 130 }}>
+      <div style={{ maxWidth: 860 }}>
+        <Kinetic text="Your Mac, with a living assistant." size={104} delay={start + 18} />
+        <Rise delay={start + 76}>
+          <div style={{ marginTop: 34, maxWidth: 650, color: SOFT, fontSize: 33, lineHeight: 1.42 }}>
+            She hears you, sees the relevant part of your screen, plans the work,
+            acts across apps, and leaves receipts.
           </div>
         </Rise>
       </div>
@@ -217,257 +289,122 @@ const SceneClaim: React.FC = () => {
   );
 };
 
-// 11–18s · live conversation demo (the orb is the persistent blob, bottom-center)
-const SceneDemo: React.FC = () => {
+const SceneContext: React.FC<{ start: number; end: number }> = ({ start, end }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
-  const fadeOut = interpolate(frame, [6.2 * fps, 7 * fps], [1, 0], { extrapolateLeft: "clamp" });
-  const replyIn = spring({ frame: frame - Math.round(3.6 * fps), fps, config: { damping: 15 } });
+  const op = sceneOpacity(frame, start, end, 18);
+  const local = frame - start;
+  const typed = `"Circle the broken chart and explain it."`.slice(0, Math.max(0, Math.floor(local / 1.55)));
+  const lens = spring({ frame: local - 70, fps: FPS, config: { damping: 18 } });
   return (
-    <AbsoluteFill style={{ opacity: fadeOut, alignItems: "center" }}>
-      <Rise delay={4} style={{ marginTop: 130 }}>
-        <Mono>A real conversation</Mono>
+    <AbsoluteFill style={{ opacity: op, alignItems: "center" }}>
+      <Rise delay={start + 10} style={{ marginTop: 112 }}>
+        <Mono>Voice + visual context</Mono>
       </Rise>
-      {/* the user's line, typed as if spoken */}
-      <div style={{
-        marginTop: 56, background: PAPER, border: `1.5px solid ${LINE}`,
-        borderRadius: 999, padding: "22px 42px", minWidth: 760, textAlign: "center",
-        boxShadow: "0 24px 70px rgba(21,19,13,0.10)",
-        fontFamily: serif.fontFamily, fontSize: 42, fontWeight: 500,
-      }}>
-        <TypeOn text='"Prepare me for tomorrow."' startDelay={Math.round(0.8 * fps)} />
-      </div>
-      {/* Aria's reply rises once she's "thought" */}
-      <div style={{
-        opacity: replyIn,
-        transform: `translateY(${interpolate(replyIn, [0, 1], [26, 0])}px)`,
-        marginTop: 26, background: INK, color: PAPER,
-        borderRadius: 999, padding: "18px 38px", fontSize: 28,
-      }}>
-        Checked your calendar, pulled last week's notes — your briefing is ready.
-      </div>
-    </AbsoluteFill>
-  );
-};
-
-// 18–24s · she gets things done (card stack)
-const SceneTasks: React.FC = () => {
-  const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
-  const fadeOut = interpolate(frame, [5.2 * fps, 6 * fps], [1, 0], { extrapolateLeft: "clamp" });
-  const rows: [string, string][] = [
-    ["Email drafted", "To: Sam — ready to review"],
-    ["Document summarized", "Key points saved to notes"],
-    ["Meeting found", "Tomorrow at 10:00 AM"],
-    ["Briefing ready", "Today, carry-over, suggested focus"],
-  ];
-  return (
-    <AbsoluteFill style={{ opacity: fadeOut, justifyContent: "center" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 130, paddingLeft: 170 }}>
-        <div>
-          <Rise><div style={{ marginLeft: 56 }}><Mono>Actions</Mono></div></Rise>
-          <Rise delay={4}>
-            <Kinetic text="Aria gets things done." size={96} startDelay={6} />
-          </Rise>
+      <Card
+        style={{
+          width: 980,
+          height: 390,
+          marginTop: 54,
+          padding: 28,
+          background: "linear-gradient(180deg,rgba(255,250,241,0.9),rgba(255,250,241,0.58))",
+        }}
+      >
+        <div style={{ height: 46, display: "flex", gap: 10, alignItems: "center" }}>
+          {[0, 1, 2].map((i) => (
+            <span key={i} style={{ width: 14, height: 14, borderRadius: "50%", background: ["#ef6f5f", "#e9bd5a", "#68b36b"][i] }} />
+          ))}
         </div>
-        <div style={{
-          width: 520, background: PAPER, border: `1.5px solid ${LINE}`,
-          borderRadius: 26, padding: "30px 30px 20px",
-          boxShadow: "0 40px 100px rgba(21,19,13,0.14)",
-        }}>
-          <div style={{
-            fontFamily: serif.fontFamily, fontWeight: 600, fontSize: 30,
-            display: "flex", alignItems: "center", gap: 14, marginBottom: 22,
-          }}>
-            <Blob size={34} amp={0.08} speed={0.6} /> Aria
+        <div style={{ display: "grid", gridTemplateColumns: "1.1fr 0.9fr", gap: 24 }}>
+          <div style={{ borderRadius: 26, background: "#17120e", minHeight: 260, position: "relative", overflow: "hidden" }}>
+            <div style={{ position: "absolute", left: 55, right: 55, bottom: 58, height: 120, display: "flex", alignItems: "end", gap: 18 }}>
+              {[54, 92, 68, 132, 88, 160, 104].map((h, i) => (
+                <div key={i} style={{ flex: 1, height: h, borderRadius: 999, background: i === 5 ? GOLD : "rgba(255,248,236,0.34)" }} />
+              ))}
+            </div>
+            <div
+              style={{
+                position: "absolute",
+                left: 596,
+                top: 75,
+                width: 126,
+                height: 126,
+                border: "4px solid #f7ead5",
+                borderRadius: "45% 55% 58% 42%",
+                opacity: lens,
+                transform: `scale(${interpolate(lens, [0, 1], [0.9, 1])}) rotate(-8deg)`,
+              }}
+            />
           </div>
-          {rows.map(([t, s], i) => {
-            const d = Math.round((0.7 + i * 0.55) * fps);
-            const sp = spring({ frame: frame - d, fps, config: { damping: 15 } });
-            return (
-              <div key={t} style={{
-                opacity: sp,
-                transform: `translateY(${interpolate(sp, [0, 1], [22, 0])}px) scale(${interpolate(sp, [0, 1], [0.98, 1])})`,
-                background: BG, border: `1px solid ${LINE}`, borderRadius: 16,
-                padding: "15px 20px", marginBottom: 12,
-              }}>
-                <div style={{ fontWeight: 700, fontSize: 23 }}>✓ {t}</div>
-                <div style={{ color: FAINT, fontSize: 18, marginTop: 1 }}>{s}</div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </AbsoluteFill>
-  );
-};
-
-// 24–30s · project memory (a second exchange — she remembers)
-const SceneMemory: React.FC = () => {
-  const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
-  const fadeOut = interpolate(frame, [5.2 * fps, 6 * fps], [1, 0], { extrapolateLeft: "clamp" });
-  const replyIn = spring({ frame: frame - Math.round(3.2 * fps), fps, config: { damping: 15 } });
-  return (
-    <AbsoluteFill style={{ opacity: fadeOut, alignItems: "center" }}>
-      <Rise delay={4} style={{ marginTop: 130 }}>
-        <Mono>Project memory</Mono>
-      </Rise>
-      <div style={{
-        marginTop: 56, background: PAPER, border: `1.5px solid ${LINE}`,
-        borderRadius: 999, padding: "22px 42px", minWidth: 760, textAlign: "center",
-        boxShadow: "0 24px 70px rgba(21,19,13,0.10)",
-        fontFamily: serif.fontFamily, fontSize: 42, fontWeight: 500,
-      }}>
-        <TypeOn text='"Continue my Verdai work."' startDelay={Math.round(0.7 * fps)} />
-      </div>
-      <div style={{
-        opacity: replyIn,
-        transform: `translateY(${interpolate(replyIn, [0, 1], [26, 0])}px)`,
-        marginTop: 26, background: INK, color: PAPER,
-        borderRadius: 999, padding: "18px 38px", fontSize: 28,
-      }}>
-        Verdai — the deck wrapped yesterday. Picking up at pricing.
-      </div>
-    </AbsoluteFill>
-  );
-};
-
-// 30–36s · timeline (your day, accounted for)
-const SceneTimeline: React.FC = () => {
-  const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
-  const fadeOut = interpolate(frame, [5.2 * fps, 6 * fps], [1, 0], { extrapolateLeft: "clamp" });
-  const rows: [string, string][] = [
-    ["8:30", "Briefing delivered"],
-    ["11:02", "Pricing model finished"],
-    ["2:15", "Downloads organized"],
-    ["4:40", "Investor research saved"],
-  ];
-  return (
-    <AbsoluteFill style={{ opacity: fadeOut, justifyContent: "center" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 130, paddingLeft: 170 }}>
-        <div>
-          <Rise><div style={{ marginLeft: 56 }}><Mono>Timeline</Mono></div></Rise>
-          <Rise delay={4}>
-            <Kinetic text="What did I do today?" size={96} startDelay={6} />
-          </Rise>
-        </div>
-        <div style={{
-          width: 520, background: PAPER, border: `1.5px solid ${LINE}`,
-          borderRadius: 26, padding: "30px 30px 20px",
-          boxShadow: "0 40px 100px rgba(21,19,13,0.14)",
-        }}>
-          <div style={{
-            fontFamily: serif.fontFamily, fontWeight: 600, fontSize: 30,
-            display: "flex", alignItems: "center", gap: 14, marginBottom: 22,
-          }}>
-            <Blob size={34} amp={0.08} speed={0.6} /> Today
-          </div>
-          {rows.map(([time, t], i) => {
-            const d = Math.round((0.7 + i * 0.55) * fps);
-            const sp = spring({ frame: frame - d, fps, config: { damping: 15 } });
-            return (
-              <div key={t} style={{
-                opacity: sp,
-                transform: `translateY(${interpolate(sp, [0, 1], [22, 0])}px) scale(${interpolate(sp, [0, 1], [0.98, 1])})`,
-                background: BG, border: `1px solid ${LINE}`, borderRadius: 16,
-                padding: "15px 20px", marginBottom: 12,
-                display: "flex", alignItems: "baseline", gap: 14,
-              }}>
-                <span style={{
-                  fontFamily: "JetBrains Mono, SF Mono, monospace",
-                  fontSize: 17, color: FAINT, minWidth: 58,
-                }}>{time}</span>
-                <span style={{ fontWeight: 700, fontSize: 23 }}>✓ {t}</span>
-              </div>
-            );
-          })}
-          <div style={{
-            opacity: spring({ frame: frame - Math.round(3.2 * fps), fps, config: { damping: 15 } }),
-            color: FAINT, fontSize: 18, padding: "4px 6px 8px",
-          }}>
-            14 things done — say “show my week”
+          <div style={{ padding: "22px 8px" }}>
+            <div style={{ color: FAINT, fontSize: 18, fontWeight: 800, letterSpacing: "0.12em", textTransform: "uppercase" }}>Hey Aria</div>
+            <div style={{ marginTop: 18, fontFamily: serif.fontFamily, fontSize: 42, lineHeight: 1.08 }}>{typed}</div>
           </div>
         </div>
-      </div>
+      </Card>
     </AbsoluteFill>
   );
 };
 
-// 36–42s · focus mode (close the noise)
-const SceneFocus: React.FC = () => {
+const ScenePlan: React.FC<{ start: number; end: number }> = ({ start, end }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
-  const fadeOut = interpolate(frame, [5.2 * fps, 6 * fps], [1, 0], { extrapolateLeft: "clamp" });
-  const replyIn = spring({ frame: frame - Math.round(2.8 * fps), fps, config: { damping: 15 } });
+  const op = sceneOpacity(frame, start, end, 18);
+  const rows = ["Read the selection", "Draft a fix", "Ask before sending", "Verify the result"];
   return (
-    <AbsoluteFill style={{ opacity: fadeOut, justifyContent: "center" }}>
-      <div style={{ paddingLeft: 230, maxWidth: 1050 }}>
-        <Rise><Mono>Focus Mode</Mono></Rise>
-        <Rise delay={4} style={{ marginTop: 24 }}>
-          <Kinetic text="Close the noise." size={108} startDelay={6} />
-        </Rise>
-        <div style={{
-          opacity: replyIn,
-          transform: `translateY(${interpolate(replyIn, [0, 1], [26, 0])}px)`,
-          marginTop: 40, display: "inline-block", background: INK, color: PAPER,
-          borderRadius: 999, padding: "18px 38px", fontSize: 28,
-        }}>
-          Work apps open. Distractions closed. Recap when you're done.
-        </div>
-      </div>
-    </AbsoluteFill>
-  );
-};
-
-// 42–48s · privacy (ring forms around the persistent blob)
-const ScenePrivate: React.FC = () => {
-  const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
-  const fadeOut = interpolate(frame, [5.2 * fps, 6 * fps], [1, 0], { extrapolateLeft: "clamp" });
-  const ring = spring({ frame: frame - Math.round(0.6 * fps), fps, config: { damping: 13 } });
-  return (
-    <AbsoluteFill style={{ opacity: fadeOut, alignItems: "center" }}>
-      <div style={{
-        position: "absolute", top: 540 - 60 - 195, width: 390, height: 390, borderRadius: "50%",
-        background: PAPER, transform: `scale(${ring})`,
-        boxShadow: "inset 0 4px 16px rgba(255,255,255,0.9), inset 0 -10px 26px rgba(21,19,13,0.07), 0 36px 90px rgba(21,19,13,0.12)",
-      }} />
-      <div style={{ position: "absolute", top: 660, textAlign: "center" }}>
-        <Kinetic text="Your data stays your data." size={88} startDelay={Math.round(1.0 * fps)} align="center" />
-        <Rise delay={Math.round(2.0 * fps)}>
-          <div style={{ fontSize: 30, color: SOFT, marginTop: 26, lineHeight: 1.5 }}>
-            Local-first intelligence. On-device wake word.<br />
-            The cloud is an option, not a requirement.
-          </div>
-        </Rise>
-      </div>
-    </AbsoluteFill>
-  );
-};
-
-// 30–35s · feature roll
-const SceneRoll: React.FC = () => {
-  const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
-  const fadeOut = interpolate(frame, [4.2 * fps, 5 * fps], [1, 0], { extrapolateLeft: "clamp" });
-  const words = ["Voice", "Local-first", "Timeline", "Recipes", "Agents", "Free & open source"];
-  return (
-    <AbsoluteFill style={{ opacity: fadeOut, justifyContent: "center", alignItems: "center" }}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "center", marginTop: 120 }}>
-        {words.map((w, i) => {
-          const d = Math.round(i * 0.48 * fps);
-          const sp = spring({ frame: frame - d, fps, config: { damping: 16 } });
+    <AbsoluteFill style={{ opacity: op, justifyContent: "center", paddingLeft: 150 }}>
+      <Mono>Agent plan</Mono>
+      <Kinetic text="Not a chatbot. An execution loop." size={82} delay={start + 24} maxWidth={760} />
+      <Card style={{ width: 760, marginTop: 40, padding: 26 }}>
+        {rows.map((row, i) => {
+          const s = spring({ frame: frame - start - 84 - i * 13, fps: FPS, config: { damping: 16 } });
           return (
-            <div key={w} style={{
-              opacity: sp,
-              transform: `translateY(${interpolate(sp, [0, 1], [36, 0])}px)`,
-              fontFamily: serif.fontFamily, fontWeight: 500,
-              fontSize: i === words.length - 1 ? 52 : 84,
-              color: i === words.length - 1 ? SOFT : INK,
-              lineHeight: 1.15,
-            }}>{w}</div>
+            <div
+              key={row}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "34px 1fr auto",
+                alignItems: "center",
+                gap: 16,
+                padding: "16px 12px",
+                opacity: s,
+                transform: `translateY(${interpolate(s, [0, 1], [24, 0])}px)`,
+                borderBottom: i === rows.length - 1 ? "none" : `1px solid ${LINE}`,
+              }}
+            >
+              <span style={{ width: 20, height: 20, borderRadius: "50%", border: `2px solid ${i < 2 ? MOSS : GOLD}`, background: i < 2 ? MOSS : "transparent" }} />
+              <strong style={{ fontSize: 28, letterSpacing: "-0.04em" }}>{row}</strong>
+              <span style={{ color: i < 2 ? MOSS : GOLD, fontWeight: 800 }}>{i < 2 ? "done" : "gated"}</span>
+            </div>
+          );
+        })}
+      </Card>
+    </AbsoluteFill>
+  );
+};
+
+const SceneAct: React.FC<{ start: number; end: number }> = ({ start, end }) => {
+  const frame = useCurrentFrame();
+  const op = sceneOpacity(frame, start, end, 18);
+  const apps = ["Mail", "Calendar", "Notes", "Browser", "Terminal", "GitHub"];
+  return (
+    <AbsoluteFill style={{ opacity: op, justifyContent: "center", paddingLeft: 720, paddingRight: 110 }}>
+      <Mono>Acts across apps</Mono>
+      <Kinetic text="Ask for the outcome. Aria handles the steps." size={78} delay={start + 20} maxWidth={920} />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginTop: 40 }}>
+        {apps.map((app, i) => {
+          const s = spring({ frame: frame - start - 86 - i * 7, fps: FPS, config: { damping: 15 } });
+          return (
+            <Card
+              key={app}
+              style={{
+                height: 138,
+                padding: 20,
+                opacity: s,
+                transform: `translateY(${interpolate(s, [0, 1], [30, 0])}px)`,
+              }}
+            >
+              <div style={{ width: 38, height: 38, borderRadius: "42% 58% 56% 44%", background: INK, marginBottom: 18 }} />
+              <strong style={{ fontSize: 27, letterSpacing: "-0.04em" }}>{app}</strong>
+            </Card>
           );
         })}
       </div>
@@ -475,65 +412,130 @@ const SceneRoll: React.FC = () => {
   );
 };
 
-// 35–40s · endcard
-const SceneEnd: React.FC = () => {
+const SceneMemory: React.FC<{ start: number; end: number }> = ({ start, end }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
-  const pulse = 1 + 0.02 * Math.sin((frame / fps) * 3.4);
+  const op = sceneOpacity(frame, start, end, 18);
+  const items = ["Project notes", "Work journal", "ChatGPT export", "Decisions", "People", "Receipts"];
   return (
-    <AbsoluteFill style={{ alignItems: "center" }}>
-      <div style={{ position: "absolute", top: 560, textAlign: "center" }}>
-        <Kinetic text='Say "Hey Aria."' size={120} startDelay={Math.round(0.5 * fps)} align="center" />
-        <Rise delay={Math.round(1.4 * fps)} style={{ marginTop: 38, display: "flex", justifyContent: "center" }}>
-          <div style={{
-            background: INK, color: PAPER, borderRadius: 999,
-            padding: "20px 44px", fontSize: 30, fontWeight: 600,
-            transform: `scale(${pulse})`,
-          }}>
-            Download the launch candidate
-          </div>
-        </Rise>
-        <Rise delay={Math.round(1.8 * fps)} style={{ marginTop: 26 }}>
-          <Mono>github.com/coderarush/Aria</Mono>
-        </Rise>
+    <AbsoluteFill style={{ opacity: op, justifyContent: "center", paddingLeft: 140 }}>
+      <Mono>Memory that works</Mono>
+      <Kinetic text="Past chats become usable context." size={82} delay={start + 18} maxWidth={850} />
+      <div style={{ position: "relative", width: 900, height: 330, marginTop: 38 }}>
+        {items.map((item, i) => {
+          const angle = (Math.PI * 2 * i) / items.length - Math.PI / 2;
+          const s = spring({ frame: frame - start - 78 - i * 8, fps: FPS, config: { damping: 16 } });
+          const x = 430 + Math.cos(angle) * 300;
+          const y = 150 + Math.sin(angle) * 118;
+          return (
+            <div
+              key={item}
+              style={{
+                position: "absolute",
+                left: x,
+                top: y,
+                opacity: s,
+                transform: `translate(-50%, -50%) scale(${interpolate(s, [0, 1], [0.92, 1])})`,
+                padding: "13px 18px",
+                borderRadius: 999,
+                border: `1.5px solid ${LINE}`,
+                background: "rgba(255,248,236,0.78)",
+                boxShadow: "0 18px 60px rgba(57,42,24,0.10)",
+                fontWeight: 820,
+              }}
+            >
+              {item}
+            </div>
+          );
+        })}
       </div>
     </AbsoluteFill>
   );
 };
 
-export const LaunchVideo: React.FC = () => (
-  <AbsoluteFill style={fill}>
-    {/* soundtrack: warm bed + Aria's actual chimes at story beats */}
-    <Audio src={staticFile("bed.wav")} volume={0.85} />
-    <Sequence from={Math.round(1.2 * FPS)} durationInFrames={FPS}>
-      <Audio src={staticFile("wake.wav")} volume={0.8} />
-    </Sequence>
-    <Sequence from={Math.round(14.6 * FPS)} durationInFrames={FPS}>
-      <Audio src={staticFile("task.wav")} volume={0.7} />
-    </Sequence>
-    <Sequence from={Math.round(24.8 * FPS)} durationInFrames={FPS}>
-      <Audio src={staticFile("wake.wav")} volume={0.6} />
-    </Sequence>
-    <Sequence from={Math.round(30.8 * FPS)} durationInFrames={FPS}>
-      <Audio src={staticFile("task.wav")} volume={0.6} />
-    </Sequence>
-    <Sequence from={Math.round(53.8 * FPS)} durationInFrames={FPS}>
-      <Audio src={staticFile("done.wav")} volume={0.8} />
-    </Sequence>
+const SceneTrust: React.FC<{ start: number; end: number }> = ({ start, end }) => {
+  const frame = useCurrentFrame();
+  const op = sceneOpacity(frame, start, end, 18);
+  return (
+    <AbsoluteFill style={{ opacity: op, alignItems: "center", justifyContent: "center" }}>
+      <Mono>Trust layer</Mono>
+      <Kinetic text="Powerful by default. Safe by design." size={86} delay={start + 18} align="center" maxWidth={1180} />
+      <Card style={{ width: 900, marginTop: 48, padding: 26 }}>
+        {[
+          ["Irreversible action", "Approval required", CLAY],
+          ["Background agent", "Fail closed", GOLD],
+          ["Completed workflow", "Receipt + undo", MOSS],
+        ].map(([left, right, color], i) => {
+          const s = spring({ frame: frame - start - 94 - i * 12, fps: FPS, config: { damping: 16 } });
+          return (
+            <div
+              key={left}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "18px 10px",
+                opacity: s,
+                transform: `translateY(${interpolate(s, [0, 1], [24, 0])}px)`,
+                borderBottom: i === 2 ? "none" : `1px solid ${LINE}`,
+                fontSize: 28,
+                letterSpacing: "-0.04em",
+              }}
+            >
+              <strong>{left}</strong>
+              <span style={{ color: color as string, fontWeight: 850 }}>{right}</span>
+            </div>
+          );
+        })}
+      </Card>
+    </AbsoluteFill>
+  );
+};
 
-    <Sequence durationInFrames={5 * FPS}><SceneArrive /></Sequence>
-    <Sequence from={5 * FPS} durationInFrames={6 * FPS}><SceneClaim /></Sequence>
-    <Sequence from={11 * FPS} durationInFrames={7 * FPS}><SceneDemo /></Sequence>
-    <Sequence from={18 * FPS} durationInFrames={6 * FPS}><SceneTasks /></Sequence>
-    <Sequence from={24 * FPS} durationInFrames={6 * FPS}><SceneMemory /></Sequence>
-    <Sequence from={30 * FPS} durationInFrames={6 * FPS}><SceneTimeline /></Sequence>
-    <Sequence from={36 * FPS} durationInFrames={6 * FPS}><SceneFocus /></Sequence>
-    <Sequence from={42 * FPS} durationInFrames={6 * FPS}><ScenePrivate /></Sequence>
-    <Sequence from={48 * FPS} durationInFrames={5 * FPS}><SceneRoll /></Sequence>
-    <Sequence from={53 * FPS} durationInFrames={5 * FPS}><SceneEnd /></Sequence>
+const SceneEnd: React.FC<{ start: number; end: number }> = ({ start, end }) => {
+  const frame = useCurrentFrame();
+  const op = sceneOpacity(frame, start, end, 20);
+  return (
+    <AbsoluteFill style={{ opacity: op, alignItems: "center", justifyContent: "flex-end", paddingBottom: 118 }}>
+      <Kinetic text="Meet Aria." size={128} delay={start + 14} align="center" maxWidth={1200} />
+      <Rise delay={start + 74} style={{ marginTop: 24, textAlign: "center", color: SOFT, fontSize: 34 }}>
+        The assistant that actually does the work.
+      </Rise>
+      <Rise delay={start + 100} style={{ marginTop: 34 }}>
+        <div
+          style={{
+            padding: "18px 28px",
+            borderRadius: 999,
+            color: PAPER,
+            background: INK,
+            fontSize: 24,
+            fontWeight: 850,
+            boxShadow: "0 22px 70px rgba(21,18,14,0.22)",
+          }}
+        >
+          Download for macOS
+        </div>
+      </Rise>
+    </AbsoluteFill>
+  );
+};
 
-    {/* the main character, continuous across every scene */}
-    <BlobLayer />
-    <Finish />
-  </AbsoluteFill>
-);
+export const LaunchVideo: React.FC = () => {
+  return (
+    <AbsoluteFill style={fill}>
+      <Audio src={staticFile("wake.wav")} volume={0.18} />
+      <Sequence from={Math.round(1.2 * FPS)}>
+        <Audio src={staticFile("task.wav")} volume={0.1} />
+      </Sequence>
+      <SceneIntro start={0} end={5 * FPS} />
+      <SceneClaim start={4 * FPS} end={11 * FPS} />
+      <SceneContext start={10 * FPS} end={17 * FPS} />
+      <ScenePlan start={16 * FPS} end={23 * FPS} />
+      <SceneAct start={22 * FPS} end={29 * FPS} />
+      <SceneMemory start={28 * FPS} end={35 * FPS} />
+      <SceneTrust start={34 * FPS} end={40 * FPS} />
+      <SceneEnd start={39 * FPS} end={46 * FPS} />
+      <BlobLayer />
+      <Grain />
+    </AbsoluteFill>
+  );
+};
