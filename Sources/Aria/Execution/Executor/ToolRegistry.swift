@@ -80,6 +80,7 @@ actor ToolRegistry {
             ArtifactTool(),
             DailyReviewTool(),
             RecallTool(),
+            ChatGPTImportTool(),
             RememberEntityTool(),
             WhoIsTool(),
             BriefingTool(),
