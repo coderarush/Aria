@@ -339,7 +339,7 @@ final class ConnectorStoreActorTests: XCTestCase {
 
     func testConnectThrowsNotConfigured() async {
         // The "no client ID ⇒ .notConfigured" contract is specific to bring-your-own
-        // mode; in the default relay mode the relay supplies the client and connect
+        // mode; in relay mode the relay supplies the client and connect
         // proceeds without a user client ID. Pin BYO for this contract test.
         let prior = UserDefaults.standard.string(forKey: ConnectorMode.defaultsKey)
         UserDefaults.standard.set(ConnectorMode.bringYourOwn.rawValue, forKey: ConnectorMode.defaultsKey)

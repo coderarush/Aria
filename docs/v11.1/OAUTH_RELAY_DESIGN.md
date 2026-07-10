@@ -44,8 +44,8 @@ Key properties:
 ## Client integration (the code change, when we build it)
 
 A small switch in the connector layer — minimal, additive:
-- Add `ConnectorMode` { `.relay` (default), `.bringYourOwn` }, read from a setting
-  (`app.connectorMode`, default `.relay`).
+- Add `ConnectorMode` { `.bringYourOwn` (current default), `.relay` }, read from a
+  setting (`app.connectorMode`, default `.bringYourOwn` until relay infra is live).
 - `OAuth2.AuthConfig` gains `authorizationURL`/`tokenURL` that point at the relay
   (`https://relay.aria.app/authorize`, `/token`) in `.relay` mode, or the provider
   endpoints in `.bringYourOwn` (today's behavior, unchanged).

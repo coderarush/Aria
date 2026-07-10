@@ -17,15 +17,15 @@ final class ConnectorRelayModeTests: XCTestCase {
 
     // MARK: - ConnectorMode.current
 
-    func testModeDefaultsToRelayWhenUnset() {
+    func testModeDefaultsToBringYourOwnWhenUnset() {
         let d = makeDefaults()
-        XCTAssertEqual(ConnectorMode.current(defaults: d), .relay)
+        XCTAssertEqual(ConnectorMode.current(defaults: d), .bringYourOwn)
     }
 
-    func testModeDefaultsToRelayWhenGarbage() {
+    func testModeDefaultsToBringYourOwnWhenGarbage() {
         let d = makeDefaults()
         d.set("nonsense", forKey: ConnectorMode.defaultsKey)
-        XCTAssertEqual(ConnectorMode.current(defaults: d), .relay)
+        XCTAssertEqual(ConnectorMode.current(defaults: d), .bringYourOwn)
     }
 
     func testModeReadsRelayOverride() {

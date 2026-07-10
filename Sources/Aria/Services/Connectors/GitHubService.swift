@@ -19,31 +19,77 @@ struct GitHubService: Sendable {
 
     /// Returns open issues (not PRs) as formatted text. `repo` must be "owner/repo".
     func issues(repo: String) async throws -> String {
-        let url = URL(string: "https://api.github.com/repos/\(repo)/issues?state=open&per_page=10&pulls=false")!
+        let ref = try RepoRef(repo)
+        let url = try Self.url(path: "/repos/\(ref.owner)/\(ref.name)/issues",
+                               query: [
+                                   URLQueryItem(name: "state", value: "open"),
+                                   URLQueryItem(name: "per_page", value: "10")
+                               ])
         let data = try await perform(url: url)
-        let items = try parseItems(data)
-        guard !items.isEmpty else { return "No open issues in \(repo)." }
+        let items = try parseItems(data, includePullRequests: false)
+        guard !items.isEmpty else { return "No open issues in \(ref.label)." }
         let lines = items.map { "#\($0.number) \($0.title) by \($0.user) — \($0.url)" }
-        return "Open issues in \(repo):\n\(lines.joined(separator: "\n"))"
+        return "Open issues in \(ref.label):\n\(lines.joined(separator: "\n"))"
     }
 
     /// Returns open PRs as formatted text. `repo` must be "owner/repo".
     func pullRequests(repo: String) async throws -> String {
-        let url = URL(string: "https://api.github.com/repos/\(repo)/pulls?state=open&per_page=10")!
+        let ref = try RepoRef(repo)
+        let url = try Self.url(path: "/repos/\(ref.owner)/\(ref.name)/pulls",
+                               query: [
+                                   URLQueryItem(name: "state", value: "open"),
+                                   URLQueryItem(name: "per_page", value: "10")
+                               ])
         let data = try await perform(url: url)
-        let items = try parseItems(data)
-        guard !items.isEmpty else { return "No open pull requests in \(repo)." }
+        let items = try parseItems(data, includePullRequests: true)
+        guard !items.isEmpty else { return "No open pull requests in \(ref.label)." }
         let lines = items.map { "#\($0.number) \($0.title) by \($0.user) — \($0.url)" }
-        return "Open PRs in \(repo):\n\(lines.joined(separator: "\n"))"
+        return "Open PRs in \(ref.label):\n\(lines.joined(separator: "\n"))"
     }
 
     // MARK: - Private helpers
+
+    private struct RepoRef {
+        let owner: String
+        let name: String
+        var label: String { "\(owner)/\(name)" }
+
+        init(_ raw: String) throws {
+            let parts = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                .split(separator: "/", omittingEmptySubsequences: false)
+                .map(String.init)
+            guard parts.count == 2,
+                  Self.valid(parts[0]),
+                  Self.valid(parts[1]) else {
+                throw GitHubServiceError.invalidRepository(raw)
+            }
+            owner = parts[0]
+            name = parts[1]
+        }
+
+        private static func valid(_ part: String) -> Bool {
+            !part.isEmpty
+            && part.range(of: #"^[A-Za-z0-9_.-]+$"#, options: .regularExpression) != nil
+            && part != "."
+            && part != ".."
+        }
+    }
 
     private struct Item {
         let number: Int
         let title: String
         let url: String
         let user: String
+    }
+
+    private static func url(path: String, query: [URLQueryItem]) throws -> URL {
+        var comps = URLComponents()
+        comps.scheme = "https"
+        comps.host = "api.github.com"
+        comps.path = path
+        comps.queryItems = query
+        guard let url = comps.url else { throw GitHubServiceError.invalidRepository(path) }
+        return url
     }
 
     private func perform(url: URL) async throws -> Data {
@@ -60,11 +106,12 @@ struct GitHubService: Sendable {
         return data
     }
 
-    private func parseItems(_ data: Data) throws -> [Item] {
+    private func parseItems(_ data: Data, includePullRequests: Bool) throws -> [Item] {
         guard let array = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
             return []
         }
         return array.compactMap { dict -> Item? in
+            if !includePullRequests, dict["pull_request"] != nil { return nil }
             guard let number = dict["number"] as? Int,
                   let title = dict["title"] as? String,
                   let url = dict["html_url"] as? String else { return nil }
@@ -77,10 +124,13 @@ struct GitHubService: Sendable {
 
 enum GitHubServiceError: Error, LocalizedError {
     case httpError(Int)
+    case invalidRepository(String)
 
     var errorDescription: String? {
         switch self {
         case .httpError(let code): return "GitHub API error: HTTP \(code)"
+        case .invalidRepository(let repo):
+            return "Invalid GitHub repository '\(repo)'. Use owner/repo, for example apple/swift."
         }
     }
 }

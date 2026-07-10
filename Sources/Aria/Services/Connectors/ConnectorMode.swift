@@ -2,15 +2,16 @@ import Foundation
 
 /// How Aria brokers the OAuth exchange for connected accounts.
 ///
-/// - `.relay`: the **default**. Token/authorization traffic goes through Aria's
+/// - `.relay`: hosted mode. Token/authorization traffic goes through Aria's
 ///   hosted relay (`https://relay.aria.app`), which holds ONE registered OAuth
 ///   client per provider and the client secret. The user connects an account
 ///   with no developer-console setup and no pasted client ID — the relay supplies
 ///   the client. The app still generates the PKCE verifier locally and stores the
 ///   returned tokens in the Keychain exactly as in `.bringYourOwn`.
-/// - `.bringYourOwn`: today's path, byte-identical — the user registers their own
-///   OAuth app, pastes the client ID (and, for confidential providers, the secret)
-///   into Settings, and the app talks directly to the provider's endpoints.
+/// - `.bringYourOwn`: the default until the hosted relay is deployed. The user
+///   registers their own OAuth app, pastes the client ID (and, for confidential
+///   providers, the secret) into Settings, and the app talks directly to the
+///   provider's endpoints.
 ///
 /// The mode is a single UserDefaults setting (`app.connectorMode`); the Settings
 /// toggle that writes it is built separately. This layer only reads it.
@@ -21,11 +22,11 @@ enum ConnectorMode: String, Sendable, Equatable, CaseIterable {
     /// The UserDefaults key the mode is persisted under.
     static let defaultsKey = "app.connectorMode"
 
-    /// The mode in effect, read from `defaults`. Defaults to `.relay` when unset
-    /// or when the stored string is unrecognized — pure, no side effects.
+    /// The mode in effect, read from `defaults`. Defaults to `.bringYourOwn`
+    /// when unset or when the stored string is unrecognized — pure, no side effects.
     static func current(defaults: UserDefaults = .standard) -> ConnectorMode {
         guard let raw = defaults.string(forKey: defaultsKey),
-              let mode = ConnectorMode(rawValue: raw) else { return .relay }
+              let mode = ConnectorMode(rawValue: raw) else { return .bringYourOwn }
         return mode
     }
 }
