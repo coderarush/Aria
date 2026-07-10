@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - runtime-os
+
+jobs:
+  swift:
+    name: Swift tests
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify release guard
+        run: make verify-release
+      - name: Run Swift tests
+        run: swift test
+
+  site:
+    name: Site build and audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - name: Install site dependencies
+        working-directory: site
+        run: npm ci
+      - name: Build site
+        working-directory: site
+        run: npm run build
+      - name: Audit site dependencies
+        working-directory: site
+        run: npm audit --audit-level=moderate
+
+  video-audit:
+    name: Video dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: video/package-lock.json
+      - name: Install video dependencies
+        working-directory: video
+        run: npm ci
+      - name: Audit video dependencies
+        working-directory: video
+        run: npm audit --audit-level=moderate

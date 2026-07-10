@@ -26,6 +26,7 @@ let package = Package(
             name: "Aria",
             dependencies: ["CSpeexDSP"],
             path: "Sources/Aria",
+            exclude: ["ruvector.db"],
             swiftSettings: [
                 // The Swift optimizer miscompiles SwiftUI actor-isolation in this
                 // toolchain. History: on macOS 26.3 / Swift 6.3, whole-module
