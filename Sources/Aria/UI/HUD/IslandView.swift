@@ -28,6 +28,7 @@ struct IslandView: View {
 
     /// Reported up to the hosting panel so it can make ONLY the blob interactive.
     var onBlobFrameChange: ((CGRect?) -> Void)?
+    var onBlobTap: (() -> Void)?
 
     private var presenceMode: PresenceMode {
         PresenceMode.from(state: viewModel.state,
@@ -186,6 +187,7 @@ struct IslandView: View {
                     .position(blobPosition(in: size, t: t))
                     .allowsHitTesting(choreographer.kind == .blob)
                     .gesture(blobDrag(in: size))
+                    .onTapGesture { if !isDragging { onBlobTap?() } }
             }
         }
     }

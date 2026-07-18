@@ -47,12 +47,13 @@ final class IslandViewModelTests: XCTestCase {
         XCTAssertEqual(vm.state, .responding)
     }
 
-    func testDismissHidesAndClears() {
+    func testDismissReturnsToRestingBlobAndClears() {
         let vm = IslandViewModel()
         vm.beginListening()
         vm.showResponse("Done.")
         vm.dismiss()
         XCTAssertEqual(vm.state, .idle)
-        XCTAssertFalse(vm.isVisible)
+        XCTAssertEqual(vm.liquidPhase, .resting)
+        XCTAssertEqual(vm.isVisible, AppSettings.shared.idleBlobVisible)
     }
 }

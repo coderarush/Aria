@@ -35,6 +35,8 @@ final class AppSettings: ObservableObject {
     @Published var orbSize: OrbSize {
         didSet { defaults.set(orbSize.rawValue, forKey: K.orbSize) }
     }
+    /// Keep the resting companion available between turns.
+    @Published var idleBlobVisible: Bool { didSet { defaults.set(idleBlobVisible, forKey: K.idleBlobVisible) } }
     @Published var responseDuration: Double {
         didSet { defaults.set(responseDuration, forKey: K.responseDuration) }
     }
@@ -188,6 +190,7 @@ final class AppSettings: ObservableObject {
         self.defaults = defaults
         orbPosition = OrbPosition(rawValue: defaults.string(forKey: K.orbPosition) ?? "") ?? .bottomCenter
         orbSize = OrbSize(rawValue: defaults.string(forKey: K.orbSize) ?? "") ?? .medium
+        idleBlobVisible = defaults.object(forKey: K.idleBlobVisible) as? Bool ?? true
         responseDuration = defaults.object(forKey: K.responseDuration) as? Double ?? 8
         privacyMode = defaults.bool(forKey: K.privacyMode)
         launchAtLogin = defaults.bool(forKey: K.launchAtLogin)
@@ -260,6 +263,7 @@ final class AppSettings: ObservableObject {
     private enum K {
         static let orbPosition = "app.orbPosition"
         static let orbSize = "app.orbSize"
+        static let idleBlobVisible = "app.idleBlobVisible"
         static let responseDuration = "app.responseDuration"
         static let privacyMode = "app.privacyMode"
         static let launchAtLogin = "app.launchAtLogin"

@@ -18,6 +18,9 @@ final class WakeWordEngine {
     // Callbacks (delivered on the main actor).
     var onWake: (() -> Void)?
     var onCommand: ((String) -> Void)?
+    /// Latest stripped command transcript. Recognition rewrites partials, so
+    /// consumers must replace their display text rather than append it.
+    var onCommandPartial: ((String) -> Void)?
     var onCommandEmpty: (() -> Void)?
     var onAudioLevel: ((Float) -> Void)?
     var onError: ((String) -> Void)?
@@ -230,6 +233,7 @@ final class WakeWordEngine {
                 : (committedCommand + " " + sessionText).trimmingCharacters(in: .whitespacesAndNewlines)
             let grew = combined.count > commandBuffer.count
             commandBuffer = combined
+            if combined != committedCommand { onCommandPartial?(combined) }
             if grew {
                 resetSilenceTimer(commandSilence)
                 Log.trace("capture: buffer now \(combined.count) chars")
@@ -254,6 +258,7 @@ final class WakeWordEngine {
         committedCommand = ""
         commandBuffer = stripWakePhrase(from: initialTranscript, original: initialTranscript)
         onWake?()
+        if !commandBuffer.isEmpty { onCommandPartial?(commandBuffer) }
         let grace = commandBuffer.isEmpty ? commandLeadGrace : commandSilence
         resetSilenceTimer(grace)
         Log.trace("command mode armed (buffer='\(commandBuffer)', grace=\(grace)s)")

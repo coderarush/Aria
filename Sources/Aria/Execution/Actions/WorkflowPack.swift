@@ -16,7 +16,7 @@ struct WorkflowPack: Codable, Equatable, Sendable, Identifiable {
 
     // MARK: built-ins
 
-    static let builtins: [WorkflowPack] = [founder, student, developer]
+    static let builtins: [WorkflowPack] = [founder, student, developer, creator, aiBuilder]
 
     /// Pack for a persona name ("Student" → student pack); nil for unknown.
     static func forPersona(_ persona: String) -> WorkflowPack? {
@@ -100,6 +100,59 @@ struct WorkflowPack: Codable, Equatable, Sendable, Identifiable {
             BackgroundAgent(name: "Daily briefing",
                             goal: BriefingComposer.agentSentinel,
                             trigger: .daily(hour: 9, minute: 0))
+        ])
+
+    static let creator = WorkflowPack(
+        key: "creator",
+        persona: "Creator",
+        summary: "Turn ideas into publishable drafts, launch assets, and follow-up loops.",
+        recipes: [
+            Recipe(name: "Content launch", steps: [
+                RecipeStep(summary: "Collect recent notes", tool: "notes_read", input: ["query": "idea"]),
+                RecipeStep(summary: "Research the topic", tool: "research", input: ["query": "topic"]),
+                RecipeStep(summary: "Improve the draft", tool: "draft_feedback", input: ["goal": "make this clearer and more compelling"])
+            ], packKey: "creator"),
+            Recipe(name: "Audience follow-up", steps: [
+                RecipeStep(summary: "Find recent email", tool: "gmail_recent", input: ["limit": "10"]),
+                RecipeStep(summary: "Suggest replies", tool: "smart_reply", input: ["tone": "warm concise"]),
+                RecipeStep(summary: "Check follow-ups", tool: "followup_check", input: [:])
+            ], packKey: "creator"),
+            Recipe(name: "Creative wrap", steps: [
+                RecipeStep(summary: "Today’s timeline", tool: "timeline", input: ["timeframe": "today"]),
+                RecipeStep(summary: "Save what shipped", tool: "save_note", input: ["title": "Creative log"])
+            ], packKey: "creator")
+        ],
+        agents: [
+            BackgroundAgent(name: "Creator daily sweep",
+                            goal: BriefingComposer.agentSentinel,
+                            trigger: .daily(hour: 10, minute: 0))
+        ])
+
+    static let aiBuilder = WorkflowPack(
+        key: "ai_builder",
+        persona: "AI Builder",
+        summary: "Audit, build, test, and ship assistant features without losing product context.",
+        recipes: [
+            Recipe(name: "Assistant build loop", steps: [
+                RecipeStep(summary: "Recover current project status", tool: "status", input: ["project": "Aria"]),
+                RecipeStep(summary: "Recall recent implementation work", tool: "recall_work", input: ["timeframe": "this week"]),
+                RecipeStep(summary: "List saved workflows", tool: "recipe_list", input: [:])
+            ], packKey: "ai_builder"),
+            Recipe(name: "Assistant audit", steps: [
+                RecipeStep(summary: "Review open loops", tool: "status", input: ["project": "Aria"]),
+                RecipeStep(summary: "Check assistant capability gaps", tool: "assistant_benchmark", input: ["focus": "Aria"]),
+                RecipeStep(summary: "Save audit notes", tool: "save_note", input: ["title": "Aria audit"])
+            ], packKey: "ai_builder"),
+            Recipe(name: "Ship readiness", steps: [
+                RecipeStep(summary: "Review today’s timeline", tool: "timeline", input: ["timeframe": "today"]),
+                RecipeStep(summary: "Summarize recent work", tool: "recall_work", input: ["timeframe": "today"]),
+                RecipeStep(summary: "Prepare daily review", tool: "daily_review", input: [:])
+            ], packKey: "ai_builder")
+        ],
+        agents: [
+            BackgroundAgent(name: "Assistant build briefing",
+                            goal: BriefingComposer.agentSentinel,
+                            trigger: .daily(hour: 9, minute: 15))
         ])
 }
 

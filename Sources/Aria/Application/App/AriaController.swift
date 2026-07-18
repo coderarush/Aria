@@ -55,7 +55,7 @@ final class AriaController {
     private var liveLoopActivationObserver: NSObjectProtocol?
     /// Push-to-talk (⌥Space) and type-to-Aria (⌥⇧Space) global hotkeys.
     private var hotkeyTap: HotkeyTap?
-    private var typePanel: CommandInputPanel?
+    private var liquidSurfacePanel: LiquidSurfacePanel?
     private var lensOverlay: LensOverlayController?
     private var stageController: AriaStageController?
     /// Latest HUD blob center in screen points, for anchoring the worker swarm.
@@ -164,9 +164,6 @@ final class AriaController {
             // can't be created retroactively). Keep retrying so the user never
             // has to relaunch after flipping the toggle in System Settings.
             retryHotkeysUntilLive()
-        }
-        typePanel = CommandInputPanel { [weak self] text in
-            self?.handleTypedCommand(text)
         }
     }
 
@@ -419,7 +416,8 @@ final class AriaController {
     }
 
     func showTypePanel() {
-        typePanel?.present()
+        islandViewModel.beginComposing(source: .keyboard)
+        showLiquidSurface(focusEditor: true)
     }
 
     /// Menu bar "Pause listening": hard-mutes the wake word and push-to-talk
@@ -861,7 +859,7 @@ final class AriaController {
             self.isSpeaking = false
             self.wakeEngine.freshTurn()
             self.wakeEngine.isSuspended = false
-            self.islandViewModel.beginListening()
+            self.islandViewModel.beginListening(source: self.dictationPending ? .systemDictation : .voice)
             self.convSilenceTimer?.invalidate()
             self.convSilenceTimer = Timer.scheduledTimer(withTimeInterval: AppSettings.shared.conversationSilenceTimeout, repeats: false) { [weak self] _ in
                 Task { @MainActor in self?.session?.end() }
@@ -967,12 +965,24 @@ final class AriaController {
                                     // clusters at the blob (wherever the user parked it),
                                     // not always bottom-right. Plain var → no @Published churn.
                                     self?.lastBlobCenter = rect.map { CGPoint(x: $0.midX, y: $0.midY) }
-                                })
+                                },
+                                onBlobTap: { [weak self] in self?.showTypePanel() })
         let host = NSHostingView(rootView: island)
         host.frame = panel.contentLayoutRect
         host.autoresizingMask = [.width, .height]
         panel.contentView = host
         self.panel = panel
+        liquidSurfacePanel = LiquidSurfacePanel(
+            viewModel: islandViewModel,
+            onSubmit: { [weak self] text in
+                let command = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !command.isEmpty else { return }
+                RecentCommands.record(command)
+                self?.handleTypedCommand(command)
+            },
+            onDismiss: { [weak self] in self?.dismissLiquidSurface() })
+        islandViewModel.onSurfaceDismiss = { [weak self] in self?.liquidSurfacePanel?.dismissSurface() }
+        islandViewModel.showRestingBlob()
 
         // Aria's on-screen stage: guidance markers + the agentic worker swarm,
         // in a separate passive (click-through) overlay so it never fights the
@@ -996,6 +1006,9 @@ final class AriaController {
         islandViewModel.onVisibilityChange = { [weak self] visible in
             guard let self else { return }
             self.setPanelVisible(visible)
+            if visible, self.islandViewModel.liquidPhase != .resting {
+                self.showLiquidSurface(focusEditor: false)
+            }
             // Re-arm wake only when the pill is hidden AND Aria isn't still
             // speaking — otherwise a long spoken reply could re-trigger her.
             if !visible && !self.isSpeaking {
@@ -1031,6 +1044,28 @@ final class AriaController {
         } else {
             panel.orderOut(nil)
         }
+    }
+
+    private func showLiquidSurface(focusEditor: Bool) {
+        guard let screen = panel?.screen ?? NSScreen.main else { return }
+        let anchor: CGPoint
+        if let blob = lastBlobCenter {
+            // IslandView reports top-left SwiftUI coordinates; NSPanel geometry
+            // uses the screen's bottom-left coordinate system.
+            anchor = CGPoint(x: screen.frame.minX + blob.x, y: screen.frame.maxY - blob.y)
+        } else {
+            anchor = CGPoint(x: screen.visibleFrame.midX, y: screen.visibleFrame.minY + 110)
+        }
+        liquidSurfacePanel?.present(anchor: anchor, on: screen, focusEditor: focusEditor)
+    }
+
+    private func dismissLiquidSurface() {
+        // Never cancel active work or listening by clicking away. Dismissal only
+        // hides a composer/answer; task cancellation remains the explicit task UI.
+        if islandViewModel.liquidPhase == .composing || islandViewModel.liquidPhase == .answering || islandViewModel.liquidPhase == .error {
+            islandViewModel.dismiss()
+        }
+        liquidSurfacePanel?.dismissSurface()
     }
 
     // MARK: Engine wiring
@@ -1147,12 +1182,16 @@ final class AriaController {
                 onTurn: { [weak self] in self?.handleCommand($0) })
             self.session?.start()
             self.islandViewModel.beginListening()
+            self.showLiquidSurface(focusEditor: false)
             self.playChime(.wake)   // soft "I'm listening" cue
             // If a suggestion is glowing, lead with it and await the user's yes/no.
             self.revealPendingSuggestionIfAny()
         }
         wakeEngine.onAudioLevel = { [weak self] level in
             self?.islandViewModel.updateAudioLevel(level)
+        }
+        wakeEngine.onCommandPartial = { [weak self] partial in
+            self?.islandViewModel.replacePartialTranscript(partial)
         }
         wakeEngine.onCommand = { [weak self] command in
             Log.trace("onCommand: '\(command)'")
