@@ -26,6 +26,21 @@ final class RecentCommandsTests: XCTestCase {
         RecentCommands.record("   ", defaults: d)
         XCTAssertTrue(RecentCommands.all(defaults: d).isEmpty)
     }
+
+    func testCompactPaletteUsesExactCompactGeometryAndPreservesRecentOrder() {
+        let layout = CommandPaletteLayout.compact
+        let commands = (0..<8).map { "command \($0)" }
+
+        XCTAssertEqual(layout.width, 500)
+        XCTAssertEqual(layout.rowHeight, 30)
+        XCTAssertEqual(layout.headerHeight, 64)
+        XCTAssertEqual(layout.maxVisibleRecents, 4)
+        XCTAssertEqual(layout.visibleCommands(commands), Array(commands.prefix(4)))
+        XCTAssertEqual(layout.contentHeight(recentCount: 4), 230)
+        XCTAssertEqual(layout.contentHeight(recentCount: 8), 230)
+        XCTAssertEqual(layout.contentHeight(recentCount: 0), 88)
+        XCTAssertEqual(layout.contentHeight(recentCount: -3), 88)
+    }
 }
 
 @MainActor

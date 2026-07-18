@@ -23,16 +23,20 @@ actor Coordinator {
     private let verifier: Verifier
     private let memory: MemoryEngine
     private let eventBus: EventBus
+    private let now: @Sendable () -> Date
 
-    init(execution: ExecutionEngine, verifier: Verifier, memory: MemoryEngine, eventBus: EventBus) {
+    init(execution: ExecutionEngine, verifier: Verifier, memory: MemoryEngine, eventBus: EventBus,
+         now: @escaping @Sendable () -> Date = { Date() }) {
         self.execution = execution
         self.verifier = verifier
         self.memory = memory
         self.eventBus = eventBus
+        self.now = now
     }
 
     /// Run one objective end to end and return its contract.
     func run(objective: Domain.Objective, steps: [PlanStep], rules: [String]) async -> ExecutionContract {
+        let startedAt = now()
         // Plan
         let plan = SequentialPlanner().plan(objective: objective, steps: steps)
         // Execute
@@ -54,7 +58,7 @@ actor Coordinator {
             actions: report.completed,
             artifacts: report.artifacts,
             verificationPassed: verification.passed,
-            duration: 0,
+            duration: max(0, now().timeIntervalSince(startedAt)),
             confidence: success ? 1.0 : 0.0,
             recoverable: !success)
     }

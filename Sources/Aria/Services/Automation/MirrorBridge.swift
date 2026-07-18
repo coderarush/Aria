@@ -9,6 +9,15 @@ import Foundation
 /// rest of the app can wire against a stable interface.
 final class MirrorBridge {
 
+    /// The settings UI must not imply a network bridge works before a listener,
+    /// pairing, and authenticated transport exist. Persisted MirrorSettings are
+    /// retained for forward compatibility, but this build exposes no server.
+    enum Availability: Equatable, Sendable {
+        case unavailable
+    }
+
+    static let availability: Availability = .unavailable
+
     enum ConnectionState: String {
         case notConnected = "Not connected"
         case connected = "Mirror connected"

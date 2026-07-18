@@ -47,6 +47,68 @@ final class AgentStoreTests: XCTestCase {
                         trigger: .daily(hour: 9, minute: 0))
     }
 
+    func testDuplicateDefinitionsCollapseToMostRecentlyRunPausedAgent() {
+        let older = BackgroundAgent(
+            name: " Standup prep ",
+            goal: "Prepare   notes",
+            trigger: .daily(hour: 9, minute: 0),
+            lastRun: Date(timeIntervalSince1970: 100))
+        let newer = BackgroundAgent(
+            name: "standup PREP",
+            goal: "prepare notes",
+            trigger: .daily(hour: 9, minute: 0),
+            lastRun: Date(timeIntervalSince1970: 200))
+
+        let sanitized = AgentStore.quarantiningDuplicateDefinitions([older, newer])
+
+        XCTAssertEqual(sanitized.count, 1)
+        XCTAssertEqual(sanitized[0].id, newer.id)
+        XCTAssertFalse(sanitized[0].enabled)
+        XCTAssertEqual(sanitized[0].lastOutcome,
+                       "Paused because duplicate automation definitions were found.")
+    }
+
+    func testUniqueDefinitionRemainsUnchangedAndEnabled() {
+        let unique = briefing()
+
+        let sanitized = AgentStore.quarantiningDuplicateDefinitions([unique])
+
+        XCTAssertEqual(sanitized, [unique])
+        XCTAssertTrue(sanitized[0].enabled)
+    }
+
+    func testLoadingQuarantinesDuplicatesWithoutChangingRunHistory() async throws {
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let writer = AgentStore(fileURL: url)
+        let older = BackgroundAgent(
+            name: "Standup prep",
+            goal: "Prepare notes",
+            trigger: .daily(hour: 9, minute: 0),
+            lastRun: Date(timeIntervalSince1970: 100))
+        let newer = BackgroundAgent(
+            name: "STANDUP PREP",
+            goal: " Prepare notes ",
+            trigger: .daily(hour: 9, minute: 0),
+            lastRun: Date(timeIntervalSince1970: 200))
+        await writer.upsert(older)
+        await writer.upsert(newer)
+        await writer.markRun(newer.id, at: Date(timeIntervalSince1970: 300),
+                             ok: true, summary: "Prepared.")
+
+        let reloaded = AgentStore(fileURL: url)
+
+        let agents = await reloaded.all()
+        XCTAssertEqual(agents.count, 1)
+        XCTAssertEqual(agents[0].id, newer.id)
+        XCTAssertFalse(agents[0].enabled)
+        let runs = await reloaded.recentRuns(10)
+        XCTAssertEqual(runs.count, 1)
+        XCTAssertEqual(runs[0].summary, "Prepared.")
+        let persisted = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any]
+        XCTAssertEqual((persisted?["agents"] as? [[String: Any]])?.count, 1)
+    }
+
     func testCRUDAndPersistence() async {
         let url = tempURL()
         defer { try? FileManager.default.removeItem(at: url) }

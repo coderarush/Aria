@@ -28,6 +28,7 @@ actor AutonomyEngine {
     private let context: GeminiClient.SystemContext
     private let runAction: @Sendable (AgentAction, String) async -> ToolResult
     private let confirm: @Sendable (String) async -> Bool
+    private let postConditionVerifier: PostConditionVerifier
     /// Plan-preview hook (V10 P2): called with the parsed steps before
     /// execution; return false to cancel. Default approves everything, so
     /// existing callers (background agents, resume) are unaffected.
@@ -39,6 +40,7 @@ actor AutonomyEngine {
          context: GeminiClient.SystemContext,
          runAction: @escaping @Sendable (AgentAction, String) async -> ToolResult,
          confirm: @escaping @Sendable (String) async -> Bool,
+         postConditionVerifier: PostConditionVerifier = .live,
          approvePlan: @escaping @Sendable ([TaskStep]) async -> Bool = { _ in true }) {
         self.gemini = gemini
         self.registry = registry
@@ -46,6 +48,7 @@ actor AutonomyEngine {
         self.context = context
         self.runAction = runAction
         self.confirm = confirm
+        self.postConditionVerifier = postConditionVerifier
         self.approvePlan = approvePlan
     }
 
@@ -153,17 +156,19 @@ actor AutonomyEngine {
                 result = await execute(step, lastOutput: lastOutput, material: material)
             }
             // Verify the step's EFFECT, not just that the call returned — an
-            // unconfirmed post-condition is a failure, so recovery runs (v11.1.1 trust).
-            if result.success, !step.postCondition.isSatisfied(byResult: result.output, ok: result.success) {
-                result = .fail("Step ran but its expected result couldn't be confirmed.")
-            }
+            // unconfirmed post-condition is a failure, so recovery runs. This is
+            // also done after recovery below: a successful alternative is never
+            // allowed to bypass the original step's promised outcome.
+            result = await verify(result, for: step.postCondition)
             // Recover (alternative action) for anything still failing except a decline —
             // a missing-input CAN be fixed by a different action, a decline must not be.
             if !result.success, !result.wasDeclined {
                 // V11 P16: recovery is visible, never silent — the panel and the
                 // narration both say a different approach is being tried.
                 emit(.narrate("That didn't work — trying another way."))
-                result = await recover(step: step, lastOutput: lastOutput, material: material, goal: goal)
+                result = await verify(
+                    await recover(step: step, lastOutput: lastOutput, material: material, goal: goal),
+                    for: step.postCondition)
             }
 
             plan.steps[i].status = result.success ? .done : .failed
@@ -278,11 +283,15 @@ actor AutonomyEngine {
         `save_note` (it lands in Apple Notes, or falls back to a file + clipboard).
 
         Break the goal into an ordered JSON array of steps. Each step is:
-        {"summary": "short human text", "agent": "<crew member>" OR "tool": "<tool name>", "input": {...}}
+        {"summary": "short human text", "agent": "<crew member>" OR "tool": "<tool name>", "input": {...}, "verify": {...optional...}}
         Use a crew member for research/writing/code; use a tool for concrete actions. \
         A later step automatically receives the previous steps' output as its material — \
         so for a save/write step you can leave the content field empty and it will be \
-        filled from the earlier result. Output ONLY the JSON array.
+        filled from the earlier result. When a local effect is directly checkable, add
+        one of these optional verifier objects: {"kind":"app_running","name":"Notes"},
+        {"kind":"app_not_running","name":"Mail"}, {"kind":"result_contains","text":"saved"},
+        {"kind":"file_exists","path":"/full/path/to/file"}, or {"kind":"succeeded"}.
+        Never invent other verifier kinds. Output ONLY the JSON array.
 
         EXAMPLE
         GOAL: research the best usb mics and save a summary to a note
@@ -305,6 +314,25 @@ actor AutonomyEngine {
     /// extremely important AND irreversible. Everything else runs free and receipted.
     static func shouldPause(tool: String, input: [String: String], summary: String) -> Bool {
         Safety.importance(tool: tool, input: input, summary: summary).requiresApproval
+    }
+
+    private func verify(_ result: ToolResult, for condition: PostCondition) async -> ToolResult {
+        guard result.success else { return result }
+        let check = await postConditionVerifier.verify(condition, result: result)
+        return Self.applying(check, condition: condition, to: result)
+    }
+
+    /// Render a verification result into the step's normal output channel. That
+    /// keeps completed work auditable in the existing task panel and transcript;
+    /// it also converts an unconfirmed explicit effect into an honest failure.
+    nonisolated static func applying(_ check: PostConditionCheck,
+                                     condition: PostCondition,
+                                     to result: ToolResult) -> ToolResult {
+        guard result.success, condition != .none else { return result }
+        let output = result.output.isEmpty ? check.proof : "\(result.output)\n\n\(check.proof)"
+        return check.passed
+            ? .ok(output, diagnostics: result.diagnostics)
+            : .fail(output, diagnostics: result.diagnostics)
     }
 
     private func execute(_ step: TaskStep, lastOutput: String, material: String) async -> ToolResult {

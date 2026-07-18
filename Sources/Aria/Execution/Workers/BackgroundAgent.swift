@@ -1,7 +1,7 @@
 import Foundation
 
 /// What causes a background agent to run.
-enum AgentTrigger: Codable, Equatable, Sendable {
+enum AgentTrigger: Codable, Equatable, Hashable, Sendable {
     /// Once per day, at or after the given local time.
     case daily(hour: Int, minute: Int)
     /// At most once per `seconds` interval.
@@ -97,6 +97,12 @@ enum AgentSchedule {
 actor AgentStore {
     static let shared = AgentStore()
 
+    private struct DuplicateDefinitionKey: Hashable {
+        let name: String
+        let goal: String
+        let trigger: AgentTrigger
+    }
+
     private struct State: Codable {
         var agents: [BackgroundAgent] = []
         var runs: [AgentRun] = []
@@ -110,7 +116,43 @@ actor AgentStore {
         let url = fileURL ?? PersistencePaths.applicationSupportBaseDirectory()
             .appendingPathComponent("agents.json")
         self.fileURL = url
-        self.state = Self.load(from: url)
+        let loaded = Self.load(from: url)
+        let agents = Self.quarantiningDuplicateDefinitions(loaded.agents)
+        if agents != loaded.agents {
+            var quarantined = loaded
+            quarantined.agents = agents
+            Self.save(quarantined, to: url)
+            self.state = quarantined
+        } else {
+            self.state = loaded
+        }
+    }
+
+    static func quarantiningDuplicateDefinitions(
+        _ agents: [BackgroundAgent]
+    ) -> [BackgroundAgent] {
+        var groups: [DuplicateDefinitionKey: [BackgroundAgent]] = [:]
+        var order: [DuplicateDefinitionKey] = []
+        for agent in agents {
+            let key = DuplicateDefinitionKey(
+                name: normalizedDefinitionText(agent.name),
+                goal: normalizedDefinitionText(agent.goal),
+                trigger: agent.trigger)
+            if groups[key] == nil { order.append(key) }
+            groups[key, default: []].append(agent)
+        }
+
+        return order.compactMap { key in
+            guard let group = groups[key], var representative = group.first else { return nil }
+            for candidate in group.dropFirst()
+            where (candidate.lastRun ?? .distantPast) > (representative.lastRun ?? .distantPast) {
+                representative = candidate
+            }
+            guard group.count > 1 else { return representative }
+            representative.enabled = false
+            representative.lastOutcome = "Paused because duplicate automation definitions were found."
+            return representative
+        }
     }
 
     func all() -> [BackgroundAgent] { state.agents }
@@ -160,10 +202,14 @@ actor AgentStore {
     }
 
     private func save() {
+        Self.save(state, to: fileURL)
+    }
+
+    private static func save(_ state: State, to url: URL) {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .secondsSince1970
         if let data = try? encoder.encode(state) {
-            try? data.write(to: fileURL, options: .atomic)
+            try? data.write(to: url, options: .atomic)
         }
     }
 
@@ -172,5 +218,12 @@ actor AgentStore {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .secondsSince1970
         return (try? decoder.decode(State.self, from: data)) ?? State()
+    }
+
+    private static func normalizedDefinitionText(_ text: String) -> String {
+        text.components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .lowercased()
     }
 }

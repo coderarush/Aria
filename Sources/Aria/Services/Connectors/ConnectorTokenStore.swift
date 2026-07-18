@@ -34,6 +34,14 @@ struct ConnectorTokens: Sendable, Equatable, Codable {
     func isExpired(now: Date = Date(), skew: TimeInterval = 60) -> Bool {
         now.addingTimeInterval(skew) >= expiry
     }
+
+    /// Whether Aria can use this credential now or renew it automatically.
+    /// An expired token with no refresh token is a known-unrecoverable state:
+    /// keeping it in Keychain must not make the assistant claim the account is
+    /// connected.
+    func isUsable(now: Date = Date()) -> Bool {
+        !isExpired(now: now) || refreshToken != nil
+    }
 }
 
 /// Reads/writes `ConnectorTokens` keyed by provider. Backed by the Keychain via
@@ -78,6 +86,6 @@ struct ConnectorTokenStore: Sendable {
     }
 
     func isConnected(_ id: ConnectorID) -> Bool {
-        load(id) != nil
+        load(id)?.isUsable() == true
     }
 }

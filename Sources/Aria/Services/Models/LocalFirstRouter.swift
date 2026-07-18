@@ -1,5 +1,46 @@
 import Foundation
 
+/// A shared, non-queuing admission gate for local-model inference. When the
+/// current runtime posture has no capacity left, callers use their existing
+/// cloud fallback instead of stacking work on a thermally constrained Mac.
+actor LocalWorkLimiter {
+    static let shared = LocalWorkLimiter()
+
+    private var activeRequests = 0
+
+    func acquire(limit: Int) -> Bool {
+        guard limit > 0, activeRequests < limit else { return false }
+        activeRequests += 1
+        return true
+    }
+
+    func release() {
+        activeRequests = max(0, activeRequests - 1)
+    }
+}
+
+/// Actor-isolated, model-specific availability cache for live local chat. A
+/// runtime power cap can select a different model mid-session, so its probe must
+/// never inherit an availability result from the larger model it replaced.
+actor LocalChatAvailabilityCache {
+    static let shared = LocalChatAvailabilityCache()
+
+    private var probes: [String: (at: Date, alive: Bool)] = [:]
+
+    func value(for model: String, now: Date = Date(), ttl: TimeInterval = 30) -> Bool? {
+        guard let probe = probes[model] else { return nil }
+        guard now.timeIntervalSince(probe.at) < ttl else {
+            probes.removeValue(forKey: model)
+            return nil
+        }
+        return probe.alive
+    }
+
+    func record(alive: Bool, model: String, at date: Date = Date()) {
+        probes[model] = (at: date, alive: alive)
+    }
+}
+
 /// Decides, per call, whether a local-eligible piece of work should run on the
 /// local model — and runs it there when so. Used by `GeminiClient.generateText`
 /// as an opt-in pre-step: the master toggle defaults OFF, so cloud behavior is
@@ -14,33 +55,74 @@ struct LocalFirstRouter {
     private let defaults: UserDefaults
     private let makeProvider: @Sendable (String) -> any ModelProvider
     private let availability: (@Sendable () async -> Bool)?
+    private let runtimeRecommendation: @Sendable () async -> RuntimeRecommendation
+    private let chatProbeCache: LocalChatAvailabilityCache
+    private let localWorkLimiter: LocalWorkLimiter
 
     init(defaults: UserDefaults = .standard,
          makeProvider: @escaping @Sendable (String) -> any ModelProvider = { OllamaProvider(model: $0) },
-         availability: (@Sendable () async -> Bool)? = nil) {
+         availability: (@Sendable () async -> Bool)? = nil,
+         runtimeRecommendation: @escaping @Sendable () async -> RuntimeRecommendation = {
+             await RuntimeAdvisor.shared.refresh()
+         },
+         chatProbeCache: LocalChatAvailabilityCache = .shared,
+         localWorkLimiter: LocalWorkLimiter = .shared) {
         self.defaults = defaults
         self.makeProvider = makeProvider
         self.availability = availability
+        self.runtimeRecommendation = runtimeRecommendation
+        self.chatProbeCache = chatProbeCache
+        self.localWorkLimiter = localWorkLimiter
     }
 
     private var enabled: Bool { defaults.object(forKey: Self.toggleKey) as? Bool ?? true }   // local is the default (V9)
     var localModelName: String { defaults.string(forKey: Self.modelKey) ?? "" }
 
     static let chatModelKey = "app.localChatModel"
-    /// Live voice chat wants a FAST *instruct* model (sub-second first token), not
-    /// the heavier thinking model used for planning/agents. Defaults to a small
-    /// instruct model so enabling local chat + `ollama pull llama3.2:3b` is fast.
+    /// Live voice chat can use an explicitly selected model; otherwise it follows
+    /// the installed local model, with the runtime recommendation remaining a cap.
     var localChatModelName: String {
-        let m = defaults.string(forKey: Self.chatModelKey) ?? ""
-        return m.isEmpty ? "llama3.2:3b" : m
+        let explicit = defaults.string(forKey: Self.chatModelKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !explicit.isEmpty { return explicit }
+        let selected = localModelName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return selected.isEmpty ? OllamaProvider.defaultModel : selected
     }
 
-    private func provider() -> any ModelProvider { makeProvider(localModelName) }
+    private func provider(model: String? = nil) -> any ModelProvider {
+        makeProvider(model ?? localModelName)
+    }
 
-    // Cached availability so the live conversation path never pays the 1.5s
-    // dead-server probe per turn. 30s TTL; guarded for cross-task access.
-    private static let probeLock = NSLock()
-    nonisolated(unsafe) private static var lastProbe: (at: Date, alive: Bool)?
+    /// The largest planning model that is appropriate right now. This is only a
+    /// ceiling: a user's smaller selection is always preserved.
+    func effectivePlanningModelName() async -> String {
+        let selected = localModelName.isEmpty ? OllamaProvider.defaultModel : localModelName
+        let runtime = await runtimeRecommendation()
+        return RuntimePolicy.effectiveModel(selected: selected, cap: runtime.planningModelCap)
+    }
+
+    /// Voice favors the user's fast instruct model, capped by current power and
+    /// thermal conditions without ever moving to a larger one.
+    func effectiveChatModelName() async -> String {
+        let runtime = await runtimeRecommendation()
+        return RuntimePolicy.effectiveModel(selected: localChatModelName, cap: runtime.chatModelCap)
+    }
+
+    func permitsLocalPlanning() async -> Bool {
+        guard enabled else { return false }
+        return (await runtimeRecommendation()).permitsLocalPlanning
+    }
+
+    /// Reserve one local-inference slot for streaming chat or low-priority
+    /// warming. Planning uses the same gate internally in `tryLocal`.
+    func acquireLocalWorkSlot() async -> Bool {
+        let runtime = await runtimeRecommendation()
+        return await localWorkLimiter.acquire(limit: runtime.maxConcurrentLocalRequests)
+    }
+
+    func releaseLocalWorkSlot() async {
+        await localWorkLimiter.release()
+    }
 
     static let chatToggleKey = "app.localChat"
 
@@ -55,16 +137,14 @@ struct LocalFirstRouter {
         // only wins when a local server is actually alive, else cloud takes over.
         let chatOn = defaults.object(forKey: Self.chatToggleKey) as? Bool ?? true
         guard enabled, chatOn else { return false }
-        Self.probeLock.lock()
-        if let p = Self.lastProbe, Date().timeIntervalSince(p.at) < 30 {
-            Self.probeLock.unlock()
-            return p.alive
-        }
-        Self.probeLock.unlock()
-        let alive = await provider().isAvailable()
-        Self.probeLock.lock()
-        Self.lastProbe = (Date(), alive)
-        Self.probeLock.unlock()
+        let runtime = await runtimeRecommendation()
+        guard runtime.permitsLocalChat else { return false }
+        let model = RuntimePolicy.effectiveModel(
+            selected: localChatModelName,
+            cap: runtime.chatModelCap)
+        if let cached = await chatProbeCache.value(for: model) { return cached }
+        let alive = await provider(model: model).isAvailable()
+        await chatProbeCache.record(alive: alive, model: model)
         return alive
     }
 
@@ -76,11 +156,17 @@ struct LocalFirstRouter {
                                        localFirstEnabled: enabled,
                                        localAvailable: false)
         }
+        let runtime = await runtimeRecommendation()
+        guard runtime.permitsLocalPlanning else {
+            return RoutingDecision(taskClass: taskClass, tier: .cloud, reason: runtime.reason)
+        }
+        let selected = localModelName.isEmpty ? OllamaProvider.defaultModel : localModelName
+        let model = RuntimePolicy.effectiveModel(selected: selected, cap: runtime.planningModelCap)
         let alive: Bool
         if let availability {
             alive = await availability()
         } else {
-            alive = await provider().isAvailable()
+            alive = await provider(model: model).isAvailable()
         }
         return RoutingPolicy.route(taskClass: taskClass,
                                    localFirstEnabled: true,
@@ -91,20 +177,29 @@ struct LocalFirstRouter {
     /// the caller falls through to the cloud path, so local can never make Aria
     /// less capable than cloud-only. Outcomes feed LocalModelHealth (V11 P1).
     func tryLocal(prompt: String, temperature: Double) async -> String? {
-        let p = provider()
+        let runtime = await runtimeRecommendation()
+        guard runtime.permitsLocalPlanning else { return nil }
+        guard await localWorkLimiter.acquire(limit: runtime.maxConcurrentLocalRequests) else { return nil }
+        let selected = localModelName.isEmpty ? OllamaProvider.defaultModel : localModelName
+        let p = provider(model: RuntimePolicy.effectiveModel(selected: selected,
+                                                              cap: runtime.planningModelCap))
         let started = Date()
+        let output: String?
         do {
             let text = try await p.generateText(prompt: prompt, temperature: temperature)
-            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 await LocalModelHealth.shared.record(ok: false, latency: 0, error: "empty output")
-                return nil
+                output = nil
+            } else {
+                await LocalModelHealth.shared.record(ok: true, latency: Date().timeIntervalSince(started))
+                output = text
             }
-            await LocalModelHealth.shared.record(ok: true, latency: Date().timeIntervalSince(started))
-            return text
         } catch {
             await LocalModelHealth.shared.record(ok: false, latency: 0,
                                                  error: String("\(error)".prefix(120)))
-            return nil
+            output = nil
         }
+        await localWorkLimiter.release()
+        return output
     }
 }

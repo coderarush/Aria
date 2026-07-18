@@ -1,6 +1,23 @@
 import XCTest
 @testable import Aria
 
+private final class PrimaryOutcomeRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var outcomes: [(ok: Bool, latency: TimeInterval)] = []
+
+    func record(ok: Bool, latency: TimeInterval) {
+        lock.lock()
+        outcomes.append((ok, latency))
+        lock.unlock()
+    }
+
+    var values: [(ok: Bool, latency: TimeInterval)] {
+        lock.lock()
+        defer { lock.unlock() }
+        return outcomes
+    }
+}
+
 final class StreamFallbackTests: XCTestCase {
 
     private func stream(_ events: [StreamEvent], thenError: Bool = false,
@@ -38,6 +55,33 @@ final class StreamFallbackTests: XCTestCase {
             fallback: { self.stream([.text("cloud answer")]) })
         let events = try await collect(s)
         XCTAssertEqual(events, [.text("cloud answer")])
+    }
+
+    func testPrimaryFailureReportsOneOutcomeBeforeFallback() async throws {
+        let recorder = PrimaryOutcomeRecorder()
+        let s = GeminiClient.streamWithFallback(
+            primary: stream([], errorBeforeAny: true),
+            fallback: { self.stream([.text("cloud answer")]) },
+            onPrimaryOutcome: { ok, latency in recorder.record(ok: ok, latency: latency) })
+
+        let events = try await collect(s)
+        XCTAssertEqual(events, [.text("cloud answer")])
+        XCTAssertEqual(recorder.values.count, 1)
+        XCTAssertFalse(recorder.values[0].ok)
+        XCTAssertGreaterThanOrEqual(recorder.values[0].latency, 0)
+    }
+
+    func testPrimaryFirstOutputReportsOneSuccessfulOutcome() async throws {
+        let recorder = PrimaryOutcomeRecorder()
+        let s = GeminiClient.streamWithFallback(
+            primary: stream([.text("local")]),
+            fallback: { self.stream([.text("cloud")]) },
+            onPrimaryOutcome: { ok, latency in recorder.record(ok: ok, latency: latency) })
+
+        let events = try await collect(s)
+        XCTAssertEqual(events, [.text("local")])
+        XCTAssertEqual(recorder.values.count, 1)
+        XCTAssertTrue(recorder.values[0].ok)
     }
 
     func testSlowPrimaryFirstTokenFallsBackOnTimeout() async throws {

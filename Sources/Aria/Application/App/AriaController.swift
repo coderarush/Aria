@@ -31,6 +31,8 @@ final class AriaController {
     private var panel: IslandPanel?
     private let taskViewModel = TaskViewModel()
     private var taskPanel: TaskPanel?
+    private var resumeTaskObserver: NSObjectProtocol?
+    private var commandPaletteObserver: NSObjectProtocol?
     private var learningTimer: Timer?
     /// Fires every 60 s to tick the Pomodoro session timer.
     private var pomodoroTimer: Timer?
@@ -110,6 +112,9 @@ final class AriaController {
         setupPanel();              Log.trace("start: panel")
         wireEngine();              Log.trace("start: engine wired")
         configureConfirmation()
+        configureCommandPalette()
+        configureHomeCommandPalette()
+        configureHomeTaskResume()
         configureLearning();       Log.trace("start: learning")
         startListening()
         offerResumeIfPending()
@@ -132,19 +137,41 @@ final class AriaController {
     private func warmLocalModel() {
         Task.detached(priority: .utility) {
             let router = LocalFirstRouter()
-            guard await router.chatGoesLocal() else { return }
-            let model = router.localModelName.isEmpty ? OllamaProvider.defaultModel : router.localModelName
+            guard await router.permitsLocalPlanning(), await router.chatGoesLocal() else { return }
+            let model = await router.effectivePlanningModelName()
             let provider = OllamaProvider(model: model)
+            func warm(prompt: String) async {
+                guard await router.acquireLocalWorkSlot() else { return }
+                let startedAt = Date()
+                do {
+                    let reply = try await provider.generateText(prompt: prompt, temperature: 0)
+                    let ok = !reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    await LocalModelHealth.shared.record(
+                        ok: ok,
+                        latency: Date().timeIntervalSince(startedAt),
+                        error: ok ? nil : "local warm-up returned empty output")
+                } catch where Task.isCancelled {
+                    // Model/power changes cancel the warm-up intentionally; that
+                    // should not be interpreted as a degraded local model.
+                } catch {
+                    await LocalModelHealth.shared.record(
+                        ok: false,
+                        latency: Date().timeIntervalSince(startedAt),
+                        error: String("\(error)".prefix(120)))
+                }
+                await router.releaseLocalWorkSlot()
+            }
             Log.trace("local: warming \(model)…")
             let start = Date()
-            _ = try? await provider.generateText(prompt: "Reply with: ok", temperature: 0)
+            await warm(prompt: "Reply with: ok")
             Log.trace("local: warm in \(Int(Date().timeIntervalSince(start)))s")
             // Keep it resident: Ollama unloads after ~5 idle minutes, which
             // would put the cold-load penalty back on the next conversation.
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 240_000_000_000)   // 4 min
-                guard await router.chatGoesLocal() else { continue }
-                _ = try? await provider.generateText(prompt: "ok", temperature: 0)
+                guard await router.permitsLocalPlanning(), await router.chatGoesLocal() else { return }
+                guard await router.effectivePlanningModelName() == model else { return }
+                await warm(prompt: "ok")
             }
         }
     }
@@ -165,6 +192,13 @@ final class AriaController {
             // has to relaunch after flipping the toggle in System Settings.
             retryHotkeysUntilLive()
         }
+    }
+
+    /// The typed-command surface is useful independently of a global hotkey:
+    /// Home and the menu bar can always summon it even when Accessibility input
+    /// monitoring is disabled or unavailable.
+    private func configureCommandPalette() {
+        guard typePanel == nil else { return }
         typePanel = CommandInputPanel { [weak self] text in
             self?.handleTypedCommand(text)
         }
@@ -463,6 +497,7 @@ final class AriaController {
     /// Completion always notifies (never hidden), and runs land in history.
     private func configureBackgroundAgents() {
         let coordinator = AgentCoordinator(
+            isEnabled: { AppSettings.shared.backgroundAgentsEnabled },
             isBusy: { [weak self] in
                 guard let self else { return true }
                 return self.isSpeaking || self.taskActive || self.wakeEngine.conversationActive
@@ -554,9 +589,9 @@ final class AriaController {
             guard let self, let pending = await self.orchestrator.pendingTask() else { return }
             let remaining = pending.unfinishedCount
             guard UserDefaults.standard.object(forKey: "app.notifyResume") as? Bool ?? true else { return }
-            let msg = "Unfinished task: “\(pending.goal)” — \(remaining) step\(remaining == 1 ? "" : "s") left. Say “Hey Aria, resume” to continue."
+            let msg = ResumeNotificationPresentation.body(remainingSteps: remaining)
             Notifier.notify(title: "Aria", body: msg)
-            Log.trace("resume: offered pending task '\(pending.goal)'")
+            Log.trace("resume: offered pending task")
         }
     }
 
@@ -952,6 +987,73 @@ final class AriaController {
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Cancel")    // default (Return / Esc) — the safe choice
         alert.addButton(withTitle: "Approve")
+        NSApp.activate(ignoringOtherApps: true)
+        return alert.runModal() == .alertSecondButtonReturn
+    }
+
+    /// Home may request a resume, but it never starts persisted work directly.
+    /// The controller re-reads the durable task, shows only its metadata, and
+    /// delegates approval to the established autonomy execution path.
+    private func configureHomeCommandPalette() {
+        guard commandPaletteObserver == nil else { return }
+        commandPaletteObserver = NotificationCenter.default.addObserver(
+            forName: .ariaShowCommandPalette, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.showTypePanel()
+            }
+        }
+    }
+
+    private func configureHomeTaskResume() {
+        guard resumeTaskObserver == nil else { return }
+        resumeTaskObserver = NotificationCenter.default.addObserver(
+            forName: .ariaResumeTask, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.resumePendingTaskFromHome()
+            }
+        }
+    }
+
+    private func resumePendingTaskFromHome() async {
+        guard !taskActive, !isConfirming else { return }
+        guard let pending = await orchestrator.pendingTask() else {
+            // The card was stale; prompt it to re-read rather than pretending a
+            // task resumed successfully.
+            NotificationCenter.default.post(name: .ariaTaskStoreDidChange, object: nil)
+            islandViewModel.showResponse("There’s no unfinished task to resume.")
+            return
+        }
+        guard !taskActive, !isConfirming,
+              await confirmResume(pending) else { return }
+        // A background run or another interaction may have changed the task
+        // while the confirmation was on screen. Resume only the same snapshot.
+        guard !taskActive,
+              let current = await orchestrator.pendingTask(),
+              current.updatedAt == pending.updatedAt else {
+            NotificationCenter.default.post(name: .ariaTaskStoreDidChange, object: nil)
+            return
+        }
+        runAutonomousTask(current.goal, resume: true)
+    }
+
+    @MainActor
+    private func confirmResume(_ task: PersistedTask) async -> Bool {
+        guard !taskActive, !isConfirming else { return false }
+        isConfirming = true
+        hotkeyTap?.setEnabled(false)
+        defer { isConfirming = false; hotkeyTap?.setEnabled(true) }
+
+        let nextStep = task.steps.first { $0.status != "done" }?.summary ?? "the remaining work"
+        let remaining = task.unfinishedCount
+        let alert = NSAlert()
+        alert.messageText = "Resume this task?"
+        alert.informativeText = "Aria will continue “\(task.goal)” with “\(nextStep)”. "
+            + "\(remaining) step\(remaining == 1 ? "" : "s") remain."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Resume")
         NSApp.activate(ignoringOtherApps: true)
         return alert.runModal() == .alertSecondButtonReturn
     }

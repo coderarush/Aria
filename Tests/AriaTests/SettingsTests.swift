@@ -3,6 +3,13 @@ import XCTest
 
 final class SettingsTests: XCTestCase {
 
+    func testSettingsGroupsCoverEveryDestinationOnce() {
+        let grouped = SettingsView.Section.grouped
+
+        XCTAssertEqual(Set(grouped.flatMap(\.sections)), Set(SettingsView.Section.allCases))
+        XCTAssertEqual(grouped.map(\.title), ["Basics", "Workflows", "Privacy & access", "Advanced"])
+    }
+
     @MainActor
     func testAppSettingsDefaultsAndPersistence() {
         let suite = UserDefaults(suiteName: "aria-app-\(UUID().uuidString)")!
@@ -13,16 +20,19 @@ final class SettingsTests: XCTestCase {
         XCTAssertFalse(s.privacyMode)
         XCTAssertFalse(s.onboardingComplete)
         XCTAssertFalse(s.autonomousMode)
+        XCTAssertFalse(s.backgroundAgentsEnabled)
 
         s.privacyMode = true
         s.orbSize = .large
         s.disabledTools.insert("shell")
+        s.backgroundAgentsEnabled = true
 
         // Reload from the same suite — values persist.
         let reloaded = AppSettings(defaults: suite)
         XCTAssertTrue(reloaded.privacyMode)
         XCTAssertEqual(reloaded.orbSize, .large)
         XCTAssertTrue(reloaded.disabledTools.contains("shell"))
+        XCTAssertTrue(reloaded.backgroundAgentsEnabled)
     }
 
     func testOrbSizeDiameters() {
@@ -46,5 +56,9 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(bridge.state, .notConnected)
         bridge.startServer(port: 8765)   // no-op stub
         XCTAssertEqual(bridge.port, 8765)
+    }
+
+    func testMirrorBridgeIsUnavailableUntilTransportExists() {
+        XCTAssertEqual(MirrorBridge.availability, .unavailable)
     }
 }

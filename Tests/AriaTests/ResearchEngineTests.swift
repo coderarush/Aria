@@ -2,6 +2,14 @@ import XCTest
 @testable import Aria
 
 final class ResearchEngineTests: XCTestCase {
+    private func temporaryDirectory() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("aria-research-\(UUID().uuidString)", isDirectory: true)
+    }
+
+    private static let reportJSON = """
+    {"sections":[{"heading":"Notes","content":"Content."}],"keyFindings":["Finding 1"]}
+    """
 
     // MARK: - research()
 
@@ -15,14 +23,14 @@ final class ResearchEngineTests: XCTestCase {
         }
         engine.fetchPage = { _ in "Fetched page content about the topic." }
 
-        let report = await engine.research(topic: "Swift concurrency") { _ in
+        let outcome = await engine.research(topic: "Swift concurrency") { _ in
             """
             {"sections":[{"heading":"Overview","content":"Swift concurrency overview."}],"keyFindings":["Actors prevent data races"]}
             """
         }
 
-        XCTAssertFalse(report.sections.isEmpty)
-        XCTAssertEqual(report.topic, "Swift concurrency")
+        XCTAssertFalse(outcome.report.sections.isEmpty)
+        XCTAssertEqual(outcome.report.topic, "Swift concurrency")
     }
 
     func testResearchDeduplicatesURLs() async {
@@ -36,16 +44,16 @@ final class ResearchEngineTests: XCTestCase {
         }
         engine.fetchPage = { _ in "Content." }
 
-        let report = await engine.research(topic: "dedup test", maxSources: 5) { _ in
+        let outcome = await engine.research(topic: "dedup test", maxSources: 5) { _ in
             """
             {"sections":[{"heading":"Summary","content":"Deduplication works."}],"keyFindings":[]}
             """
         }
 
         // Sources should have unique URLs
-        let uniqueSources = Set(report.sources)
-        XCTAssertEqual(report.sources.count, uniqueSources.count)
-        XCTAssertFalse(report.sources.isEmpty)
+        let uniqueSources = Set(outcome.report.sources)
+        XCTAssertEqual(outcome.report.sources.count, uniqueSources.count)
+        XCTAssertFalse(outcome.report.sources.isEmpty)
     }
 
     func testResearchFallbackOnSynthesisError() async {
@@ -55,38 +63,48 @@ final class ResearchEngineTests: XCTestCase {
         }
         engine.fetchPage = { _ in "some content" }
 
-        let report = await engine.research(topic: "error test") { _ in
+        let outcome = await engine.research(topic: "error test") { _ in
             throw NSError(domain: "test", code: 1, userInfo: nil)
         }
 
         // Should still return a report (fallback)
-        XCTAssertFalse(report.sections.isEmpty)
-        XCTAssertEqual(report.topic, "error test")
+        XCTAssertFalse(outcome.report.sections.isEmpty)
+        XCTAssertEqual(outcome.report.topic, "error test")
     }
 
     func testResearchSavesFile() async {
-        var engine = ResearchEngine()
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var engine = ResearchEngine(reportsDirectory: directory)
         engine.search = { _ in
             [SearchResult(title: "T", url: "https://example.com", snippet: "s")]
         }
         engine.fetchPage = { _ in "page content" }
 
         let topic = "save-test-\(UUID().uuidString)"
-        _ = await engine.research(topic: topic) { _ in
-            """
-            {"sections":[{"heading":"Notes","content":"Content."}],"keyFindings":["Finding 1"]}
-            """
+        let outcome = await engine.research(topic: topic) { _ in Self.reportJSON }
+
+        XCTAssertNotNil(outcome.savedURL, "Research report should expose its saved file.")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outcome.savedURL?.path ?? ""))
+    }
+
+    func testResearchReturnsReportWhenSaveFails() async throws {
+        let parent = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        let blockedDirectory = parent.appendingPathComponent("not-a-directory")
+        try Data("blocked".utf8).write(to: blockedDirectory)
+
+        var engine = ResearchEngine(reportsDirectory: blockedDirectory)
+        engine.search = { _ in
+            [SearchResult(title: "T", url: "https://example.com", snippet: "s")]
         }
+        engine.fetchPage = { _ in "page content" }
 
-        let dir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Documents/Aria Notes/Research")
-        let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
-        let safeTopic = topic.replacingOccurrences(of: " ", with: "-")
-        let matchingFile = files.first { $0.lastPathComponent.contains(safeTopic) }
-        XCTAssertNotNil(matchingFile, "Research report file should be saved.")
+        let outcome = await engine.research(topic: "save failure") { _ in Self.reportJSON }
 
-        // Cleanup
-        if let file = matchingFile { try? FileManager.default.removeItem(at: file) }
+        XCTAssertNil(outcome.savedURL)
+        XCTAssertEqual(outcome.report.topic, "save failure")
     }
 
     func testSearchResultsEmpty() async {
@@ -94,14 +112,14 @@ final class ResearchEngineTests: XCTestCase {
         engine.search = { _ in [] }
         engine.fetchPage = { _ in "" }
 
-        let report = await engine.research(topic: "empty sources test") { _ in
+        let outcome = await engine.research(topic: "empty sources test") { _ in
             """
             {"sections":[{"heading":"No Sources","content":"Nothing found."}],"keyFindings":[]}
             """
         }
 
         // Should not crash; report returned
-        XCTAssertEqual(report.topic, "empty sources test")
-        XCTAssertTrue(report.sources.isEmpty)
+        XCTAssertEqual(outcome.report.topic, "empty sources test")
+        XCTAssertTrue(outcome.report.sources.isEmpty)
     }
 }

@@ -7,7 +7,7 @@ struct ConnectorStatus: Sendable, Equatable, Identifiable {
     let displayName: String
     /// The user has supplied an OAuth client ID for this provider.
     let isConfigured: Bool
-    /// A valid token bundle is stored.
+    /// A credential is usable now or can be renewed automatically.
     let isConnected: Bool
     /// The granted scopes, when connected.
     let scopes: [String]
@@ -33,6 +33,8 @@ actor ConnectorStore {
     private let session: URLSession
     /// Injectable so tests can avoid the real network/browser.
     private let authorizeImpl: @Sendable (OAuth2.AuthConfig, URLSession) async throws -> OAuth2.TokenResponse
+    /// Injectable so refresh-failure handling is deterministic in tests.
+    private let refreshImpl: @Sendable (String, OAuth2.AuthConfig, URLSession) async throws -> OAuth2.TokenResponse
     /// Injectable so tests can pin the "is a client ID configured?" answer without
     /// touching the real Keychain — otherwise a developer's stored client ID makes
     /// the BYO "not configured" contract non-hermetic (different result per machine).
@@ -42,10 +44,13 @@ actor ConnectorStore {
          session: URLSession = .shared,
          authorize: @escaping @Sendable (OAuth2.AuthConfig, URLSession) async throws -> OAuth2.TokenResponse =
             { config, session in try await OAuth2.authorize(config: config, session: session) },
+         refresh: @escaping @Sendable (String, OAuth2.AuthConfig, URLSession) async throws -> OAuth2.TokenResponse =
+            { token, config, session in try await OAuth2.refresh(refreshToken: token, config: config, session: session) },
          resolveClientID: @escaping @Sendable (any ConnectorProvider) -> String? = { $0.resolvedClientID() }) {
         self.tokenStore = tokenStore
         self.session = session
         self.authorizeImpl = authorize
+        self.refreshImpl = refresh
         self.resolveClientID = resolveClientID
     }
 
@@ -58,7 +63,7 @@ actor ConnectorStore {
                 id: provider.id,
                 displayName: provider.displayName,
                 isConfigured: provider.isConfigured(mode: mode),
-                isConnected: tokens != nil,
+                isConnected: tokens?.isUsable() == true,
                 scopes: tokens?.scopes ?? [],
                 expiry: tokens?.expiry
             )
@@ -72,7 +77,7 @@ actor ConnectorStore {
             id: id,
             displayName: provider.displayName,
             isConfigured: provider.isConfigured(mode: ConnectorMode.current()),
-            isConnected: tokens != nil,
+            isConnected: tokens?.isUsable() == true,
             scopes: tokens?.scopes ?? [],
             expiry: tokens?.expiry
         )
@@ -117,7 +122,12 @@ actor ConnectorStore {
     func validAccessToken(_ id: ConnectorID) async -> String? {
         guard var tokens = tokenStore.load(id) else { return nil }
         guard tokens.isExpired() else { return tokens.accessToken }
-        guard let refreshToken = tokens.refreshToken else { return nil }
+        guard let refreshToken = tokens.refreshToken else {
+            // The token can neither be used nor renewed. Forget it so every
+            // later snapshot truthfully presents the account as disconnected.
+            tokenStore.delete(id)
+            return nil
+        }
         let provider = Connectors.provider(for: id)
         let mode = ConnectorMode.current()
         // `.bringYourOwn` refreshes need the user client ID; `.relay` refreshes go
@@ -131,15 +141,25 @@ actor ConnectorStore {
             clientID = resolved
         }
         do {
-            let response = try await OAuth2.refresh(refreshToken: refreshToken,
-                                                    config: provider.authConfig(clientID: clientID, mode: mode),
-                                                    session: session)
+            let response = try await refreshImpl(refreshToken,
+                                                 provider.authConfig(clientID: clientID, mode: mode),
+                                                 session)
             tokens = ConnectorTokens(from: response, previousRefreshToken: refreshToken)
             try? tokenStore.save(tokens, for: id)
             return tokens.accessToken
         } catch {
+            if Self.isTerminalRefreshFailure(error) {
+                // A revoked/invalid authorization cannot become usable by retrying.
+                // Clear it so Home, tools, and the model ask for reconnection honestly.
+                tokenStore.delete(id)
+            }
             Log.trace("connector \(id.rawValue): token refresh failed (\(error))")
             return nil
         }
+    }
+
+    private static func isTerminalRefreshFailure(_ error: Error) -> Bool {
+        guard case let OAuth2.OAuth2Error.tokenExchangeFailed(status) = error else { return false }
+        return (400...403).contains(status)
     }
 }

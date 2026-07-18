@@ -15,23 +15,38 @@ extension Notification.Name {
 final class AgentCoordinator {
 
     private let store: AgentStore
+    private let isEnabled: () -> Bool
     private let isBusy: () -> Bool
     /// Executes one autonomy goal, silently. Returns (ok, one-line summary).
     private let runner: (String) async -> (Bool, String)
     private let notify: (String, String) -> Void
+    private let loadAgents: () async -> [BackgroundAgent]
+    private let mailSnapshot: (String) async -> String?
+    private let urlSnapshot: (String) async -> String?
 
     private var timer: Timer?
     private var watchers: [UUID: FolderWatcher] = [:]
+    private var watcherRefreshGeneration: UInt = 0
     private var running = false
 
+    var activeWatcherCount: Int { watchers.count }
+
     init(store: AgentStore = .shared,
+         isEnabled: @escaping () -> Bool = { true },
          isBusy: @escaping () -> Bool,
          runner: @escaping (String) async -> (Bool, String),
-         notify: @escaping (String, String) -> Void) {
+         notify: @escaping (String, String) -> Void,
+         loadAgents: (() async -> [BackgroundAgent])? = nil,
+         mailSnapshot: @escaping (String) async -> String? = WatcherCheck.mailSnapshot,
+         urlSnapshot: @escaping (String) async -> String? = { await WatcherCheck.urlSnapshot($0) }) {
         self.store = store
+        self.isEnabled = isEnabled
         self.isBusy = isBusy
         self.runner = runner
         self.notify = notify
+        self.loadAgents = loadAgents ?? { await store.all() }
+        self.mailSnapshot = mailSnapshot
+        self.urlSnapshot = urlSnapshot
     }
 
     func start() {
@@ -43,29 +58,35 @@ final class AgentCoordinator {
 
     func stop() {
         timer?.invalidate(); timer = nil
+        watcherRefreshGeneration &+= 1
         watchers.values.forEach { $0.stop() }
         watchers = [:]
     }
 
     /// Run everything due. Serial: one background agent at a time.
     func sweep(now: Date) async {
-        guard !running, !isBusy() else { return }
+        guard isEnabled(), !running, !isBusy() else { return }
         let due = await store.dueAgents(now: now)
         guard !due.isEmpty else { return }
         running = true
         defer { running = false }
         for agent in due {
             // Re-check between agents — the user may have started talking.
-            if isBusy() { break }
+            if !isEnabled() || isBusy() { break }
             await run(agent)
         }
     }
 
     /// Rebuild folder watchers from the current agent set. Call after CRUD.
     func refreshWatchers() async {
+        watcherRefreshGeneration &+= 1
+        let generation = watcherRefreshGeneration
         watchers.values.forEach { $0.stop() }
         watchers = [:]
-        for agent in await store.all() where agent.enabled {
+        guard isEnabled() else { return }
+        let agents = await loadAgents()
+        guard generation == watcherRefreshGeneration, isEnabled() else { return }
+        for agent in agents where agent.enabled {
             guard case .folderChanged(let path) = agent.trigger else { continue }
             let id = agent.id
             let watcher = FolderWatcher(path: path) { [weak self] in
@@ -80,7 +101,7 @@ final class AgentCoordinator {
     }
 
     private func runFolderAgent(_ id: UUID) async {
-        guard !running, !isBusy() else { return }   // next change re-fires; skipping is safe
+        guard isEnabled(), !running, !isBusy() else { return }   // next change re-fires; skipping is safe
         guard let agent = await store.all().first(where: { $0.id == id }), agent.enabled else { return }
         running = true
         defer { running = false }
@@ -94,7 +115,7 @@ final class AgentCoordinator {
         var goal = agent.goal
         switch agent.trigger {
         case .mailMatched(let query):
-            let snapshot = await WatcherCheck.mailSnapshot(query: query)
+            let snapshot = await mailSnapshot(query)
             switch WatcherCheck.evaluate(current: snapshot, watermark: agent.watermark) {
             case .unavailable:
                 await store.touch(agent.id, at: Date()); return
@@ -107,7 +128,7 @@ final class AgentCoordinator {
                 goal += "\n\nNew matching mail since the last check:\n\(String(context.prefix(1200)))"
             }
         case .urlChanged(let url):
-            let snapshot = await WatcherCheck.urlSnapshot(url)
+            let snapshot = await urlSnapshot(url)
             switch WatcherCheck.evaluate(current: snapshot, watermark: agent.watermark) {
             case .unavailable:
                 await store.touch(agent.id, at: Date()); return
@@ -123,6 +144,7 @@ final class AgentCoordinator {
             break
         }
 
+        guard isEnabled() else { return }
         Log.trace("agents: running '\(agent.name)'")
         let (ok, summary) = await runner(goal)
         await store.markRun(agent.id, at: Date(), ok: ok, summary: summary)

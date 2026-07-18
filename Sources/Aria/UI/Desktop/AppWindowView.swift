@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 /// Aria's main application window — a premium, branded home for everything she's
 /// done. A materials sidebar (logo + sections) on the left, a scrolling content
@@ -21,6 +22,9 @@ struct AppWindowView: View {
         }
         .frame(minWidth: 900, minHeight: 600)
         .task { await model.refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: .ariaTaskStoreDidChange)) { _ in
+            Task { await model.refreshCurrentTask() }
+        }
     }
 
     // MARK: Sidebar
@@ -42,12 +46,22 @@ struct AppWindowView: View {
             .padding(.top, 22)
             .padding(.bottom, 18)
 
-            VStack(spacing: 3) {
-                ForEach(AppSection.allCases) { section in
-                    SidebarItem(section: section,
-                                isSelected: model.section == section,
-                                accent: settings.accentColor) {
-                        select(section)
+            VStack(alignment: .leading, spacing: 16) {
+                ForEach(AppSection.grouped) { group in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Label(group.title, systemImage: group.symbol)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .textCase(.uppercase)
+                            .padding(.horizontal, 11)
+                            .padding(.bottom, 2)
+                        ForEach(group.sections) { section in
+                            SidebarItem(section: section,
+                                        isSelected: model.section == section,
+                                        accent: settings.accentColor) {
+                                select(section)
+                            }
+                        }
                     }
                 }
             }
@@ -56,17 +70,11 @@ struct AppWindowView: View {
             Spacer()
 
             // Footer status pill.
-            HStack(spacing: 7) {
-                Circle().fill(Color.green).frame(width: 7, height: 7)
-                    .shadow(color: .green.opacity(0.6), radius: 3)
-                Text("Aria is online")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-            }
+            AriaStatusBadge(title: "Aria is online", symbol: "checkmark.circle.fill", tint: .green)
             .padding(.horizontal, 18)
             .padding(.bottom, 16)
         }
-        .frame(width: 224)
+        .frame(width: AriaVisualMetrics.sidebarWidth)
         .frame(maxHeight: .infinity)
         .background(.ultraThinMaterial)
     }
@@ -128,62 +136,5 @@ private struct SidebarItem: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.12), value: hovering)
-    }
-}
-
-// MARK: - Shared card primitives (the window's visual language)
-
-/// A rounded, soft-shadowed card on thin material — the building block of every
-/// pane. Matches SettingsView's grouped look but elevated for a full window.
-struct AriaCard<Content: View>: View {
-    var padding: CGFloat = 18
-    @ViewBuilder var content: Content
-    var body: some View {
-        content
-            .padding(padding)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.06))
-            )
-            .shadow(color: .black.opacity(0.06), radius: 14, y: 6)
-    }
-}
-
-/// A pane heading — big system-rounded title + a quiet subtitle.
-struct PaneHeader: View {
-    let title: String
-    var subtitle: String? = nil
-    var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(title).font(.system(size: 26, weight: .bold, design: .rounded))
-            if let subtitle {
-                Text(subtitle).font(.system(size: 13)).foregroundStyle(.secondary)
-            }
-        }
-    }
-}
-
-/// A calm, centered empty-state with the Aria blob and a message.
-struct AriaEmptyState: View {
-    let message: String
-    var detail: String? = nil
-    var body: some View {
-        VStack(spacing: 16) {
-            AppBlobMark(size: 84, animated: true)
-                .opacity(0.85)
-            Text(message)
-                .font(.system(size: 16, weight: .semibold, design: .rounded))
-            if let detail {
-                Text(detail)
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 320)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.vertical, 60)
     }
 }

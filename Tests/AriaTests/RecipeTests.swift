@@ -103,7 +103,9 @@ final class RecipeTests: XCTestCase {
     func testPackToolsAllExistInRegistry() async {
         // Every tool a built-in pack references must actually be registered —
         // a pack that plans dead steps would fail on first run.
-        let registry = ToolRegistry()
+        let agentsURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("recipe-registry-agents-\(UUID().uuidString).json")
+        let registry = ToolRegistry(automationStore: AgentStore(fileURL: agentsURL))
         for pack in WorkflowPack.builtins {
             for recipe in pack.recipes {
                 for step in recipe.steps {

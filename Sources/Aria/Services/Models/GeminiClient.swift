@@ -183,11 +183,11 @@ actor GeminiClient {
             let router = LocalFirstRouter()
             return AsyncThrowingStream { continuation in
                 let task = Task {
-                    if await router.chatGoesLocal() {
+                    if await router.chatGoesLocal(), await router.acquireLocalWorkSlot() {
                         await RoutingLog.shared.record(RoutingDecision(
                             taskClass: .simpleChat, tier: .local, reason: "conversation on local model"))
                         Log.trace("chat: local model")
-                        let local = OllamaProvider(model: router.localChatModelName)
+                        let local = OllamaProvider(model: await router.effectiveChatModelName())
                         // Trimmed tool catalog: prompt-eval cost on a small local
                         // model scales with spec bytes — the full 25-tool catalog
                         // costs ~3x the first-token time of this core set. Tools
@@ -200,11 +200,20 @@ actor GeminiClient {
                                 Log.trace("chat: local failed before output — Gemini fallback")
                                 return cloud()
                             },
-                            firstTokenTimeout: 15)
+                            firstTokenTimeout: 15,
+                            onPrimaryOutcome: { ok, latency in
+                                Task {
+                                    await LocalModelHealth.shared.record(
+                                        ok: ok,
+                                        latency: latency,
+                                        error: ok ? nil : "local chat failed before first output")
+                                }
+                            })
                         do {
                             for try await ev in stream { continuation.yield(ev) }
                             continuation.finish()
                         } catch { continuation.finish(throwing: error) }
+                        await router.releaseLocalWorkSlot()
                     } else if let fast = await self.fastChatProvider() {
                         // FAST CLOUD: snappier first-token than Gemini. Gemini stays
                         // the fallback via the same first-token watchdog, so a stalled
@@ -260,22 +269,32 @@ actor GeminiClient {
     static func streamWithFallback(
         primary: AsyncThrowingStream<StreamEvent, Error>,
         fallback: @escaping @Sendable () -> AsyncThrowingStream<StreamEvent, Error>,
-        firstTokenTimeout: TimeInterval = 12
+        firstTokenTimeout: TimeInterval = 12,
+        onPrimaryOutcome: @escaping @Sendable (Bool, TimeInterval) -> Void = { _, _ in }
     ) -> AsyncThrowingStream<StreamEvent, Error> {
         // Single consumer on `primary` (AsyncThrowingStream supports exactly one
         // iterator — a racing second consumer parks forever) + a watchdog that
         // only acts if nothing arrived by the deadline. Lock-guarded flags keep
         // the pump and the watchdog from both deciding the outcome.
         final class State: @unchecked Sendable {
+            enum EventDecision {
+                case first
+                case later
+                case ignored
+            }
+
             private let lock = NSLock()
             private var gotFirst = false
             private var resolved = false
-            /// Pump got an event. Returns false if the watchdog already won.
-            func noteFirst() -> Bool {
+            /// Pump got an event. The first local event is a successful local
+            /// health outcome; later events continue normally. An event arriving
+            /// after the watchdog chose cloud is discarded.
+            func noteEvent() -> EventDecision {
                 lock.lock(); defer { lock.unlock() }
-                if resolved { return false }
+                if resolved { return .ignored }
+                if gotFirst { return .later }
                 gotFirst = true
-                return true
+                return .first
             }
             /// Watchdog fired. True (= run fallback) only if nothing arrived yet.
             func timeoutWins() -> Bool {
@@ -289,15 +308,27 @@ actor GeminiClient {
 
         return AsyncThrowingStream { continuation in
             let state = State()
+            let startedAt = Date()
+            func report(_ ok: Bool) {
+                onPrimaryOutcome(ok, max(0, Date().timeIntervalSince(startedAt)))
+            }
             let pump = Task {
                 do {
                     for try await ev in primary {
-                        guard state.noteFirst() else { return }   // watchdog already fell back
+                        switch state.noteEvent() {
+                        case .ignored:
+                            return                               // watchdog already fell back
+                        case .first:
+                            report(true)
+                        case .later:
+                            break
+                        }
                         continuation.yield(ev)
                     }
                     if state.firstArrived {
                         continuation.finish()
                     } else if state.timeoutWins() {               // ended empty before deadline
+                        report(false)
                         await Self.pump(fallback(), into: continuation)
                     }
                 } catch {
@@ -305,6 +336,7 @@ actor GeminiClient {
                         continuation.finish(throwing: error)      // post-output: propagate
                     } else if state.timeoutWins() {
                         Log.trace("stream: primary failed before output — fallback")
+                        report(false)
                         await Self.pump(fallback(), into: continuation)
                     }
                 }
@@ -314,6 +346,7 @@ actor GeminiClient {
                 guard state.timeoutWins() else { return }
                 Log.trace("stream: primary gave nothing in \(Int(firstTokenTimeout))s — fallback")
                 pump.cancel()
+                report(false)
                 await Self.pump(fallback(), into: continuation)
             }
             continuation.onTermination = { _ in

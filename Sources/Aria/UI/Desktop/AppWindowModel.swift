@@ -4,7 +4,7 @@ import Combine
 /// The five top-level destinations of Aria's main window. Plain eager switch —
 /// deliberately no NavigationSplitView (see SettingsView header for the macOS 26
 /// Form/List optimizer-crash note that governs this whole window).
-enum AppSection: String, CaseIterable, Identifiable, Sendable {
+enum AppSection: String, CaseIterable, Identifiable, Sendable, Hashable {
     case home          = "Home"
     case conversations = "Conversations"
     case activity      = "Activity"
@@ -26,6 +26,26 @@ enum AppSection: String, CaseIterable, Identifiable, Sendable {
         case .settings:      return "gearshape"
         }
     }
+}
+
+/// A human-facing group of desktop destinations. Grouping is view navigation
+/// only: every original destination remains independently addressable.
+struct AppSectionGroup: Identifiable, Equatable, Sendable {
+    let title: String
+    let symbol: String
+    let sections: [AppSection]
+    var id: String { title }
+}
+
+extension AppSection {
+    static let grouped = [
+        AppSectionGroup(title: "Workspace", symbol: "square.grid.2x2",
+                        sections: [.home, .conversations, .activity]),
+        AppSectionGroup(title: "History", symbol: "clock.arrow.circlepath",
+                        sections: [.receipts, .insights]),
+        AppSectionGroup(title: "Setup", symbol: "slider.horizontal.3",
+                        sections: [.connectors, .settings])
+    ]
 }
 
 /// A read-only view-model snapshot of a single conversation turn, decoupled from
@@ -53,6 +73,74 @@ struct ActivityDayGroup: Identifiable, Equatable, Sendable {
     let id: String            // the formatted day label, also the stable id
     let day: Date
     let entries: [ActivityEntry]
+}
+
+enum RuntimeStatusTone: Equatable, Sendable {
+    case positive
+    case neutral
+    case attention
+}
+
+/// A small, human-facing runtime fact for the Home pane. It deliberately
+/// carries no provider errors, tokens, or model prompts.
+struct RuntimeStatusRow: Identifiable, Equatable, Sendable {
+    let id: String
+    let title: String
+    let value: String
+    let detail: String
+    let symbol: String
+    let tone: RuntimeStatusTone
+}
+
+/// Privacy-safe progress for the one active task. It deliberately omits task
+/// input and output; Home needs continuity at a glance, not a second transcript.
+struct TaskProgressSummary: Equatable, Sendable {
+    let state: TaskRunState
+    let goal: String
+    let value: String
+    let progress: String
+    let nextStep: String?
+    let detail: String
+
+    /// A live task is already executing in this process. Only an interrupted
+    /// task can offer the explicit, confirmation-gated Home resume action.
+    var canResume: Bool { state == .resumable }
+}
+
+/// The single thing Home should ask the user to consider now. This is derived
+/// from existing task/readiness snapshots so it is deterministic and never
+/// duplicates execution state or task input.
+enum HomeFocusAction: Equatable, Sendable {
+    case askAria
+    case resumeTask
+    case openSetup
+}
+
+struct HomeFocusPresentation: Equatable, Sendable {
+    let title: String
+    let detail: String
+    let action: HomeFocusAction
+
+    static func from(task: TaskProgressSummary?, readiness: OperationalReadiness?) -> Self {
+        if let task, task.state == .resumable {
+            return Self(title: "Ready to resume", detail: task.progress, action: .resumeTask)
+        }
+        if let task, task.state == .running {
+            return Self(title: "Work in progress", detail: task.detail, action: .askAria)
+        }
+        if readiness?.needsSettings == true {
+            return Self(
+                title: "Finish setting up Aria",
+                detail: "Grant access to unlock the tools you need.",
+                action: .openSetup
+            )
+        }
+        return Self(
+            title: "Ready when you are",
+            detail: "Ask a question, start a task, or pick up recent work.",
+            action: .askAria
+        )
+    }
 }
 
 /// A connector card descriptor. OAuth-backed cards (those with a `connectorID`)
@@ -241,6 +329,9 @@ final class AppWindowModel: ObservableObject {
     @Published private(set) var conversations: [ConversationRow] = []
     @Published private(set) var activity: [ActivityEntry] = []
     @Published private(set) var workEntries: [WorkEntry] = []
+    @Published private(set) var runtimeStatus: [RuntimeStatusRow] = []
+    @Published private(set) var operationalReadiness: OperationalReadiness?
+    @Published private(set) var currentTask: TaskProgressSummary?
     @Published private(set) var isLoading = true
 
     private let conversationMemory: ConversationMemory
@@ -262,6 +353,8 @@ final class AppWindowModel: ObservableObject {
         async let turns = conversationMemory.turns
         async let recentActivity = activityLog.recent(200)
         async let recentWork = journal.recent(200)
+        async let readiness = OperationalReadiness.snapshot()
+        async let task = TaskStore.shared.currentTask()
 
         let loadedTurns = await turns
         conversations = loadedTurns
@@ -270,8 +363,24 @@ final class AppWindowModel: ObservableObject {
             .reversed()                       // newest first
         activity = await recentActivity
         workEntries = await recentWork
+        let recommendation = await RuntimeAdvisor.shared.refresh()
+        let capability = await RuntimeAdvisor.shared.capability()
+        let health = await LocalModelHealth.shared.snapshot()
+        runtimeStatus = Self.runtimeStatusRows(capability: capability,
+                                               recommendation: recommendation,
+                                               health: health)
+        operationalReadiness = await readiness
+        currentTask = (await task).map(Self.taskSummary)
         if selectedConversationID == nil { selectedConversationID = conversations.first?.id }
         isLoading = false
+    }
+
+    /// Update only the Home continuity card after TaskStore reports a durable
+    /// change. This avoids reloading unrelated conversation/activity snapshots
+    /// after every autonomous task step.
+    func refreshCurrentTask() async {
+        let task = await TaskStore.shared.currentTask()
+        currentTask = task.map(Self.taskSummary)
     }
 
     // MARK: Derived (computed off the snapshots)
@@ -293,6 +402,100 @@ final class AppWindowModel: ObservableObject {
     var conversationCount: Int { conversations.count }
     var tasksCompleted: Int { workEntries.filter { $0.ok }.count }
     var actionsTaken: Int { activity.count }
+
+    // MARK: Runtime status
+
+    nonisolated static func runtimeStatusRows(capability: RuntimeCapability,
+                                              recommendation: RuntimeRecommendation,
+                                              health: LocalModelHealth.Snapshot) -> [RuntimeStatusRow] {
+        let runtime: RuntimeStatusRow = {
+            let value: String
+            let tone: RuntimeStatusTone
+            switch recommendation.posture {
+            case .performance:
+                value = "Performance"
+                tone = .positive
+            case .balanced:
+                value = "Balanced"
+                tone = .positive
+            case .batterySaver:
+                value = "Battery saver"
+                tone = .neutral
+            case .cooldown:
+                value = "Cooling down"
+                tone = .neutral
+            case .constrained:
+                value = "Local work paused"
+                tone = .attention
+            }
+            let battery = capability.batteryPercent.map { " · \($0)% battery" } ?? ""
+            return RuntimeStatusRow(id: "runtime", title: "Runtime", value: value,
+                                    detail: recommendation.reason + battery,
+                                    symbol: "waveform.path.ecg", tone: tone)
+        }()
+
+        let localModel: RuntimeStatusRow = {
+            let value: String
+            let detail: String
+            let tone: RuntimeStatusTone
+            if health.failures > health.successes, health.failures > 0 {
+                value = "Needs attention"
+                detail = "Aria will fall back when local work is not reliable."
+                tone = .attention
+            } else if let latency = health.lastLatency {
+                value = String(format: "Ready · %.1fs last reply", latency)
+                detail = "Local work is available when this Mac has room."
+                tone = .positive
+            } else {
+                value = "Not measured yet"
+                detail = "Aria will check local readiness when needed."
+                tone = .neutral
+            }
+            return RuntimeStatusRow(id: "local-model", title: "Local model", value: value,
+                                    detail: detail, symbol: "cpu", tone: tone)
+        }()
+
+        let mac = RuntimeStatusRow(
+            id: "mac",
+            title: "This Mac",
+            value: "\(capability.chip) · \(capability.ramGB) GB memory",
+            detail: "\(capability.freeDiskGB) GB free for local work.",
+            symbol: "laptopcomputer",
+            tone: .neutral)
+
+        return [runtime, localModel, mac]
+    }
+
+    nonisolated static func operationalReadinessRows(_ readiness: OperationalReadiness) -> [OperationalReadinessRow] {
+        readiness.rows
+    }
+
+    nonisolated static func taskSummary(_ snapshot: CurrentTaskSnapshot) -> TaskProgressSummary {
+        let task = snapshot.task
+        let completed = task.steps.filter { $0.status == "done" }.count
+        let total = task.steps.count
+        let nextStep = task.steps.first { $0.status != "done" }?.summary
+        let progress = "\(completed) of \(total) step\(total == 1 ? "" : "s") complete"
+        switch snapshot.state {
+        case .running:
+            return TaskProgressSummary(
+                state: .running,
+                goal: task.goal,
+                value: "Working now",
+                progress: progress,
+                nextStep: nextStep,
+                detail: nextStep.map { "Next: \($0)" } ?? "Finishing up")
+        case .resumable:
+            return TaskProgressSummary(
+                state: .resumable,
+                goal: task.goal,
+                value: "Ready to resume",
+                progress: progress,
+                nextStep: nextStep,
+                detail: nextStep.map { "Say “resume” to continue with \($0)" }
+                    ?? "Say “resume” to continue")
+        }
+    }
 
     // MARK: - Pure helpers (unit-tested)
 

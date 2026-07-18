@@ -205,7 +205,7 @@ final class ConnectorTokenStoreTests: XCTestCase {
     func testDeleteRemovesTokens() throws {
         let (store, _) = memoryStore()
         try store.save(ConnectorTokens(accessToken: "AT", refreshToken: nil,
-                                       expiry: Date(), scopes: []), for: .slack)
+                                       expiry: Date().addingTimeInterval(3600), scopes: []), for: .slack)
         XCTAssertTrue(store.isConnected(.slack))
         store.delete(.slack)
         XCTAssertFalse(store.isConnected(.slack))
@@ -337,6 +337,17 @@ final class GoogleResponseParseTests: XCTestCase {
 
 final class ConnectorStoreActorTests: XCTestCase {
 
+    private func memoryTokenStore() -> ConnectorTokenStore {
+        final class Box: @unchecked Sendable { var values: [String: String] = [:] }
+        let box = Box()
+        let lock = NSLock()
+        return ConnectorTokenStore(
+            read: { key in lock.lock(); defer { lock.unlock() }; return box.values[key] },
+            write: { key, value in lock.lock(); box.values[key] = value; lock.unlock() },
+            remove: { key in lock.lock(); box.values[key] = nil; lock.unlock() }
+        )
+    }
+
     func testConnectThrowsNotConfigured() async {
         // The "no client ID ⇒ .notConfigured" contract is specific to bring-your-own
         // mode; in relay mode the relay supplies the client and connect
@@ -377,6 +388,66 @@ final class ConnectorStoreActorTests: XCTestCase {
         XCTAssertEqual(statuses.count, ConnectorID.allCases.count)
         let google = statuses.first { $0.id == .google }
         XCTAssertEqual(google?.isConnected, false)
+    }
+
+    func testExpiredTokenWithoutRefreshIsNotConnectedAndIsClearedOnUse() async throws {
+        let tokens = memoryTokenStore()
+        try tokens.save(ConnectorTokens(accessToken: "expired", refreshToken: nil,
+                                        expiry: .distantPast, scopes: []), for: .google)
+        let store = ConnectorStore(tokenStore: tokens,
+                                   resolveClientID: { _ in "client-id" })
+
+        let status = await store.status(.google)
+        XCTAssertFalse(status.isConnected)
+
+        let accessToken = await store.validAccessToken(.google)
+        XCTAssertNil(accessToken)
+        XCTAssertNil(tokens.load(.google))
+    }
+
+    func testExpiredTokenWithRefreshRemainsConnected() async throws {
+        let tokens = memoryTokenStore()
+        try tokens.save(ConnectorTokens(accessToken: "expired", refreshToken: "renewable",
+                                        expiry: .distantPast, scopes: []), for: .google)
+        let store = ConnectorStore(tokenStore: tokens,
+                                   resolveClientID: { _ in "client-id" })
+
+        let status = await store.status(.google)
+        XCTAssertTrue(status.isConnected)
+    }
+
+    func testTerminalRefreshFailureClearsUnusableCredential() async throws {
+        let tokens = memoryTokenStore()
+        try tokens.save(ConnectorTokens(accessToken: "expired", refreshToken: "revoked",
+                                        expiry: .distantPast, scopes: []), for: .google)
+        let store = ConnectorStore(
+            tokenStore: tokens,
+            refresh: { _, _, _ in throw OAuth2.OAuth2Error.tokenExchangeFailed(400) },
+            resolveClientID: { _ in "client-id" })
+
+        let accessToken = await store.validAccessToken(.google)
+        let status = await store.status(.google)
+
+        XCTAssertNil(accessToken)
+        XCTAssertNil(tokens.load(.google))
+        XCTAssertFalse(status.isConnected)
+    }
+
+    func testTransientRefreshFailureRetainsRenewableCredential() async throws {
+        let tokens = memoryTokenStore()
+        try tokens.save(ConnectorTokens(accessToken: "expired", refreshToken: "retry-later",
+                                        expiry: .distantPast, scopes: []), for: .google)
+        let store = ConnectorStore(
+            tokenStore: tokens,
+            refresh: { _, _, _ in throw OAuth2.OAuth2Error.tokenExchangeFailed(503) },
+            resolveClientID: { _ in "client-id" })
+
+        let accessToken = await store.validAccessToken(.google)
+        let status = await store.status(.google)
+
+        XCTAssertNil(accessToken)
+        XCTAssertNotNil(tokens.load(.google))
+        XCTAssertTrue(status.isConnected)
     }
 
     func testConnectorStatusToolNeverCrashesUnconfigured() async throws {

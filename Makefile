@@ -24,7 +24,7 @@ ifeq ($(strip $(SIGN_ID)),)
 SIGN_ID := -
 endif
 
-.PHONY: build test run release verify-release smoke dmg notarize clean xcode cert
+.PHONY: build test evaluate run release verify-release smoke dmg notarize clean xcode cert
 
 DMG   := $(BUILD_DIR)/$(APP_NAME).dmg
 STAGE := $(BUILD_DIR)/dmg-stage
@@ -35,13 +35,18 @@ build:
 test:
 	swift test
 
+# Runs the deterministic evaluation release gate. It is deliberately local:
+# no model, accounts, network, or hardware are needed for this evidence.
+evaluate:
+	swift test --filter EvaluationGateTests
+
 # Run the raw executable (menu-bar app; no Dock icon due to LSUIElement).
 run: build
 	swift run $(APP_NAME)
 
 # Assemble a proper .app bundle and codesign ad-hoc so permission
 # dialogs (mic / screen recording) attribute to "Aria".
-release: verify-release
+release: evaluate verify-release
 	# SHIPS THE DEBUG-CONFIGURATION BINARY — deliberately. On macOS 26.3.1 every
 	# release-config build (with WMO off, even with -Onone) crashes on the first
 	# SwiftUI control tap: garbage executor ref in
