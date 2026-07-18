@@ -23,10 +23,15 @@ struct ResearchTool: AriaTool {
         let depth = input["depth"] ?? "quick"
         let maxSources = depth == "deep" ? 5 : 3
 
-        let report = await engine.research(topic: topic, maxSources: maxSources) { [gemini] prompt in
+        let outcome = await engine.research(topic: topic, maxSources: maxSources) { [gemini] prompt in
             try await gemini.generateText(prompt: prompt, temperature: 0.3)
         }
 
-        return .ok("Research complete on '\(topic)': \(report.sections.count) sections, \(report.sources.count) sources used. Saved.")
+        let report = outcome.report
+        let summary = "Research complete on '\(topic)': \(report.sections.count) sections, \(report.sources.count) sources used."
+        if let savedURL = outcome.savedURL {
+            return .ok("\(summary) Saved to \(savedURL.path).")
+        }
+        return .ok("\(summary) Not saved locally.")
     }
 }

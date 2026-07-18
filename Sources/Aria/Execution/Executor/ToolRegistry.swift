@@ -5,7 +5,13 @@ import Foundation
 actor ToolRegistry {
     private var tools: [String: AriaTool] = [:]
 
-    init(tools: [AriaTool] = ToolRegistry.builtins()) {
+    init(automationStore: AgentStore = .shared) {
+        for tool in ToolRegistry.builtins(automationStore: automationStore) {
+            self.tools[type(of: tool).name] = tool
+        }
+    }
+
+    init(tools: [AriaTool]) {
         for tool in tools { self.tools[type(of: tool).name] = tool }
     }
 
@@ -33,7 +39,7 @@ actor ToolRegistry {
     }
 
     /// The default built-in tool set.
-    static func builtins() -> [AriaTool] {
+    static func builtins(automationStore: AgentStore = .shared) -> [AriaTool] {
         [
             ShellTool(),
             AppleScriptTool(),
@@ -113,8 +119,8 @@ actor ToolRegistry {
             ResearchTool(),
             DocReadTool(),
             DocSummarizeTool(),
-            AutomationCreateTool(),
-            AutomationListTool(),
+            AutomationCreateTool(store: automationStore),
+            AutomationListTool(store: automationStore),
             EmailTaskTool(),
             AgendaTool(),
             FollowUpTool(),

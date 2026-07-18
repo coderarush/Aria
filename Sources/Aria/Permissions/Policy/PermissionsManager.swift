@@ -7,7 +7,7 @@ import Speech
 /// system prompts on first capture attempt).
 enum PermissionsManager {
 
-    enum Status {
+    enum Status: Equatable, Sendable {
         case granted, denied, undetermined
     }
 

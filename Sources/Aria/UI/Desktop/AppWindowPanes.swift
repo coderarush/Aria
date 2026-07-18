@@ -14,6 +14,9 @@ struct HomePane: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
                 hero
+                if let task = model.currentTask { TaskProgressCard(task: task) }
+                runtimeStatus
+                capabilities
                 stats
                 quickActions
                 Spacer(minLength: 8)
@@ -25,20 +28,66 @@ struct HomePane: View {
     }
 
     private var hero: some View {
-        AriaCard(padding: 26) {
+        let focus = HomeFocusPresentation.from(task: model.currentTask, readiness: model.operationalReadiness)
+        return AriaCard(padding: 26) {
             HStack(alignment: .center, spacing: 24) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(AppWindowModel.greeting())
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Now")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+                    Text(focus.title)
                         .font(.system(size: 30, weight: .bold, design: .rounded))
-                    Text("I'm ready when you are. Say “Hey Aria”, press your hotkey, or pick up where we left off.")
+                    Text(focus.detail)
                         .font(.system(size: 14))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: 460, alignment: .leading)
+                    Button(action: { perform(focus.action) }) {
+                        Label(actionTitle(for: focus.action), systemImage: actionSymbol(for: focus.action))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.regular)
+                    .accessibilityHint(actionHint(for: focus.action))
                 }
                 Spacer(minLength: 0)
                 AppBlobMark(size: 128, animated: true)
             }
+        }
+    }
+
+    private func perform(_ action: HomeFocusAction) {
+        switch action {
+        case .askAria:
+            NotificationCenter.default.post(name: .ariaShowCommandPalette, object: nil)
+        case .resumeTask:
+            NotificationCenter.default.post(name: .ariaResumeTask, object: nil)
+        case .openSetup:
+            NotificationCenter.default.post(name: .ariaOpenSettings, object: nil)
+        }
+    }
+
+    private func actionTitle(for action: HomeFocusAction) -> String {
+        switch action {
+        case .askAria: return "Ask Aria"
+        case .resumeTask: return "Resume task"
+        case .openSetup: return "Review access"
+        }
+    }
+
+    private func actionSymbol(for action: HomeFocusAction) -> String {
+        switch action {
+        case .askAria: return "command"
+        case .resumeTask: return "play.fill"
+        case .openSetup: return "gearshape"
+        }
+    }
+
+    private func actionHint(for action: HomeFocusAction) -> String {
+        switch action {
+        case .askAria: return "Opens the command palette."
+        case .resumeTask: return "Shows a confirmation before restarting the saved task."
+        case .openSetup: return "Opens settings for required access."
         }
     }
 
@@ -57,6 +106,17 @@ struct HomePane: View {
                      label: "Actions taken",
                      tint: Color(red: 0.96, green: 0.70, blue: 0.20))
         }
+    }
+
+    private var runtimeStatus: some View {
+        RuntimeStatusCard(rows: model.runtimeStatus)
+    }
+
+    private var capabilities: some View {
+        OperationalReadinessCard(
+            readiness: model.operationalReadiness,
+            openSettings: { NotificationCenter.default.post(name: .ariaOpenSettings, object: nil) },
+            openConnectors: { model.section = .connectors })
     }
 
     private var quickActions: some View {
@@ -86,6 +146,252 @@ struct HomePane: View {
                 }
             }
         }
+    }
+}
+
+private struct TaskProgressCard: View {
+    let task: TaskProgressSummary
+
+    private var tone: Color {
+        task.state == .running ? .green : .orange
+    }
+
+    private var symbol: String {
+        task.state == .running ? "arrow.triangle.2.circlepath" : "arrow.clockwise.circle"
+    }
+
+    var body: some View {
+        AriaCard(padding: 20) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Label("Task continuity", systemImage: symbol)
+                        .font(.system(size: 15, weight: .semibold))
+                    Spacer()
+                    Text(task.value)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(tone)
+                }
+                Text(task.goal)
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .lineLimit(2)
+                HStack(spacing: 8) {
+                    Image(systemName: "checklist")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(tone)
+                    Text(task.progress)
+                        .font(.system(size: 12.5, weight: .medium))
+                    if let nextStep = task.nextStep {
+                        Divider().frame(height: 14)
+                        Text("Next: \(nextStep)")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Text(task.detail)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                if task.canResume {
+                    Button {
+                        NotificationCenter.default.post(name: .ariaResumeTask, object: nil)
+                    } label: {
+                        Label("Resume task", systemImage: "play.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .accessibilityHint("Shows a confirmation before restarting the saved task.")
+                }
+            }
+            .accessibilityElement(children: .contain)
+        }
+    }
+}
+
+private struct RuntimeStatusCard: View {
+    let rows: [RuntimeStatusRow]
+
+    var body: some View {
+        AriaCard(padding: 20) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Label("Aria status", systemImage: "waveform.path.ecg")
+                        .font(.system(size: 15, weight: .semibold))
+                    Spacer()
+                    Text("Live")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+
+                if rows.isEmpty {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Checking this Mac…")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .top, spacing: 0) {
+                            runtimeCells(vertical: false)
+                        }
+                        VStack(alignment: .leading, spacing: 12) {
+                            runtimeCells(vertical: true)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func runtimeCells(vertical: Bool) -> some View {
+        ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+            if index > 0 {
+                if vertical {
+                    Divider().opacity(0.45)
+                } else {
+                    Divider().opacity(0.45)
+                }
+            }
+            RuntimeStatusCell(row: row)
+                .frame(minWidth: vertical ? nil : 160, maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+private struct RuntimeStatusCell: View {
+    let row: RuntimeStatusRow
+
+    private var tone: Color {
+        switch row.tone {
+        case .positive: return .green
+        case .neutral: return .secondary
+        case .attention: return .orange
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: row.symbol)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(tone)
+                .frame(width: 28, height: 28)
+                .background(tone.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(row.title)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Text(row.value)
+                    .font(.system(size: 13, weight: .semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(row.detail)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 10)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct OperationalReadinessCard: View {
+    let readiness: OperationalReadiness?
+    let openSettings: () -> Void
+    let openConnectors: () -> Void
+
+    var body: some View {
+        AriaCard(padding: 20) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Label("Capabilities", systemImage: "checklist.checked")
+                        .font(.system(size: 15, weight: .semibold))
+                    Spacer()
+                    if let readiness, !readiness.needsSettings, !readiness.needsConnectors {
+                        Text("Ready")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.green)
+                    }
+                }
+
+                if let readiness {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .top, spacing: 0) {
+                            readinessCells(readiness.rows, vertical: false)
+                        }
+                        VStack(alignment: .leading, spacing: 12) {
+                            readinessCells(readiness.rows, vertical: true)
+                        }
+                    }
+                    if readiness.needsSettings || readiness.needsConnectors {
+                        HStack(spacing: 10) {
+                            if readiness.needsSettings {
+                                Button(action: openSettings) {
+                                    Label("Review access", systemImage: "gearshape")
+                                }
+                            }
+                            if readiness.needsConnectors {
+                                Button(action: openConnectors) {
+                                    Label("Connect apps", systemImage: "link")
+                                }
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                } else {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Checking capabilities…")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func readinessCells(_ rows: [OperationalReadinessRow], vertical: Bool) -> some View {
+        ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+            if index > 0 { Divider().opacity(0.45) }
+            OperationalReadinessCell(row: row)
+                .frame(minWidth: vertical ? nil : 135, maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+private struct OperationalReadinessCell: View {
+    let row: OperationalReadinessRow
+
+    private var tone: Color {
+        switch row.tone {
+        case .positive: return .green
+        case .neutral: return .secondary
+        case .attention: return .orange
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: row.symbol)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(tone)
+                .frame(width: 28, height: 28)
+                .background(tone.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(row.title)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Text(row.value)
+                    .font(.system(size: 13, weight: .semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(row.detail)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 10)
+        .accessibilityElement(children: .combine)
     }
 }
 

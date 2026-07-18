@@ -93,4 +93,18 @@ final class LocalModelSetupTests: XCTestCase {
         XCTAssertEqual(snap.failures, 1)
         XCTAssertEqual(snap.lastLatency ?? 0, 0.8, accuracy: 0.001)
     }
+
+    func testHealthUsesRecentWindowAfterMinimumObservations() async {
+        let health = LocalModelHealth(window: 60, maximumObservations: 8)
+        let start = Date(timeIntervalSince1970: 1_000)
+
+        await health.record(ok: false, latency: 0, error: "timeout", at: start)
+        let beforeMinimum = await health.snapshot(at: start)
+        XCTAssertNil(beforeMinimum.recentFailureRate)
+        await health.record(ok: true, latency: 0.2, at: start.addingTimeInterval(1))
+
+        let snapshot = await health.snapshot(at: start.addingTimeInterval(1))
+        XCTAssertEqual(snapshot.recentObservationCount, 2)
+        XCTAssertEqual(snapshot.recentFailureRate ?? -1, 0.5, accuracy: 0.000_1)
+    }
 }

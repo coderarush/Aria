@@ -11,8 +11,16 @@ struct FocusMode: Codable, Equatable, Sendable {
 
     /// The deterministic plan: open everything needed, then close distractions.
     func taskSteps() -> [TaskStep] {
-        openApps.map { TaskStep(summary: "Open \($0)", executor: .tool("open_app"), input: ["name": $0]) }
-        + closeApps.map { TaskStep(summary: "Close \($0)", executor: .tool("quit_app"), input: ["name": $0]) }
+        openApps.map { app in
+            var step = TaskStep(summary: "Open \(app)", executor: .tool("open_app"), input: ["name": app])
+            step.postCondition = .appRunning(app)
+            return step
+        }
+        + closeApps.map { app in
+            var step = TaskStep(summary: "Close \(app)", executor: .tool("quit_app"), input: ["name": app])
+            step.postCondition = .appNotRunning(app)
+            return step
+        }
     }
 
     // MARK: presets (V11: Student / Founder / Developer / Custom)

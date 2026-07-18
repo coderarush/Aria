@@ -3,8 +3,13 @@ import XCTest
 
 final class ToolTests: XCTestCase {
 
+    private func tempAgentStoreURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("tool-registry-agents-\(UUID().uuidString).json")
+    }
+
     func testRegistryLookupAndCatalog() async {
-        let registry = ToolRegistry()
+        let registry = ToolRegistry(automationStore: AgentStore(fileURL: tempAgentStoreURL()))
         let shell = await registry.tool(named: "shell")
         XCTAssertNotNil(shell)
         let missing = await registry.tool(named: "nope")
@@ -12,6 +17,29 @@ final class ToolTests: XCTestCase {
         let catalog = await registry.catalog()
         XCTAssertTrue(catalog.contains("shell:"))
         XCTAssertTrue(catalog.contains("web_search:"))
+    }
+
+    func testInjectedFullRegistryAutomationToolsUseOnlyInjectedStore() async throws {
+        let storeURL = tempAgentStoreURL()
+        let store = AgentStore(fileURL: storeURL)
+        let registry = ToolRegistry(automationStore: store)
+        guard let create = await registry.tool(named: AutomationCreateTool.name),
+              let list = await registry.tool(named: AutomationListTool.name) else {
+            return XCTFail("full registry must expose both automation tools")
+        }
+
+        let created = try await create.run(input: [
+            "name": "Injected registry automation",
+            "trigger_type": "daily",
+            "trigger_value": "09:30",
+            "goal": "Prove registry automation storage is isolated"
+        ])
+        let listed = try await list.run(input: [:])
+        let persisted = await AgentStore(fileURL: storeURL).all()
+
+        XCTAssertTrue(created.success)
+        XCTAssertEqual(persisted.map(\.name), ["Injected registry automation"])
+        XCTAssertTrue(listed.output.contains("Injected registry automation"))
     }
 
     func testFileWriteThenRead() async throws {

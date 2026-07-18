@@ -8,12 +8,13 @@ final class AutomationToolTests: XCTestCase {
             .appendingPathComponent("agents-automation-\(UUID().uuidString).json")
     }
 
-    // Note: AutomationCreateTool uses AgentStore.shared, which we can't inject.
-    // We test the outcomes by observing what gets stored in the shared store,
-    // but we clean up by name after each test.
+    private func store() -> AgentStore {
+        AgentStore(fileURL: tempStoreURL())
+    }
 
     func testCreateEmailAutomation() async throws {
-        let tool = AutomationCreateTool()
+        let store = store()
+        let tool = AutomationCreateTool(store: store)
         let result = try await tool.run(input: [
             "name": "Boss emails",
             "trigger_type": "email",
@@ -25,7 +26,7 @@ final class AutomationToolTests: XCTestCase {
         XCTAssertTrue(result.output.contains("from:boss@company.com"))
 
         // Verify it was stored
-        let all = await AgentStore.shared.all()
+        let all = await store.all()
         let stored = all.first { $0.name == "Boss emails" }
         XCTAssertNotNil(stored)
         if case .mailMatched(let q) = stored?.trigger {
@@ -35,8 +36,9 @@ final class AutomationToolTests: XCTestCase {
         }
     }
 
-    func testCreateCalendarAutomation() async throws {
-        let tool = AutomationCreateTool()
+    func testCreateCalendarAutomationUsesInjectedStore() async throws {
+        let store = store()
+        let tool = AutomationCreateTool(store: store)
         let result = try await tool.run(input: [
             "name": "Standup prep",
             "trigger_type": "calendar",
@@ -46,7 +48,7 @@ final class AutomationToolTests: XCTestCase {
         XCTAssertTrue(result.success)
         XCTAssertTrue(result.output.contains("Standup prep"))
 
-        let all = await AgentStore.shared.all()
+        let all = await store.all()
         let stored = all.first { $0.name == "Standup prep" }
         XCTAssertNotNil(stored)
         if case .calendarEventSoon(let title, let mins) = stored?.trigger {
@@ -58,7 +60,8 @@ final class AutomationToolTests: XCTestCase {
     }
 
     func testCreateDailyAutomation() async throws {
-        let tool = AutomationCreateTool()
+        let store = store()
+        let tool = AutomationCreateTool(store: store)
         let result = try await tool.run(input: [
             "name": "Morning briefing",
             "trigger_type": "daily",
@@ -67,7 +70,7 @@ final class AutomationToolTests: XCTestCase {
         ])
         XCTAssertTrue(result.success)
 
-        let all = await AgentStore.shared.all()
+        let all = await store.all()
         let stored = all.first { $0.name == "Morning briefing" }
         XCTAssertNotNil(stored)
         if case .daily(let h, let m) = stored?.trigger {
@@ -79,7 +82,8 @@ final class AutomationToolTests: XCTestCase {
     }
 
     func testCreateIntervalAutomation() async throws {
-        let tool = AutomationCreateTool()
+        let store = store()
+        let tool = AutomationCreateTool(store: store)
         let result = try await tool.run(input: [
             "name": "Hourly check",
             "trigger_type": "interval",
@@ -88,7 +92,7 @@ final class AutomationToolTests: XCTestCase {
         ])
         XCTAssertTrue(result.success)
 
-        let all = await AgentStore.shared.all()
+        let all = await store.all()
         let stored = all.first { $0.name == "Hourly check" }
         XCTAssertNotNil(stored)
         if case .interval(let s) = stored?.trigger {
@@ -99,7 +103,8 @@ final class AutomationToolTests: XCTestCase {
     }
 
     func testCreateMissingNameReturnsError() async throws {
-        let tool = AutomationCreateTool()
+        let store = store()
+        let tool = AutomationCreateTool(store: store)
         let result = try await tool.run(input: [
             "trigger_type": "email",
             "trigger_value": "from:boss",
@@ -110,7 +115,8 @@ final class AutomationToolTests: XCTestCase {
     }
 
     func testCreateMissingGoalReturnsError() async throws {
-        let tool = AutomationCreateTool()
+        let store = store()
+        let tool = AutomationCreateTool(store: store)
         let result = try await tool.run(input: [
             "name": "Test",
             "trigger_type": "email",
@@ -121,7 +127,8 @@ final class AutomationToolTests: XCTestCase {
     }
 
     func testCreateBadDailyFormatReturnsError() async throws {
-        let tool = AutomationCreateTool()
+        let store = store()
+        let tool = AutomationCreateTool(store: store)
         let result = try await tool.run(input: [
             "name": "Bad daily",
             "trigger_type": "daily",
@@ -132,7 +139,8 @@ final class AutomationToolTests: XCTestCase {
     }
 
     func testCreateBadIntervalFormatReturnsError() async throws {
-        let tool = AutomationCreateTool()
+        let store = store()
+        let tool = AutomationCreateTool(store: store)
         let result = try await tool.run(input: [
             "name": "Bad interval",
             "trigger_type": "interval",
@@ -143,7 +151,8 @@ final class AutomationToolTests: XCTestCase {
     }
 
     func testCreateUnknownTriggerTypeReturnsError() async throws {
-        let tool = AutomationCreateTool()
+        let store = store()
+        let tool = AutomationCreateTool(store: store)
         let result = try await tool.run(input: [
             "name": "Bad type",
             "trigger_type": "webhook",
@@ -153,18 +162,16 @@ final class AutomationToolTests: XCTestCase {
         XCTAssertFalse(result.success)
     }
 
-    func testListReturnsFormattedAutomations() async throws {
-        // Create one
-        let createTool = AutomationCreateTool()
-        _ = try await createTool.run(input: [
+    func testListReadsOnlyItsInjectedStore() async throws {
+        let store = store()
+        _ = try await AutomationCreateTool(store: store).run(input: [
             "name": "List test agent",
             "trigger_type": "email",
             "trigger_value": "from:alice",
             "goal": "Reply to Alice"
         ])
 
-        let listTool = AutomationListTool()
-        let result = try await listTool.run(input: [:])
+        let result = try await AutomationListTool(store: store).run(input: [:])
         XCTAssertTrue(result.success)
         XCTAssertTrue(result.output.contains("List test agent"))
         XCTAssertTrue(result.output.contains("Goal: Reply to Alice"))

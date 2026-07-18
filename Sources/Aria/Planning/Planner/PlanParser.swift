@@ -15,9 +15,47 @@ enum PlanParser {
             let input = (obj["input"] as? [String: Any])?.reduce(into: [String: String]()) {
                 $0[$1.key] = String(describing: $1.value)
             } ?? [:]
-            if let agent = obj["agent"] as? String { return TaskStep(summary: summary, executor: .agent(agent), input: input) }
-            if let tool = obj["tool"] as? String { return TaskStep(summary: summary, executor: .tool(tool), input: input) }
+            if let agent = obj["agent"] as? String {
+                var step = TaskStep(summary: summary, executor: .agent(agent), input: input)
+                step.postCondition = condition(from: obj["verify"], input: input, tool: nil)
+                return step
+            }
+            if let tool = obj["tool"] as? String {
+                var step = TaskStep(summary: summary, executor: .tool(tool), input: input)
+                step.postCondition = condition(from: obj["verify"], input: input, tool: tool)
+                return step
+            }
             return nil
+        }
+    }
+
+    /// The planner may request only local, deterministic checks. Unknown forms
+    /// intentionally become `.none`: an invented verifier must never cause a
+    /// false claim or silently change a plan's meaning.
+    private static func condition(from raw: Any?, input: [String: String], tool: String?) -> PostCondition {
+        guard let verify = raw as? [String: Any],
+              let kind = verify["kind"] as? String
+        else { return .none }
+        switch kind.lowercased() {
+        case "app_running":
+            guard let name = verify["name"] as? String, !name.isEmpty else { return .none }
+            return .appRunning(name)
+        case "app_not_running":
+            guard let name = verify["name"] as? String, !name.isEmpty else { return .none }
+            return .appNotRunning(name)
+        case "file_exists":
+            guard let path = verify["path"] as? String,
+                  !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  tool == "file_write",
+                  input["path"] == path else { return .none }
+            return .fileExists(path)
+        case "result_contains":
+            guard let text = verify["text"] as? String, !text.isEmpty else { return .none }
+            return .resultContains(text)
+        case "succeeded":
+            return .succeeded
+        default:
+            return .none
         }
     }
 }

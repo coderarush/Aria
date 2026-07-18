@@ -16,4 +16,22 @@ final class PlanParserTests: XCTestCase {
     func testReturnsEmptyOnGarbage() {
         XCTAssertTrue(PlanParser.steps(fromJSON: "not json").isEmpty)
     }
+
+    func testParsesWhitelistedVerificationContracts() {
+        let json = """
+        [{"summary":"Open Notes","tool":"open_app","input":{"name":"Notes"},"verify":{"kind":"app_running","name":"Notes"}},
+         {"summary":"Close Mail","tool":"quit_app","input":{"name":"Mail"},"verify":{"kind":"app_not_running","name":"Mail"}},
+         {"summary":"Save draft","tool":"file_write","input":{"path":"/tmp/draft.md"},"verify":{"kind":"file_exists","path":"/tmp/draft.md"}},
+         {"summary":"Ignore malformed file check","tool":"file_write","verify":{"kind":"file_exists","path":"   "}},
+         {"summary":"Ignore unrelated file check","tool":"file_write","input":{"path":"/tmp/draft.md"},"verify":{"kind":"file_exists","path":"/tmp/unrelated.md"}},
+         {"summary":"Ignore unknown","tool":"open_app","verify":{"kind":"screenshot_matches","name":"x"}}]
+        """
+        let steps = PlanParser.steps(fromJSON: json)
+        XCTAssertEqual(steps[0].postCondition, .appRunning("Notes"))
+        XCTAssertEqual(steps[1].postCondition, .appNotRunning("Mail"))
+        XCTAssertEqual(steps[2].postCondition, .fileExists("/tmp/draft.md"))
+        XCTAssertEqual(steps[3].postCondition, .none)
+        XCTAssertEqual(steps[4].postCondition, .none)
+        XCTAssertEqual(steps[5].postCondition, .none)
+    }
 }

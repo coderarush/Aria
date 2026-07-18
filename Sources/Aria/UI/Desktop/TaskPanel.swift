@@ -13,7 +13,7 @@ final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
 final class TaskPanel: NSPanel {
     init(viewModel: TaskViewModel) {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 440, height: 200),
+            contentRect: NSRect(x: 0, y: 0, width: 440, height: 420),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false)

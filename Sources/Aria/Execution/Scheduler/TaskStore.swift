@@ -1,16 +1,25 @@
 import Foundation
 
+extension Notification.Name {
+    /// Carries no task content. Desktop surfaces re-read their privacy-safe
+    /// snapshot after this event rather than retaining execution data themselves.
+    static let ariaTaskStoreDidChange = Notification.Name("aria.taskStoreDidChange")
+}
+
 /// On-disk snapshot of an in-flight multi-step task, so a long objective survives a
 /// crash or quit and can be resumed (directive P6: resumable workflows). One active
 /// task at a time, in Application Support/Aria/active-task.json.
-struct PersistedTask: Codable, Equatable {
-    struct Step: Codable, Equatable {
+struct PersistedTask: Codable, Equatable, Sendable {
+    struct Step: Codable, Equatable, Sendable {
         var summary: String
         var kind: String          // "tool" | "agent"
         var name: String
         var input: [String: String]
         var status: String        // "pending" | "done" | "failed"
         var result: String
+        /// Optional so active-task files created before verified contracts remain
+        /// decodable and resume with the old `.none` behavior.
+        var postCondition: PostCondition?
     }
     var goal: String
     var steps: [Step]
@@ -43,7 +52,8 @@ struct PersistedTask: Codable, Equatable {
                 case .agent(let n): kind = "agent"; name = n
                 }
                 return Step(summary: s.summary, kind: kind, name: name, input: s.input,
-                            status: statusString(s.status), result: s.result)
+                            status: statusString(s.status), result: s.result,
+                            postCondition: s.postCondition)
             },
             lastOutput: lastOutput, updatedAt: now)
     }
@@ -55,6 +65,7 @@ struct PersistedTask: Codable, Equatable {
             var step = TaskStep(summary: s.summary, executor: exec, input: s.input)
             step.status = (s.status == "done") ? .done : (s.status == "failed" ? .failed : .pending)
             step.result = s.result
+            step.postCondition = s.postCondition ?? .none
             return step
         }
     }
@@ -63,6 +74,23 @@ struct PersistedTask: Codable, Equatable {
     func completedPairs() -> [(summary: String, output: String)] {
         steps.filter { $0.status == "done" }.map { (summary: $0.summary, output: $0.result) }
     }
+}
+
+/// Whether the active-task snapshot belongs to an execution still running in
+/// this process or work discovered after launch that can be resumed. This is
+/// deliberately process-local: timestamps would guess, while this state is
+/// exact for both cases.
+enum TaskRunState: Sendable, Equatable {
+    case running
+    case resumable
+}
+
+/// The privacy-safe store result used by surfaces that need task continuity.
+/// Consumers render only task metadata; raw input and output remain in the
+/// persisted task for execution/resume, not dashboard presentation.
+struct CurrentTaskSnapshot: Sendable, Equatable {
+    let task: PersistedTask
+    let state: TaskRunState
 }
 
 /// Detects a command asking to resume the interrupted task — deterministic, zero quota.
@@ -78,11 +106,23 @@ enum ResumeIntent {
     }
 }
 
+/// Notification copy for interrupted work. It intentionally accepts only a
+/// count, so a task goal, step summary, input, or output cannot reach a
+/// system notification that may be visible outside Aria.
+enum ResumeNotificationPresentation {
+    static func body(remainingSteps: Int) -> String {
+        let count = max(remainingSteps, 0)
+        let steps = count == 1 ? "1 step" : "\(count) steps"
+        return "An unfinished task is ready to resume (\(steps) left). Open Aria or say “resume” to continue."
+    }
+}
+
 /// Persists the single active task. An actor — written from the autonomy loop.
 actor TaskStore {
     static let shared = TaskStore()
 
     private let url: URL
+    private var isRunningInCurrentProcess = false
     init(url: URL? = nil) { self.url = url ?? TaskStore.defaultURL() }
 
     static func defaultURL() -> URL {
@@ -92,9 +132,15 @@ actor TaskStore {
 
     func save(_ task: PersistedTask) {
         guard let data = try? JSONEncoder().encode(task) else { return }
-        try? FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? data.write(to: url, options: .atomic)
+        do {
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try data.write(to: url, options: .atomic)
+            isRunningInCurrentProcess = true
+            NotificationCenter.default.post(name: .ariaTaskStoreDidChange, object: nil)
+        } catch {
+            Log.trace("task store: couldn't persist active task")
+        }
     }
 
     func load() -> PersistedTask? {
@@ -103,11 +149,23 @@ actor TaskStore {
         return t
     }
 
-    func clear() { try? FileManager.default.removeItem(at: url) }
+    func clear() {
+        isRunningInCurrentProcess = false
+        try? FileManager.default.removeItem(at: url)
+        NotificationCenter.default.post(name: .ariaTaskStoreDidChange, object: nil)
+    }
 
     /// A resumable task: one that exists and still has unfinished steps.
     func pending() -> PersistedTask? {
         guard let t = load(), !t.isFinished, t.unfinishedCount > 0 else { return nil }
         return t
+    }
+
+    /// The active task with an exact current-process/relaunch distinction for
+    /// Home and other read-only surfaces.
+    func currentTask() -> CurrentTaskSnapshot? {
+        guard let task = pending() else { return nil }
+        return CurrentTaskSnapshot(task: task,
+                                   state: isRunningInCurrentProcess ? .running : .resumable)
     }
 }

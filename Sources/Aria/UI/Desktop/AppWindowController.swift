@@ -6,6 +6,12 @@ extension Notification.Name {
     /// as a fallback) opens the existing SettingsView in response — keeping the
     /// settings UI as the single source of truth (no duplication here).
     static let ariaOpenSettings = Notification.Name("aria.openSettings")
+    /// Posted only by the Home continuity card. AriaController owns the
+    /// confirmation and execution path; the view never resumes work itself.
+    static let ariaResumeTask = Notification.Name("aria.resumeTask")
+    /// Posted by an in-app affordance that wants the existing typed-command
+    /// palette. It carries no command content or task state.
+    static let ariaShowCommandPalette = Notification.Name("aria.showCommandPalette")
 }
 
 /// Hosts Aria's premium main window. A single, reused, centered window with a

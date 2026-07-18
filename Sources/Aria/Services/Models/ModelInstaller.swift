@@ -151,13 +151,43 @@ actor LocalModelHealth {
         let lastLatency: Double?
         let lastError: String?
         let lastSuccessAt: Date?
+        let recentObservationCount: Int
+        let recentFailureRate: Double?
+
+        init(successes: Int, failures: Int, lastLatency: Double?, lastError: String?,
+             lastSuccessAt: Date?, recentObservationCount: Int = 0,
+             recentFailureRate: Double? = nil) {
+            self.successes = successes
+            self.failures = failures
+            self.lastLatency = lastLatency
+            self.lastError = lastError
+            self.lastSuccessAt = lastSuccessAt
+            self.recentObservationCount = recentObservationCount
+            self.recentFailureRate = recentFailureRate
+        }
     }
 
+    private struct Observation: Sendable {
+        let ok: Bool
+        let at: Date
+    }
+
+    private let window: TimeInterval
+    private let maximumObservations: Int
     private var successes = 0
     private var failures = 0
     private var lastLatency: Double?
     private var lastError: String?
     private var lastSuccessAt: Date?
+
+    /// Keeps recovery responsive: failures older than ten minutes should not
+    /// pin a healthy local model in cooldown for the rest of the app session.
+    private var observations: [Observation] = []
+
+    init(window: TimeInterval = 10 * 60, maximumObservations: Int = 20) {
+        self.window = max(0, window)
+        self.maximumObservations = max(2, maximumObservations)
+    }
 
     func record(ok: Bool, latency: Double, error: String? = nil, at date: Date = Date()) {
         if ok {
@@ -168,10 +198,25 @@ actor LocalModelHealth {
             failures += 1
             lastError = error
         }
+        observations.append(Observation(ok: ok, at: date))
+        prune(at: date)
     }
 
-    func snapshot() -> Snapshot {
-        Snapshot(successes: successes, failures: failures, lastLatency: lastLatency,
-                 lastError: lastError, lastSuccessAt: lastSuccessAt)
+    func snapshot(at date: Date = Date()) -> Snapshot {
+        prune(at: date)
+        let recentFailureRate: Double? = observations.count >= 2
+            ? Double(observations.filter { !$0.ok }.count) / Double(observations.count)
+            : nil
+        return Snapshot(successes: successes, failures: failures, lastLatency: lastLatency,
+                        lastError: lastError, lastSuccessAt: lastSuccessAt,
+                        recentObservationCount: observations.count,
+                        recentFailureRate: recentFailureRate)
+    }
+
+    private func prune(at date: Date) {
+        observations.removeAll { date.timeIntervalSince($0.at) > window }
+        if observations.count > maximumObservations {
+            observations.removeFirst(observations.count - maximumObservations)
+        }
     }
 }

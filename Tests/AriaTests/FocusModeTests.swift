@@ -42,8 +42,10 @@ final class FocusModeTests: XCTestCase {
         XCTAssertEqual(steps.count, 4)
         XCTAssertEqual(steps[0].executor, .tool("open_app"))
         XCTAssertEqual(steps[0].input["name"], "Visual Studio Code")
+        XCTAssertEqual(steps[0].postCondition, .appRunning("Visual Studio Code"))
         XCTAssertEqual(steps[2].executor, .tool("quit_app"))
         XCTAssertEqual(steps[2].input["name"], "Messages")
+        XCTAssertEqual(steps[2].postCondition, .appNotRunning("Messages"))
     }
 
     // MARK: session lifecycle

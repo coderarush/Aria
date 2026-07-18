@@ -11,6 +11,7 @@ final class TaskStoreTests: XCTestCase {
         var s1 = TaskStep(summary: "Research A", executor: .agent("Orion"), input: ["q": "a"])
         s1.status = .done; s1.result = "facts A"
         var s2 = TaskStep(summary: "Save it", executor: .tool("save_note"), input: [:])
+        s2.postCondition = .resultContains("saved")
         s2.status = .pending
         return [s1, s2]
     }
@@ -28,6 +29,7 @@ final class TaskStoreTests: XCTestCase {
         XCTAssertEqual(restored[0].executor, .agent("Orion"))
         XCTAssertEqual(restored[1].executor, .tool("save_note"))
         XCTAssertEqual(restored[1].status, .pending)
+        XCTAssertEqual(restored[1].postCondition, .resultContains("saved"))
 
         let pairs = snap.completedPairs()
         XCTAssertEqual(pairs.count, 1)
@@ -63,10 +65,56 @@ final class TaskStoreTests: XCTestCase {
         XCTAssertNil(after)
     }
 
+    func testSaveAndClearPublishTaskStoreChanges() async {
+        let store = TaskStore(url: tempURL())
+        let saved = expectation(forNotification: .ariaTaskStoreDidChange, object: nil)
+        await store.save(PersistedTask.snapshot(goal: "g", steps: samplePlan(), lastOutput: ""))
+        await fulfillment(of: [saved], timeout: 1)
+
+        let cleared = expectation(forNotification: .ariaTaskStoreDidChange, object: nil)
+        await store.clear()
+        await fulfillment(of: [cleared], timeout: 1)
+    }
+
+    func testCurrentTaskDistinguishesLiveRunFromRelaunchResume() async {
+        let url = tempURL()
+        let runningStore = TaskStore(url: url)
+        let snap = PersistedTask.snapshot(goal: "prepare briefing", steps: samplePlan(), lastOutput: "facts A")
+        await runningStore.save(snap)
+
+        let running = await runningStore.currentTask()
+        let relaunchedStore = TaskStore(url: url)
+        let resumable = await relaunchedStore.currentTask()
+
+        XCTAssertEqual(running?.state, .running)
+        XCTAssertEqual(running?.task.goal, "prepare briefing")
+        XCTAssertEqual(resumable?.state, .resumable)
+        await runningStore.clear()
+    }
+
     func testResumeIntent() {
         XCTAssertTrue(ResumeIntent.matches("resume"))
         XCTAssertTrue(ResumeIntent.matches("pick up where you left off"))
         XCTAssertTrue(ResumeIntent.matches("finish what you started"))
         XCTAssertFalse(ResumeIntent.matches("what's the weather"))
+    }
+
+    func testResumeNotificationDoesNotExposeTaskGoal() {
+        let goal = "Send the confidential acquisition draft"
+        let body = ResumeNotificationPresentation.body(remainingSteps: 2)
+
+        XCTAssertEqual(
+            body,
+            "An unfinished task is ready to resume (2 steps left). Open Aria or say “resume” to continue."
+        )
+        XCTAssertFalse(body.localizedCaseInsensitiveContains(goal))
+    }
+
+    func testLegacyPersistedTaskWithoutConditionStillDecodes() throws {
+        let legacy = """
+        {"goal":"g","steps":[{"summary":"Open Notes","kind":"tool","name":"open_app","input":{"name":"Notes"},"status":"pending","result":""}],"lastOutput":"","updatedAt":0}
+        """
+        let task = try JSONDecoder().decode(PersistedTask.self, from: Data(legacy.utf8))
+        XCTAssertEqual(task.restoredSteps().first?.postCondition, PostCondition.none)
     }
 }

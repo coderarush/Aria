@@ -20,16 +20,37 @@ struct ResearchReport: Codable, Sendable, Identifiable {
     var sources: [String]
 }
 
+/// The generated report and the durable file that was actually written for it.
+/// A missing URL means research succeeded but local persistence did not.
+struct ResearchOutcome: Sendable {
+    let report: ResearchReport
+    let savedURL: URL?
+}
+
 struct ResearchEngine: Sendable {
     // Injectable for tests
-    var search: @Sendable (String) async -> [SearchResult] = ResearchEngine.duckDuckGoSearch
-    var fetchPage: @Sendable (String) async -> String = ResearchEngine.fetchAndStripHTML
+    var search: @Sendable (String) async -> [SearchResult]
+    var fetchPage: @Sendable (String) async -> String
+    private let reportsDirectory: URL
+
+    init(
+        reportsDirectory: URL = ResearchEngine.defaultReportsDirectory,
+        search: @escaping @Sendable (String) async -> [SearchResult] = ResearchEngine.duckDuckGoSearch,
+        fetchPage: @escaping @Sendable (String) async -> String = ResearchEngine.fetchAndStripHTML
+    ) {
+        self.reportsDirectory = reportsDirectory
+        self.search = search
+        self.fetchPage = fetchPage
+    }
+
+    static let defaultReportsDirectory = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Documents/Aria Notes/Research", isDirectory: true)
 
     func research(
         topic: String,
         maxSources: Int = 3,
         synthesize: @Sendable (String) async throws -> String
-    ) async -> ResearchReport {
+    ) async -> ResearchOutcome {
         // 1. Two concurrent searches
         async let results1 = search(topic)
         async let results2 = search("\(topic) explained")
@@ -113,9 +134,7 @@ struct ResearchEngine: Sendable {
         }
 
         // 6. Save
-        saveReport(report, topic: topic)
-
-        return report
+        return ResearchOutcome(report: report, savedURL: saveReport(report, topic: topic))
     }
 
     // MARK: - DuckDuckGo scraper
@@ -203,18 +222,24 @@ struct ResearchEngine: Sendable {
         )
     }
 
-    private func saveReport(_ report: ResearchReport, topic: String) {
-        let dir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Documents/Aria Notes/Research")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    private func saveReport(_ report: ResearchReport, topic: String) -> URL? {
         let dateStr = ISO8601DateFormatter().string(from: report.date).prefix(10)
         let safeTopic = topic
             .components(separatedBy: CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_ ")).inverted)
             .joined()
             .replacingOccurrences(of: " ", with: "-")
         let filename = "\(dateStr)-\(safeTopic).json"
-        if let data = try? JSONEncoder().encode(report) {
-            try? data.write(to: dir.appendingPathComponent(filename), options: .atomic)
+        let destination = reportsDirectory.appendingPathComponent(filename)
+        do {
+            try FileManager.default.createDirectory(
+                at: reportsDirectory,
+                withIntermediateDirectories: true
+            )
+            try JSONEncoder().encode(report).write(to: destination, options: .atomic)
+            return destination
+        } catch {
+            Log.trace("research: report save failed")
+            return nil
         }
     }
 }

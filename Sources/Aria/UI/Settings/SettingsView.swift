@@ -51,13 +51,27 @@ private struct TabHead: View {
 /// Aria's settings window — plain sidebar + scrolling detail. Deliberately no
 /// NavigationSplitView / List / Form anywhere (see SForm above for why).
 struct SettingsView: View {
-    enum Section: String, CaseIterable, Identifiable {
+    enum Section: String, CaseIterable, Identifiable, Hashable {
         case general = "General", voice = "Voice", conversation = "Conversation",
              proactive = "Proactive", knowledge = "Knowledge", agents = "Agents",
              recipes = "Recipes",
              transparency = "Transparency",
              apiKey = "API Key", memory = "Memory", activity = "Activity", tools = "Tools", dynamic = "Dynamic", brain = "Brain", mirror = "Mirror", crew = "Crew", license = "License"
         var id: String { rawValue }
+
+        struct Group: Identifiable, Equatable, Sendable {
+            let title: String
+            let sections: [Section]
+
+            var id: String { title }
+        }
+
+        static let grouped = [
+            Group(title: "Basics", sections: [.general, .voice, .conversation, .proactive]),
+            Group(title: "Workflows", sections: [.knowledge, .agents, .recipes, .transparency, .activity]),
+            Group(title: "Privacy & access", sections: [.apiKey, .memory, .tools, .dynamic]),
+            Group(title: "Advanced", sections: [.brain, .mirror, .crew, .license])
+        ]
 
         /// Searchable terms beyond the tab name (V11 P18) — "wake", "hotkey",
         /// "local model" etc. find the right tab even when its name doesn't say.
@@ -118,6 +132,14 @@ struct SettingsView: View {
         }
     }
 
+    private var visibleGroups: [Section.Group] {
+        Section.grouped.compactMap { group in
+            let matchingSections = group.sections.filter { visibleSections.contains($0) }
+            guard !matchingSections.isEmpty else { return nil }
+            return Section.Group(title: group.title, sections: matchingSections)
+        }
+    }
+
     var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
@@ -131,23 +153,34 @@ struct SettingsView: View {
             .background(RoundedRectangle(cornerRadius: 7).fill(Color.secondary.opacity(0.08)))
             .padding(.horizontal, 8).padding(.top, 8)
             ScrollView {
-                VStack(spacing: 2) {
-                    ForEach(visibleSections) { section in
-                        Button {
-                            selection = section
-                        } label: {
-                            HStack(spacing: 9) {
-                                Image(systemName: section.icon).frame(width: 18)
-                                Text(section.rawValue)
-                                Spacer(minLength: 0)
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(visibleGroups) { group in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(group.title)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .textCase(.uppercase)
+                                .padding(.horizontal, 10)
+                                .padding(.bottom, 3)
+
+                            ForEach(group.sections) { section in
+                                Button {
+                                    selection = section
+                                } label: {
+                                    HStack(spacing: 9) {
+                                        Image(systemName: section.icon).frame(width: 18)
+                                        Text(section.rawValue)
+                                        Spacer(minLength: 0)
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 7)
+                                    .background(selection == section ? Color.accentColor.opacity(0.18) : .clear,
+                                                in: RoundedRectangle(cornerRadius: 7))
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
-                            .background(selection == section ? Color.accentColor.opacity(0.18) : .clear,
-                                        in: RoundedRectangle(cornerRadius: 7))
-                            .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
                     }
                 }
                 .padding(8)
@@ -165,6 +198,10 @@ struct SettingsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(width: 720, height: 500)
+        .onChange(of: query) { _, _ in
+            guard !visibleSections.isEmpty, !visibleSections.contains(selection) else { return }
+            selection = visibleSections[0]
+        }
     }
 
     @ViewBuilder private var detailView: some View {
@@ -713,6 +750,7 @@ struct KnowledgeSettingsTab: View {
 // MARK: Background agents (v9)
 
 struct AgentsSettingsTab: View {
+    @ObservedObject private var settings = AppSettings.shared
     @State private var agents: [BackgroundAgent] = []
     @State private var runs: [AgentRun] = []
     @State private var briefingHour = 9
@@ -722,6 +760,15 @@ struct AgentsSettingsTab: View {
     var body: some View {
         TabHead(title: "Background Agents", subtitle: "Set it once. Let Aria handle it — silently, with every run visible here.")
         SForm {
+            SSection("Background execution") {
+                Toggle("Allow background agents to run", isOn: $settings.backgroundAgentsEnabled)
+                Text(settings.backgroundAgentsEnabled
+                     ? "Scheduled and watched automations may run when Aria is idle."
+                     : "Paused. No scheduled or watched automation will run.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             SSection("Quick add") {
                 HStack {
                     Stepper("Daily briefing at \(briefingHour):00", value: $briefingHour, in: 5...12)
@@ -819,6 +866,9 @@ struct AgentsSettingsTab: View {
             }
         }
         .task { await reload() }
+        .onChange(of: settings.backgroundAgentsEnabled) { _, _ in
+            NotificationCenter.default.post(name: .ariaAgentsChanged, object: nil)
+        }
     }
 
     private func triggerLabel(_ t: AgentTrigger) -> String {
@@ -1353,33 +1403,23 @@ struct BrainTab: View {
 // MARK: Mirror
 
 struct MirrorTab: View {
-    @State private var s = MirrorSettings.load()
-    @State private var portText = "8765"
-
     var body: some View {
-        TabHead(title: "Mirror Bridge", subtitle: "Stream Aria\u{2019}s context to companion apps on your local network.")
+        TabHead(title: "Mirror Bridge", subtitle: "A companion transport will appear here when it is ready for secure local use.")
         SForm {
             SSection("Connection") {
-                Toggle("Enable Mirror Bridge", isOn: $s.enabled)
-                TextField("Port", text: $portText)
+                Toggle("Enable Mirror Bridge", isOn: .constant(false))
+                    .disabled(true)
                 HStack {
-                    Circle().fill(s.enabled ? .green : .gray).frame(width: 8, height: 8)
-                    Text(s.enabled ? MirrorBridge.ConnectionState.notConnected.rawValue : "Disabled")
+                    Circle().fill(.gray).frame(width: 8, height: 8)
+                    Text("Unavailable in this build")
                         .foregroundStyle(.secondary)
                 }
             }
             SSection("Help") {
-                Text("Set-up guide coming soon.").font(.caption).foregroundStyle(.secondary)
+                Text("Aria will only offer a companion when it can authenticate and protect your local network connection.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
-        .onAppear { portText = String(s.port) }
-        .onChange(of: s.enabled) { _, _ in persist() }
-        .onChange(of: portText) { _, _ in persist() }
-    }
-
-    private func persist() {
-        s.port = Int(portText) ?? 8765
-        s.save()
     }
 }
 

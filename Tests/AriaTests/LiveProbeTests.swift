@@ -18,7 +18,10 @@ final class LiveProbeTests: XCTestCase {
         guard !key.isEmpty else { throw XCTSkip("no ARIA_API_KEY") }
 
         let gemini = GeminiClient(apiKeyProvider: { key })
-        let orchestrator = AgentOrchestrator(gemini: gemini)
+        let agentsURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("live-probe-agents-\(UUID().uuidString).json")
+        let registry = ToolRegistry(automationStore: AgentStore(fileURL: agentsURL))
+        let orchestrator = AgentOrchestrator(gemini: gemini, registry: registry)
 
         let goal = ProcessInfo.processInfo.environment["ARIA_GOAL"]
             ?? "research the best usb mics and save a summary to a note"

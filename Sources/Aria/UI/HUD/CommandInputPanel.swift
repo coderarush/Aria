@@ -11,15 +11,17 @@ final class CommandInputPanel: NSPanel, NSTextFieldDelegate {
     private let onSubmit: (String) -> Void
     private let field = NSTextField()
     private let recentsStack = NSStackView()
+    private let stateLabel = NSTextField(labelWithString: "Command center")
     private var recents: [String] = []
     private var selected: Int = -1   // -1 = field text, 0.. = recents row
 
-    private static let width: CGFloat = 620
-    private static let rowHeight: CGFloat = 34
+    private static let layout = CommandPaletteLayout.compact
 
     init(onSubmit: @escaping (String) -> Void) {
         self.onSubmit = onSubmit
-        super.init(contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 64),
+        super.init(contentRect: NSRect(x: 0, y: 0,
+                                      width: Self.layout.width,
+                                      height: Self.layout.headerHeight),
                    styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel],
                    backing: .buffered, defer: false)
         titleVisibility = .hidden
@@ -46,22 +48,28 @@ final class CommandInputPanel: NSPanel, NSTextFieldDelegate {
         container.layer?.borderWidth = 1
         container.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.5).cgColor
 
-        // Header row: blob · field · esc hint
+        // Header row: blob · state label · field · escape hint.
         let blob = NSImageView(image: Self.blobImage(size: 26))
         blob.translatesAutoresizingMaskIntoConstraints = false
 
         field.placeholderString = "Ask Aria anything…"
-        field.font = .systemFont(ofSize: 20, weight: .regular)
+        field.font = .systemFont(ofSize: 17, weight: .regular)
         field.isBezeled = false
         field.drawsBackground = false
         field.focusRingType = .none
         field.delegate = self
+        field.setAccessibilityLabel("Ask Aria")
         field.translatesAutoresizingMaskIntoConstraints = false
 
         let hint = NSTextField(labelWithString: "esc")
         hint.font = .monospacedSystemFont(ofSize: 11, weight: .medium)
         hint.textColor = .tertiaryLabelColor
+        hint.setAccessibilityLabel("Press Escape to close")
         hint.translatesAutoresizingMaskIntoConstraints = false
+
+        stateLabel.font = .systemFont(ofSize: 10, weight: .semibold)
+        stateLabel.textColor = .secondaryLabelColor
+        stateLabel.translatesAutoresizingMaskIntoConstraints = false
 
         recentsStack.orientation = .vertical
         recentsStack.alignment = .leading
@@ -75,18 +83,22 @@ final class CommandInputPanel: NSPanel, NSTextFieldDelegate {
         container.addSubview(blob)
         container.addSubview(field)
         container.addSubview(hint)
+        container.addSubview(stateLabel)
         container.addSubview(divider)
         container.addSubview(recentsStack)
 
         NSLayoutConstraint.activate([
             blob.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 18),
-            blob.topAnchor.constraint(equalTo: container.topAnchor, constant: 19),
+            blob.topAnchor.constraint(equalTo: container.topAnchor, constant: 24),
             blob.widthAnchor.constraint(equalToConstant: 26),
             blob.heightAnchor.constraint(equalToConstant: 26),
 
             field.leadingAnchor.constraint(equalTo: blob.trailingAnchor, constant: 12),
             field.trailingAnchor.constraint(equalTo: hint.leadingAnchor, constant: -12),
             field.centerYAnchor.constraint(equalTo: blob.centerYAnchor),
+
+            stateLabel.leadingAnchor.constraint(equalTo: field.leadingAnchor),
+            stateLabel.bottomAnchor.constraint(equalTo: field.topAnchor, constant: -2),
 
             hint.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -18),
             hint.centerYAnchor.constraint(equalTo: blob.centerYAnchor),
@@ -109,26 +121,38 @@ final class CommandInputPanel: NSPanel, NSTextFieldDelegate {
         }
         row.isHighlighted = index == selected
         row.translatesAutoresizingMaskIntoConstraints = false
-        row.heightAnchor.constraint(equalToConstant: Self.rowHeight).isActive = true
+        row.heightAnchor.constraint(equalToConstant: Self.layout.rowHeight).isActive = true
         return row
     }
 
     private func reloadRecents() {
-        recents = RecentCommands.all()
+        recents = Self.layout.visibleCommands(RecentCommands.all())
         recentsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        if !recents.isEmpty {
+            let heading = NSTextField(labelWithString: "Recent commands")
+            heading.font = .systemFont(ofSize: 10, weight: .semibold)
+            heading.textColor = .secondaryLabelColor
+            recentsStack.addArrangedSubview(heading)
+        }
         for (i, cmd) in recents.enumerated() {
             let row = makeRow(cmd, index: i)
             recentsStack.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: recentsStack.widthAnchor).isActive = true
         }
-        let header: CGFloat = 64
-        let listHeight = recents.isEmpty ? 0 : CGFloat(recents.count) * (Self.rowHeight + 2) + 18
-        setContentSize(NSSize(width: Self.width, height: header + listHeight))
+        let footer = NSTextField(labelWithString: "⌥⇧Space to open · ↑↓ to choose · ↩ to run")
+        footer.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
+        footer.textColor = .tertiaryLabelColor
+        footer.setAccessibilityLabel("Option Shift Space opens Aria. Use arrow keys to choose a recent command and Return to run it.")
+        recentsStack.addArrangedSubview(footer)
+        setContentSize(NSSize(
+            width: Self.layout.width,
+            height: Self.layout.contentHeight(recentCount: recents.count)
+        ))
     }
 
     private func refreshSelection() {
-        for (i, view) in recentsStack.arrangedSubviews.enumerated() {
-            (view as? PaletteRow)?.isHighlighted = i == selected
+        for (i, view) in recentsStack.arrangedSubviews.compactMap({ $0 as? PaletteRow }).enumerated() {
+            view.isHighlighted = i == selected
         }
     }
 
@@ -145,13 +169,20 @@ final class CommandInputPanel: NSPanel, NSTextFieldDelegate {
                                y: f.maxY - frame.height - f.height * 0.22))
         field.stringValue = ""
         alphaValue = 0
-        contentView?.layer?.setAffineTransform(CGAffineTransform(scaleX: 0.97, y: 0.97))
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if !reduceMotion {
+            contentView?.layer?.setAffineTransform(CGAffineTransform(scaleX: 0.97, y: 0.97))
+        }
         makeKeyAndOrderFront(nil)
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.18
-            ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.22, 1.2, 0.36, 1)
+            if !reduceMotion {
+                ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.22, 1.2, 0.36, 1)
+            }
             animator().alphaValue = 1
-            contentView?.layer?.setAffineTransform(.identity)
+            if !reduceMotion {
+                contentView?.layer?.setAffineTransform(.identity)
+            }
         }
         field.becomeFirstResponder()
     }

@@ -97,4 +97,22 @@ final class AutonomyEngineTests: XCTestCase {
         XCTAssertTrue(Safety.isDestructive(summary: "submit the order form"))
         XCTAssertFalse(Safety.isDestructive(summary: "summarize the page"))
     }
+
+    func testVerifiedActionResultAddsProofWithoutChangingSuccessfulOutput() {
+        let result = AutonomyEngine.applying(
+            PostConditionCheck(passed: true, proof: "Confirmed Notes is running."),
+            condition: .appRunning("Notes"),
+            to: .ok("Opened Notes."))
+        XCTAssertTrue(result.success)
+        XCTAssertEqual(result.output, "Opened Notes.\n\nConfirmed Notes is running.")
+    }
+
+    func testUnverifiedActionResultIsHonestFailure() {
+        let result = AutonomyEngine.applying(
+            PostConditionCheck(passed: false, proof: "Couldn't confirm Notes launched."),
+            condition: .appRunning("Notes"),
+            to: .ok("Opened Notes."))
+        XCTAssertFalse(result.success)
+        XCTAssertEqual(result.output, "Opened Notes.\n\nCouldn't confirm Notes launched.")
+    }
 }

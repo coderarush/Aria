@@ -120,6 +120,10 @@ final class AppSettings: ObservableObject {
     /// Speak the scheduled daily briefing aloud when it lands (V11 P4).
     /// On-demand "brief me" always speaks; this governs the background agent.
     @Published var briefingSpoken: Bool { didSet { defaults.set(briefingSpoken, forKey: K.briefingSpoken) } }
+    /// Global opt-in for scheduled and watched automation execution.
+    @Published var backgroundAgentsEnabled: Bool {
+        didSet { defaults.set(backgroundAgentsEnabled, forKey: K.backgroundAgentsEnabled) }
+    }
     /// V11 FRE: the persona picked at first run ("Student"/"Developer"/"Founder").
     /// Informs the installed pack and the default focus-mode preset.
     @Published var personaChoice: String { didSet { defaults.set(personaChoice, forKey: K.personaChoice) } }
@@ -229,6 +233,7 @@ final class AppSettings: ObservableObject {
         orbScale = defaults.object(forKey: K.orbScale) as? Double ?? 1.0
         personaStyle = defaults.string(forKey: PersonaStyle.key) ?? "balanced"
         briefingSpoken = defaults.bool(forKey: K.briefingSpoken)
+        backgroundAgentsEnabled = defaults.object(forKey: K.backgroundAgentsEnabled) as? Bool ?? false
         personaChoice = defaults.string(forKey: K.personaChoice) ?? ""
         orbAnchor = (defaults.object(forKey: K.orbAnchorX) as? Double).flatMap { x in
             (defaults.object(forKey: K.orbAnchorY) as? Double).map { CGPoint(x: x, y: $0) }
@@ -294,6 +299,7 @@ final class AppSettings: ObservableObject {
         static let uiSoundsEnabled = "app.uiSounds"
         static let orbScale = "app.orbScale"
         static let briefingSpoken = "app.briefingSpoken"
+        static let backgroundAgentsEnabled = "app.backgroundAgentsEnabled"
         static let personaChoice = "app.personaChoice"
         static let orbAnchorX = "app.orbAnchorX"
         static let orbAnchorY = "app.orbAnchorY"

@@ -22,6 +22,12 @@ func triggerDescription(_ trigger: AgentTrigger) -> String {
 // MARK: - AutomationCreateTool
 
 struct AutomationCreateTool: AriaTool {
+    private let store: AgentStore
+
+    init(store: AgentStore = .shared) {
+        self.store = store
+    }
+
     static let name = "automation_create"
     static let description = "Create an automation that runs when a trigger fires. Input: name, trigger_type (email/calendar/daily/interval), trigger_value (email query / event title keyword / HH:MM / seconds), goal (what Aria should do when triggered)."
     static let paramHints: [String: String] = [
@@ -75,7 +81,7 @@ struct AutomationCreateTool: AriaTool {
         }
 
         let agent = BackgroundAgent(name: name, goal: goal, trigger: trigger)
-        await AgentStore.shared.upsert(agent)
+        await store.upsert(agent)
 
         let desc = triggerDescription(trigger)
         return .ok("Automation '\(name)' created. It will run when: \(desc).")
@@ -85,11 +91,17 @@ struct AutomationCreateTool: AriaTool {
 // MARK: - AutomationListTool
 
 struct AutomationListTool: AriaTool {
+    private let store: AgentStore
+
+    init(store: AgentStore = .shared) {
+        self.store = store
+    }
+
     static let name = "automation_list"
     static let description = "List all saved automations and their triggers."
 
     func run(input: [String: String]) async throws -> ToolResult {
-        let agents = await AgentStore.shared.all()
+        let agents = await store.all()
         guard !agents.isEmpty else {
             return .ok("No automations yet. Use automation_create to add one.")
         }
