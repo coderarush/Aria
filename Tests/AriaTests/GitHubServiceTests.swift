@@ -30,6 +30,10 @@ final class GitHubServiceTests: XCTestCase {
             ["number": 42, "title": "Fix the bug",
              "html_url": "https://github.com/owner/repo/issues/42",
              "user": ["login": "alice"]],
+            ["number": 99, "title": "A pull request should not be listed as an issue",
+             "html_url": "https://github.com/owner/repo/pull/99",
+             "pull_request": ["url": "https://api.github.com/repos/owner/repo/pulls/99"],
+             "user": ["login": "mallory"]],
             ["number": 43, "title": "Add feature",
              "html_url": "https://github.com/owner/repo/issues/43",
              "user": ["login": "bob"]]
@@ -42,6 +46,8 @@ final class GitHubServiceTests: XCTestCase {
         XCTAssertTrue(result.contains("alice"))
         XCTAssertTrue(result.contains("#43"))
         XCTAssertTrue(result.contains("bob"))
+        XCTAssertFalse(result.contains("#99"))
+        XCTAssertFalse(result.contains("pull request should not be listed"))
     }
 
     func testPRsFormatsCorrectly() async throws {
@@ -114,5 +120,21 @@ final class GitHubServiceTests: XCTestCase {
         let err = GitHubServiceError.httpError(403)
         XCTAssertTrue(err.localizedDescription.contains("403"))
         XCTAssertTrue(err.localizedDescription.lowercased().contains("github"))
+    }
+
+    func testInvalidRepoThrowsBeforeNetwork() async throws {
+        let svc = GitHubService(token: "tok", fetch: { _ in
+            XCTFail("invalid repo should not call network")
+            return (Data(), self.mockResponse())
+        })
+        do {
+            _ = try await svc.issues(repo: "owner/repo/extra")
+            XCTFail("Expected invalid repo")
+        } catch let err as GitHubServiceError {
+            guard case .invalidRepository = err else {
+                XCTFail("Unexpected error \(err)")
+                return
+            }
+        }
     }
 }

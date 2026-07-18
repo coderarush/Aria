@@ -29,6 +29,15 @@ Google's Gemini free tier with your own key.
 
 ## What she does
 
+- **Circle anything, ask anything (Lens).** Press `⌥⇧C` (or say "let me circle something")
+  and draw a loop around whatever you don't understand — an error, a chart, a button, a
+  foreign phrase. Aria reads *just that region* (on-device OCR first) and explains it through
+  the blob + voice. A "draw on my screen" mode hands you freeform annotation.
+- **She points and walks you through it.** "Point at the export button" → Aria pools a
+  guidance blob right onto it. "Walk me through exporting a PDF" → she reads your screen,
+  plans the steps, and points at each one in turn with spoken instructions — a tutor beside
+  you, on the whole desktop. While she runs agentic work, she spawns a worker blob per step
+  (her sub-agents), each dissolving as its step completes.
 - **Acts, doesn't narrate.** A real tool + sub-agent system: open apps, click and type in
   any app (Accessibility tree, with a vision fallback for canvas/Electron UIs), run menus,
   scroll, search and fetch the web, read and write files, calendar and reminders (EventKit),
@@ -202,6 +211,11 @@ Keychain and sent only to the provider you configured.
 | “Undo that.” | rolls back her last reversible change |
 | “Resume.” | picks up an interrupted task where it left off |
 | “Find the export button and click it.” | sees the screen and clicks it |
+| `⌥⇧C`, circle an error → “fix this” | reads just that region (on-device OCR), then acts on it |
+| “Point at the share button.” | pools a guidance blob onto it — she shows, you click |
+| “Walk me through exporting a PDF.” | reads the screen and points through each step |
+| “Watch this.” (after circling) | pings you when that region changes |
+| “Draw on my screen.” | freeform annotation in her gooey ink |
 
 ## Architecture
 

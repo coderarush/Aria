@@ -1,0 +1,1496 @@
+import SwiftUI
+
+/// Crash-safe stand-ins for Form/Section. On macOS 26, SwiftUI's Form/List build a lazy
+/// DynamicViewList whose row evaluation calls swift_task_isCurrentExecutorWithFlags and
+/// crashes with EXC_BAD_ACCESS (the executor-isolation check dereferences a bad ref). These
+/// are plain, eager VStacks — same grouped look, but no List under the hood, so the body
+/// builds on the main actor and never trips the check.
+private struct SForm<Content: View>: View {
+    @ViewBuilder var content: Content
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) { content }
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct SSection<Content: View>: View {
+    var title: String?
+    @ViewBuilder var content: Content
+    init(_ title: String? = nil, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            if let title {
+                Text(title).font(.caption).fontWeight(.semibold)
+                    .foregroundStyle(.secondary).textCase(.uppercase)
+            }
+            VStack(alignment: .leading, spacing: 12) { content }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.06)))
+        }
+    }
+}
+
+/// A tab heading (title + subtitle).
+private struct TabHead: View {
+    let title: String
+    let subtitle: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.title3.bold())
+            Text(subtitle).font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 4).padding(.bottom, 8)
+    }
+}
+
+/// Aria's settings window — plain sidebar + scrolling detail. Deliberately no
+/// NavigationSplitView / List / Form anywhere (see SForm above for why).
+struct SettingsView: View {
+    enum Section: String, CaseIterable, Identifiable {
+        case general = "General", voice = "Voice", conversation = "Conversation",
+             proactive = "Proactive", knowledge = "Knowledge", agents = "Agents",
+             recipes = "Recipes",
+             transparency = "Transparency",
+             apiKey = "API Key", memory = "Memory", activity = "Activity", tools = "Tools", dynamic = "Dynamic", brain = "Brain", mirror = "Mirror", crew = "Crew", license = "License"
+        var id: String { rawValue }
+
+        /// Searchable terms beyond the tab name (V11 P18) — "wake", "hotkey",
+        /// "local model" etc. find the right tab even when its name doesn't say.
+        var keywords: String {
+            switch self {
+            case .general:      return "appearance orb blob theme accent launch login hotkey shortcut wake phrase"
+            case .voice:        return "speech speak gemini voices tts sound"
+            case .conversation: return "listening barge interrupt echo silence timeout microphone"
+            case .proactive:    return "suggestions quiet hours calendar downloads session anticipate"
+            case .knowledge:    return "index folders documents search pdf notes on-device"
+            case .agents:       return "background scheduled briefing watcher inbox mail page automation"
+            case .recipes:      return "workflow pack persona founder student developer morning startup focus"
+            case .transparency: return "context inspector router dashboard timeline history what aria sees"
+            case .apiKey:       return "gemini keys groq cerebras openrouter local model ollama qwen fallback"
+            case .memory:       return "remember facts long-term"
+            case .activity:     return "log actions audit trace"
+            case .tools:        return "permissions enable disable"
+            case .dynamic:      return "generated code scripts"
+            case .brain:        return "learning patterns habits on-device"
+            case .mirror:       return "bridge companion stream network"
+            case .crew:         return "sub-agents specialists orion lyra atlas nova comet"
+            case .license:      return "purchase activate trial key"
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .general:      return "gearshape"
+            case .voice:        return "speaker.wave.2"
+            case .conversation: return "bubble.left.and.bubble.right"
+            case .proactive:    return "bell.badge"
+            case .knowledge:    return "books.vertical"
+            case .agents:       return "clock.arrow.2.circlepath"
+            case .recipes:      return "list.bullet.clipboard"
+            case .transparency: return "eye"
+            case .apiKey:       return "key"
+            case .memory:       return "brain.head.profile"
+            case .activity:     return "list.bullet.rectangle"
+            case .tools:        return "wrench.and.screwdriver"
+            case .dynamic:      return "sparkles"
+            case .brain:        return "brain"
+            case .mirror:       return "rectangle.on.rectangle"
+            case .crew:         return "person.3"
+            case .license:      return "checkmark.seal"
+            }
+        }
+    }
+
+    @State private var selection: Section = .general
+    @State private var query = ""
+
+    /// V11 P18: sections whose name or keywords match the search.
+    private var visibleSections: [Section] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return Section.allCases }
+        return Section.allCases.filter {
+            $0.rawValue.lowercased().contains(q) || $0.keywords.contains(q)
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            VStack(spacing: 0) {
+            HStack(spacing: 5) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                TextField("Search settings", text: $query)
+                    .textFieldStyle(.plain).font(.system(size: 12))
+            }
+            .padding(.horizontal, 8).padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 7).fill(Color.secondary.opacity(0.08)))
+            .padding(.horizontal, 8).padding(.top, 8)
+            ScrollView {
+                VStack(spacing: 2) {
+                    ForEach(visibleSections) { section in
+                        Button {
+                            selection = section
+                        } label: {
+                            HStack(spacing: 9) {
+                                Image(systemName: section.icon).frame(width: 18)
+                                Text(section.rawValue)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(selection == section ? Color.accentColor.opacity(0.18) : .clear,
+                                        in: RoundedRectangle(cornerRadius: 7))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(8)
+            }
+            }
+            .frame(width: 190)
+
+            Divider()
+
+            ScrollView {
+                detailView
+                    .padding(24)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(width: 720, height: 500)
+    }
+
+    @ViewBuilder private var detailView: some View {
+        switch selection {
+        case .general:      GeneralSettingsTab()
+        case .voice:        VoiceSettingsTab()
+        case .conversation: ConversationSettingsTab()
+        case .proactive:    ProactiveSettingsTab()
+        case .knowledge:    KnowledgeSettingsTab()
+        case .agents:       AgentsSettingsTab()
+        case .recipes:      RecipesSettingsTab()
+        case .transparency: TransparencyTab()
+        case .apiKey:       APIKeyTab()
+        case .memory:       MemorySettingsTab()
+        case .activity:     ActivityTab()
+        case .tools:        ToolsTab()
+        case .dynamic:      DynamicToolsTab()
+        case .brain:        BrainTab()
+        case .mirror:       MirrorTab()
+        case .crew:         CrewSettingsTab()
+        case .license:      LicenseTab()
+        }
+    }
+}
+
+// MARK: License
+
+struct LicenseTab: View {
+    @StateObject private var lic = LicenseManager.shared
+    @State private var key = ""
+    @State private var msg = ""
+    @State private var busy = false
+
+    private var statusText: String {
+        switch lic.status {
+        case .licensed: return "Licensed"
+        case .trial(let d): return "Trial — \(d) day\(d == 1 ? "" : "s") left"
+        case .expired: return "Trial expired"
+        }
+    }
+    private var statusColor: Color {
+        switch lic.status { case .licensed: return .green; case .trial: return .secondary; case .expired: return .orange }
+    }
+
+    var body: some View {
+        TabHead(title: "License", subtitle: "One purchase, kept forever. Activate the key from your receipt.")
+        SForm {
+            SSection {
+                HStack { Text("Status"); Spacer(); Text(statusText).foregroundStyle(statusColor) }
+            }
+            if !lic.isLicensed {
+                SSection("Activate") {
+                    TextField("License key", text: $key)
+                    HStack {
+                        Button(busy ? "Activating\u{2026}" : "Activate") { activate() }
+                            .buttonStyle(.borderedProminent).disabled(busy || key.isEmpty)
+                        Link("Buy a license", destination: URL(string: "https://github.com/coderarush/Aria")!)
+                    }
+                    if !msg.isEmpty { Text(msg).font(.caption).foregroundStyle(.secondary) }
+                }
+            } else {
+                SSection {
+                    Button("Deactivate on this Mac", role: .destructive) { lic.deactivate(); msg = "" }
+                }
+            }
+        }
+    }
+
+    private func activate() {
+        busy = true; msg = ""
+        Task { let r = await lic.activate(key: key); msg = r.message; busy = false }
+    }
+}
+
+// MARK: General
+
+struct GeneralSettingsTab: View {
+    @StateObject private var settings = AppSettings.shared
+    @StateObject private var updater = UpdateChecker.shared
+
+    var body: some View {
+        TabHead(title: "Appearance & Behavior", subtitle: "Customize Aria\u{2019}s look and runtime behavior.")
+        SForm {
+            SSection("Accent Color") {
+                Picker("Accent", selection: Binding(
+                    get: { settings.accentChoiceRaw },
+                    set: { settings.accentChoiceRaw = $0 })) {
+                    Text("Follow system").tag("system")
+                    ForEach(Theme.presets, id: \.id) { p in
+                        Text(p.name).tag("preset:\(p.id)")
+                    }
+                    Text("Custom\u{2026}").tag(customTag)
+                }
+                if settings.accentChoiceRaw.hasPrefix("custom:") || settings.accentChoiceRaw == customTag {
+                    ColorPicker("Custom color", selection: customColorBinding, supportsOpacity: false)
+                }
+                HStack(spacing: 8) {
+                    Text("Preview").foregroundStyle(.secondary)
+                    Capsule().fill(settings.accentColor).frame(width: 60, height: 10)
+                }
+                Picker("Aurora palette", selection: $settings.glowPaletteID) {
+                    ForEach(Theme.glowPalettes, id: \.id) { Text($0.name).tag($0.id) }
+                }
+            }
+
+            SSection("Updates") {
+                HStack {
+                    Text("Version")
+                    Spacer()
+                    Text(updater.currentVersion).foregroundStyle(.secondary).monospacedDigit()
+                }
+                if let v = updater.newVersion, let url = updater.releaseURL {
+                    HStack {
+                        Label("Version \(v) is available", systemImage: "arrow.down.circle.fill").foregroundStyle(.green)
+                        Spacer()
+                        Link("Download", destination: url)
+                    }
+                } else {
+                    Button(updater.checking ? "Checking\u{2026}" : "Check for updates") {
+                        Task { await updater.check() }
+                    }.disabled(updater.checking)
+                }
+            }
+
+            SSection("Orb") {
+                HStack {
+                    Text("Size")
+                    Slider(value: $settings.orbScale, in: 0.7...1.3, step: 0.05)
+                    Text(String(format: "%.0f%%", settings.orbScale * 100)).monospacedDigit()
+                }
+                Picker("Position", selection: $settings.orbPosition) {
+                    ForEach(AppSettings.OrbPosition.allCases.filter { $0 != .custom }) {
+                        Text($0.label).tag($0)
+                    }
+                }
+                Toggle("Show Aria when idle", isOn: $settings.idleBlobVisible)
+                Toggle("Split into orbiting blobs while thinking", isOn: $settings.expressiveThinking)
+                Text("When she's thinking, the blob splits into a ring of small blobs that orbit, then squish back together. Turn off for a calmer shimmer.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            SSection("Personality") {
+                Picker("Style", selection: $settings.personaStyle) {
+                    ForEach(PersonaStyle.allCases, id: \.rawValue) {
+                        Text($0.label).tag($0.rawValue)
+                    }
+                }
+                Text("How Aria talks — same brain, different manner. Takes effect on the next conversation.")
+                    .font(.caption).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Standing instructions")
+                    TextEditor(text: $settings.customInstructions)
+                        .font(.body)
+                        .frame(minHeight: 60, maxHeight: 110)
+                        .overlay(RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.secondary.opacity(0.25)))
+                    Text("Things Aria should always keep in mind — “call me Cap”, “answer in metric”, “never use emoji”. Honored in every conversation.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+
+            SSection("Behavior") {
+                HStack {
+                    Text("Response duration")
+                    Slider(value: $settings.responseDuration, in: 3...20, step: 1)
+                    Text("\(Int(settings.responseDuration))s").monospacedDigit()
+                }
+                Toggle("Instant commands (skip the model for simple actions)", isOn: $settings.instantCommandsEnabled)
+                Text("Everyday one-shots — open an app, set the volume, start a timer, open a site — run immediately with no model call, so they finish the moment you stop speaking. Anything else still goes to the full agent.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Toggle("Privacy mode (disable screen capture)", isOn: $settings.privacyMode)
+                Toggle("Launch at login", isOn: $settings.launchAtLogin)
+            }
+
+            SSection("Autonomy") {
+                Toggle("Autonomous mode — just do it, don't ask", isOn: $settings.autonomousMode)
+                Text("For commands you give directly, Aria can act without pausing for “Approve?” — including irreversible actions that cannot be undone. Background automations never send, delete, pay, or run raw code unattended. Everything is recorded in the Activity log.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if !settings.autonomousMode {
+                    Toggle("Let Aria act on her own anticipations", isOn: $settings.autonomousActions)
+                    Text("When she's very confident and the action is reversible, she'll just do it (e.g. open your standup doc at 9am) and notify you. Important or irreversible things still ask first.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+
+            SSection("Connectors") {
+                Picker("Sign-in method", selection: $settings.connectorMode) {
+                    Text("Bring your own client ID").tag("bringYourOwn")
+                    Text("Hosted relay (no setup)").tag("relay")
+                }
+                Text("“Bring your own” connects with an OAuth client ID you paste per service (works today). “Hosted relay” needs no setup — available once Aria's relay is live.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private let customTag = "custom:#3B82F6"
+
+    private var customColorBinding: Binding<Color> {
+        Binding(
+            get: { settings.accentColor },
+            set: { newColor in
+                let ns = NSColor(newColor).usingColorSpace(.sRGB) ?? .systemBlue
+                let hex = String(format: "#%02X%02X%02X",
+                                 Int(ns.redComponent * 255),
+                                 Int(ns.greenComponent * 255),
+                                 Int(ns.blueComponent * 255))
+                settings.accentChoiceRaw = "custom:\(hex)"
+            })
+    }
+}
+
+// MARK: Conversation
+
+struct ConversationSettingsTab: View {
+    @StateObject private var settings = AppSettings.shared
+    @State private var axOK = AXReader.hasPermission
+
+    var body: some View {
+        TabHead(title: "Conversation", subtitle: "How Aria listens and lets you interrupt.")
+        SForm {
+            SSection {
+                HStack {
+                    Text("End conversation after silence")
+                    Slider(value: $settings.conversationSilenceTimeout, in: 5...20, step: 1)
+                    Text("\(Int(settings.conversationSilenceTimeout))s").monospacedDigit()
+                }
+                Text("Talk to Aria in a continuous back-and-forth — after she answers, just speak your next question (no need to say “Hey Aria” again). She stops listening after this much silence.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            SSection("Barge-in") {
+                Toggle("Let me interrupt her (talk-over)", isOn: $settings.bargeInEnabled)
+                if settings.bargeInEnabled {
+                    HStack {
+                        Text("Interrupt sensitivity")
+                        Slider(value: $settings.bargeInSensitivity, in: 0...1, step: 0.05)
+                        Text(settings.bargeInSensitivity < 0.34 ? "Low" : settings.bargeInSensitivity < 0.67 ? "Med" : "High")
+                            .monospacedDigit().foregroundStyle(.secondary)
+                    }
+                    Text("Start talking while Aria is speaking and she'll stop and listen — powered by on-device echo cancellation. Higher sensitivity interrupts more easily (but may trigger on background noise).")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+
+            SSection("Wake phrase") {
+                TextField("Also wake to… (e.g. “hey assistant”)", text: Binding(
+                    get: { UserDefaults.standard.string(forKey: "app.wakePhrase") ?? "" },
+                    set: { UserDefaults.standard.set($0, forKey: "app.wakePhrase") }))
+                Text("Adds an extra wake phrase alongside “Hey Aria” (which always works). Three characters minimum; takes effect on the next listen.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            SSection("Shortcuts") {
+                Picker("Hotkey modifier", selection: Binding(
+                    get: { UserDefaults.standard.string(forKey: "app.hotkeyModifier") ?? "option" },
+                    set: { UserDefaults.standard.set($0, forKey: "app.hotkeyModifier") })) {
+                    Text("⌥ Option + Space").tag("option")
+                    Text("⌃ Control + Space").tag("control")
+                }
+                Text("Talk = modifier + Space · Type = modifier + ⇧ + Space. Applies immediately.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            SSection("Dictation") {
+                Toggle("System-wide dictation (⌥⇧D)", isOn: $settings.dictationEnabled)
+                Text("Press ⌥⇧D anywhere, speak, and Aria types the cleaned-up text into whatever field you're in — email, Slack, code. Your words go in as-is; she doesn't answer them.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Toggle("Polish with AI", isOn: $settings.dictationAICleanup)
+                    .disabled(!settings.dictationEnabled)
+                Text("Fix punctuation and obvious mis-hears with a quick AI pass before inserting. Slightly slower; off uses instant local cleanup.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            SSection("Notifications") {
+                Toggle("Background agent results", isOn: Binding(
+                    get: { UserDefaults.standard.object(forKey: "app.notifyAgentRuns") as? Bool ?? true },
+                    set: { UserDefaults.standard.set($0, forKey: "app.notifyAgentRuns") }))
+                Toggle("Resume offers after an interrupted task", isOn: Binding(
+                    get: { UserDefaults.standard.object(forKey: "app.notifyResume") as? Bool ?? true },
+                    set: { UserDefaults.standard.set($0, forKey: "app.notifyResume") }))
+            }
+
+            SSection("Plan preview") {
+                Picker("Before bigger tasks", selection: Binding(
+                    get: { UserDefaults.standard.string(forKey: "app.planPreview") ?? "auto" },
+                    set: { UserDefaults.standard.set($0, forKey: "app.planPreview") })) {
+                    Text("Ask when 4+ steps").tag("auto")
+                    Text("Always ask").tag("always")
+                    Text("Just do it").tag("never")
+                }
+                Text("Aria says her plan out loud and waits for your go-ahead. Silence means go.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            SSection("Play-by-play") {
+                Toggle("Narrate steps aloud", isOn: $settings.spokenStepNarration)
+                Text("During a multi-step task, Aria says a short play-by-play as she works (“Searching the web…”, “Saving your note…”). Turn off to keep her quiet between the plan and the result.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            SSection("Speaker verification") {
+                Toggle("Speaker verification", isOn: $settings.speakerVerificationEnabled)
+                    .onChange(of: settings.speakerVerificationEnabled) { _, enabled in
+                        if !enabled { settings.speakerVerificationEnrolledDate = 0.0 }
+                    }
+                Text("When on, Aria checks it\'s your voice before acting. During the first 7 days after enrolling, mismatches warn rather than block.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if settings.speakerVerificationEnabled {
+                    Button("Teach Aria my voice") {
+                        NotificationCenter.default.post(name: .ariaEnrollVoice, object: nil)
+                    }
+                    if settings.speakerVerificationEnrolledDate > 0 {
+                        let enrolled = Date(timeIntervalSince1970: settings.speakerVerificationEnrolledDate)
+                        let inGrace = SpeakerGracePolicy.isInGracePeriod(enrolledDate: settings.speakerVerificationEnrolledDate)
+                        Text(inGrace
+                             ? "Grace period active \u{2014} mismatches warn, not block"
+                             : "Enrolled \(enrolled.formatted(date: .abbreviated, time: .omitted))")
+                            .font(.caption2)
+                            .foregroundStyle(inGrace ? Color.orange : Color.secondary)
+                    }
+                }
+                Text("Experimental. Basic on-device voiceprint \u{2014} not a hard security guarantee.")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
+
+            SSection("Computer use") {
+                HStack {
+                    Text("Accessibility access")
+                    Spacer()
+                    Text(axOK ? "Granted" : "Not granted")
+                        .font(.callout).foregroundStyle(axOK ? Color.green : Color.secondary)
+                }
+                if !axOK {
+                    Button("Grant access\u{2026}") {
+                        AXReader.requestPermission()
+                        axOK = AXReader.hasPermission
+                    }
+                }
+                Text("Lets Aria see and operate your apps \u{2014} click, type, run menus, scroll \u{2014} by voice. Required for computer-use commands. Aria asks before anything destructive and shows an indicator while in control, which you can stop.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .onAppear { axOK = AXReader.hasPermission }
+    }
+}
+
+// MARK: Proactive (v9)
+
+struct ProactiveSettingsTab: View {
+    @State private var s = ProactiveSettings.load()
+    @State private var live = LiveLoopSettings.load()
+
+    var body: some View {
+        TabHead(title: "Proactive Presence", subtitle: "Aria anticipates and gently offers \u{2014} before you ask.")
+        SForm {
+            SSection("Anticipation") {
+                Toggle("Let Aria be proactive", isOn: $s.enabled)
+            }
+
+            SSection("Live Loop") {
+                Toggle("Run the Live Loop", isOn: Binding(
+                    get: { live.enabled },
+                    set: { live.enabled = $0; live.save() }))
+                Text("Aria's always-on cycle: she watches your calendar, mail, and workflow, and steps in at the right moment. \u{201C}Act automatically\u{201D} is only ever read-only prep \u{2014} anything outward always asks first.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if live.enabled {
+                    tierPicker("Meeting prep", PlaybookLibrary.meetingPrep,
+                               "A spoken brief just before each meeting.")
+                    tierPicker("Morning brief", PlaybookLibrary.dailyBrief,
+                               "Calendar, mail, reminders \u{2014} first thing.")
+                    tierPicker("Inbox triage", PlaybookLibrary.inboxTriage,
+                               "New mail lands \u{2192} she offers a drafted reply.")
+                    tierPicker("Screen co-pilot", PlaybookLibrary.screenCoPilot,
+                               "Repetitive app-hopping \u{2192} she offers a shortcut.")
+                    Toggle("Pause in Low Power Mode", isOn: Binding(
+                        get: { live.pauseInLowPower },
+                        set: { live.pauseInLowPower = $0; live.save() }))
+                }
+            }
+
+            if s.enabled {
+                SSection("What she watches") {
+                    sourceToggle("Calendar & time", .calendar,
+                                 "A quiet heads-up just before your meetings.")
+                    sourceToggle("Learned routines", .routine,
+                                 "Offer to automate habits she notices on-device.")
+                    sourceToggle("New downloads", .downloads,
+                                 "A fresh PDF in Downloads — she offers a summary.")
+                    sourceToggle("Work sessions", .session,
+                                 "After a productive stretch, she offers a recap of the day.")
+                    Text("More signals (recurring commands, on-screen context) are coming.")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
+
+                SSection("Quiet hours") {
+                    Toggle("Stay silent during quiet hours", isOn: $s.quietHoursEnabled)
+                    if s.quietHoursEnabled {
+                        HStack(spacing: 16) {
+                            Stepper("From \(s.quietHours.startHour):00",
+                                    value: $s.quietHours.startHour, in: 0...23)
+                            Stepper("to \(s.quietHours.endHour):00",
+                                    value: $s.quietHours.endHour, in: 0...23)
+                        }
+                        Text("Only time-critical reminders (a meeting about to start) come through.")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    }
+                }
+            }
+
+            SSection("How it feels") {
+                Text("When Aria has something, the orb glows quietly \u{2014} she speaks it only when you wake her or glance over. Say \u{201C}yes\u{201D} to do it, or just ignore it and it fades.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .onChange(of: s.enabled) { _, _ in s.save() }
+        .onChange(of: s.quietHoursEnabled) { _, _ in s.save() }
+        .onChange(of: s.quietHours.startHour) { _, _ in s.save() }
+        .onChange(of: s.quietHours.endHour) { _, _ in s.save() }
+    }
+
+    private func sourceToggle(_ title: String, _ source: SuggestionSource, _ help: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Toggle(title, isOn: Binding(
+                get: { s.isSourceEnabled(source) },
+                set: { s.sourceEnabled[source] = $0; s.save() }))
+            Text(help).font(.caption2).foregroundStyle(.tertiary)
+        }
+    }
+
+    private func tierPicker(_ title: String, _ playbookID: String, _ help: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Picker(title, selection: Binding(
+                get: { live.tier(for: playbookID) },
+                set: { live.tiers[playbookID] = $0; live.save() })) {
+                ForEach(AutonomyTier.allCases, id: \.self) { tier in
+                    Text(tier.label).tag(tier)
+                }
+            }
+            .pickerStyle(.menu)
+            Text(help).font(.caption2).foregroundStyle(.tertiary)
+        }
+    }
+}
+
+// MARK: Knowledge (v9)
+
+struct KnowledgeSettingsTab: View {
+    @State private var s = KnowledgeSettings.load()
+    @StateObject private var app = AppSettings.shared
+    @State private var docCount = 0
+    @State private var indexing = false
+    @State private var status = ""
+
+    var body: some View {
+        TabHead(title: "Knowledge", subtitle: "Aria knows your work. Index folders of notes, PDFs, documents and code — all on-device.")
+        SForm {
+            SSection {
+                Toggle("Let Aria search my files", isOn: $s.enabled)
+                Text("Strictly local. Files are read and indexed on this Mac only — content never leaves the machine. Ask things like “what did the investor say about pricing?”")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            SSection("Personal context") {
+                Toggle("Let Aria see my recent files & schedule", isOn: $app.personalContextEnabled)
+                Text("On-device awareness of your world — recently downloaded files, Desktop files, and upcoming calendar events — so she can answer “what was that file I just got?” or “what’s next today?”. Local-only; nothing leaves your Mac.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            SSection("Personalization") {
+                Toggle("Let Aria learn who & how I write", isOn: $app.personalizationEnabled)
+                Text("Builds an on-device model of the people and projects you refer to (so “email Sara” resolves) and your writing voice (so her drafts sound like you). Local-only; turning it off wipes it.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            if s.enabled {
+                SSection("Indexed folders (\(s.folders.count))") {
+                    ForEach(s.folders, id: \.self) { folder in
+                        HStack {
+                            Image(systemName: "folder").foregroundStyle(.secondary)
+                            Text(folder).font(.system(size: 12, design: .monospaced)).lineLimit(1)
+                            Spacer()
+                            Button(role: .destructive) {
+                                s.folders.removeAll { $0 == folder }
+                                persistAndReindex()
+                            } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
+                        }
+                    }
+                    Button("Add folder…") { addFolder() }
+                }
+
+                SSection("Index") {
+                    HStack {
+                        Text("Documents indexed")
+                        Spacer()
+                        Text("\(docCount)").foregroundStyle(.secondary).monospacedDigit()
+                    }
+                    HStack {
+                        Button(indexing ? "Indexing…" : "Reindex now") { persistAndReindex() }
+                            .disabled(indexing || s.folders.isEmpty)
+                        Button("Forget everything", role: .destructive) {
+                            Task { await KnowledgeIndex.shared.clear(); await refreshCount() }
+                        }
+                    }
+                    if !status.isEmpty { Text(status).font(.caption).foregroundStyle(.secondary) }
+                }
+            }
+        }
+        .onChange(of: s.enabled) { _, _ in s.save() }
+        .task { await refreshCount() }
+    }
+
+    private func addFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = true
+        panel.prompt = "Index"
+        guard panel.runModal() == .OK else { return }
+        for url in panel.urls where !s.folders.contains(url.path) {
+            s.folders.append(url.path)
+        }
+        persistAndReindex()
+    }
+
+    private func persistAndReindex() {
+        s.save()
+        indexing = true
+        status = ""
+        let folders = s.folders
+        Task {
+            let stats = await KnowledgeIndex.shared.reindex(folders: folders)
+            await refreshCount()
+            indexing = false
+            status = "Indexed \(stats.indexed) new/changed, \(stats.skipped) unchanged" +
+                (stats.removed > 0 ? ", \(stats.removed) removed" : "") +
+                (stats.failed > 0 ? ", \(stats.failed) unreadable" : "") + "."
+        }
+    }
+
+    private func refreshCount() async {
+        docCount = await KnowledgeIndex.shared.documentCount
+    }
+}
+
+// MARK: Background agents (v9)
+
+struct AgentsSettingsTab: View {
+    @State private var agents: [BackgroundAgent] = []
+    @State private var runs: [AgentRun] = []
+    @State private var briefingHour = 9
+    @State private var mailQuery = ""
+    @State private var watchURL = ""
+
+    var body: some View {
+        TabHead(title: "Background Agents", subtitle: "Set it once. Let Aria handle it — silently, with every run visible here.")
+        SForm {
+            SSection("Quick add") {
+                HStack {
+                    Stepper("Daily briefing at \(briefingHour):00", value: $briefingHour, in: 5...12)
+                    Button("Add") {
+                        add(BackgroundAgent(
+                            name: "Daily briefing",
+                            goal: BriefingComposer.agentSentinel,   // composed, not planned
+                            trigger: .daily(hour: briefingHour, minute: 0)))
+                    }.disabled(agents.contains { $0.name == "Daily briefing" })
+                }
+                Toggle("Speak the scheduled briefing aloud", isOn: Binding(
+                    get: { AppSettings.shared.briefingSpoken },
+                    set: { AppSettings.shared.briefingSpoken = $0 }))
+                    .help("When the daily briefing agent runs, Aria reads it to you — unless you're mid-conversation or mid-task.")
+                Button("Watch Downloads — offer to organize new files") {
+                    add(BackgroundAgent(
+                        name: "Downloads watcher",
+                        goal: "Look at the newest files in my Downloads folder and organize them into sensible subfolders by type. Don't delete anything.",
+                        trigger: .folderChanged(path: NSHomeDirectory() + "/Downloads")))
+                }.disabled(agents.contains { $0.name == "Downloads watcher" })
+                HStack {
+                    TextField("Watch inbox for… (e.g. investor)", text: $mailQuery)
+                    Button("Add") {
+                        let q = mailQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !q.isEmpty else { return }
+                        add(BackgroundAgent(
+                            name: "Inbox: \(q)",
+                            goal: "Mail matching “\(q)” arrived. Read what's new below, then notify me with a one-line summary of who wrote and what about.",
+                            trigger: .mailMatched(query: q)))
+                        mailQuery = ""
+                    }.disabled(mailQuery.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                HStack {
+                    TextField("Watch a web page… (https://…)", text: $watchURL)
+                    Button("Add") {
+                        let u = watchURL.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard u.hasPrefix("http") else { return }
+                        add(BackgroundAgent(
+                            name: "Page: \((URL(string: u)?.host ?? u))",
+                            goal: "The page I watch (\(u)) changed. Fetch it, figure out what's different or noteworthy, and notify me with a one-line summary.",
+                            trigger: .urlChanged(url: u)))
+                        watchURL = ""
+                    }.disabled(!watchURL.trimmingCharacters(in: .whitespaces).hasPrefix("http"))
+                }
+                Text("Watchers check quietly (inbox every 5 min, pages every 30) and only speak up when something actually changed.")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
+
+            SSection("Your agents (\(agents.count))") {
+                if agents.isEmpty {
+                    Text("No background agents yet.").foregroundStyle(.secondary).font(.callout)
+                } else {
+                    ForEach(agents) { agent in
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack {
+                                Toggle(agent.name, isOn: Binding(
+                                    get: { agent.enabled },
+                                    set: { on in var a = agent; a.enabled = on; update(a) }))
+                                Spacer()
+                                Button(role: .destructive) {
+                                    Task {
+                                        await AgentStore.shared.remove(agent.id)
+                                        await reload()
+                                        NotificationCenter.default.post(name: .ariaAgentsChanged, object: nil)
+                                    }
+                                } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
+                            }
+                            Text(triggerLabel(agent.trigger)).font(.caption2).foregroundStyle(.tertiary)
+                            if let outcome = agent.lastOutcome {
+                                Text("Last: \(outcome)").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                        }
+                        Divider()
+                    }
+                }
+                Text("Agents use the same tools and safety gates as voice tasks. Anything destructive still asks first.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            if !runs.isEmpty {
+                SSection("Recent runs") {
+                    ForEach(Array(runs.prefix(8).enumerated()), id: \.offset) { _, run in
+                        HStack(alignment: .top, spacing: 8) {
+                            Circle().fill(run.ok ? Color.green : .orange).frame(width: 7, height: 7).padding(.top, 5)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(run.agentName).font(.system(size: 12, weight: .semibold))
+                                Text(run.summary).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                                Text(run.date.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.caption2).foregroundStyle(.tertiary)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                    }
+                }
+            }
+        }
+        .task { await reload() }
+    }
+
+    private func triggerLabel(_ t: AgentTrigger) -> String {
+        switch t {
+        case .daily(let h, let m): return String(format: "Daily at %d:%02d", h, m)
+        case .interval(let s): return "Every \(Int(s / 60)) min"
+        case .folderChanged(let p): return "When \((p as NSString).abbreviatingWithTildeInPath) changes"
+        case .mailMatched(let q): return "When inbox mail matches \"\(q)\""
+        case .urlChanged(let u): return "When \(u) changes"
+        case .calendarEventSoon(let t, let m): return "When \(t) starts within \(m) min"
+        }
+    }
+
+    private func add(_ agent: BackgroundAgent) {
+        Task {
+            await AgentStore.shared.upsert(agent)
+            await reload()
+            NotificationCenter.default.post(name: .ariaAgentsChanged, object: nil)
+        }
+    }
+
+    private func update(_ agent: BackgroundAgent) {
+        Task {
+            await AgentStore.shared.upsert(agent)
+            await reload()
+            NotificationCenter.default.post(name: .ariaAgentsChanged, object: nil)
+        }
+    }
+
+    private func reload() async {
+        agents = await AgentStore.shared.all()
+        runs = await AgentStore.shared.recentRuns(20)
+    }
+}
+
+// MARK: Recipes (V11 P8+P17)
+
+struct RecipesSettingsTab: View {
+    @State private var recipes: [Recipe] = []
+    @State private var installedMessage = ""
+
+    var body: some View {
+        TabHead(title: "Recipes", subtitle: "Reusable workflows that run the same way every time. Say “run my morning startup”.")
+        SForm {
+            SSection("Workflow packs") {
+                ForEach(WorkflowPack.builtins) { pack in
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(pack.persona).font(.system(size: 12, weight: .semibold))
+                            Text(pack.summary).font(.caption2).foregroundStyle(.secondary)
+                            Text(pack.recipes.map(\.name).joined(separator: " · "))
+                                .font(.caption2).foregroundStyle(.tertiary)
+                        }
+                        Spacer()
+                        Button(installed(pack) ? "Reinstall" : "Install") {
+                            Task {
+                                await PackInstaller.install(pack)
+                                await reload()
+                                installedMessage = "\(pack.persona) pack installed."
+                                NotificationCenter.default.post(name: .ariaAgentsChanged, object: nil)
+                            }
+                        }
+                    }
+                    Divider()
+                }
+                if !installedMessage.isEmpty {
+                    Text(installedMessage).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+
+            SSection("Your recipes (\(recipes.count))") {
+                if recipes.isEmpty {
+                    Text("Install a pack above to get started. Recipes run their steps exactly as written — no improvising.")
+                        .font(.callout).foregroundStyle(.secondary)
+                } else {
+                    ForEach(recipes) { recipe in
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "list.bullet.clipboard")
+                                .font(.system(size: 11)).foregroundStyle(.secondary)
+                                .frame(width: 14).padding(.top, 2)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(recipe.name).font(.system(size: 12, weight: .semibold))
+                                Text(recipe.steps.map(\.summary).joined(separator: " → "))
+                                    .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                            }
+                            Spacer(minLength: 0)
+                            Button {
+                                remove(recipe)
+                            } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
+                        }
+                        Divider()
+                    }
+                    Text("Run one by voice (“run my meeting prep”) or from the command palette.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .task { await reload() }
+    }
+
+    private func installed(_ pack: WorkflowPack) -> Bool {
+        recipes.contains { $0.packKey == pack.key }
+    }
+
+    private func remove(_ recipe: Recipe) {
+        Task {
+            await RecipeStore.shared.remove(recipe.id)
+            await reload()
+        }
+    }
+
+    private func reload() async {
+        recipes = await RecipeStore.shared.all()
+    }
+}
+
+// MARK: Transparency (v9)
+
+struct TransparencyTab: View {
+    @State private var context: GeminiClient.SystemContext?
+    @State private var decisions: [RoutingLogEntry] = []
+    @State private var work: [WorkEntry] = []
+    @State private var todayEvents: [TimelineEvent] = []
+    @State private var projects: [String] = []
+    private let localFirstOn = AppSettings.shared.localFirstEnabled
+
+    var body: some View {
+        TabHead(title: "Transparency", subtitle: "No black boxes — what Aria sees, which model answers, and what ran.")
+        SForm {
+            SSection("Context — what Aria sees right now") {
+                if let c = context {
+                    row("Active app", c.currentApp)
+                    row("Window", c.windowTitle.isEmpty ? "—" : c.windowTitle)
+                    row("Selection", c.selection.isEmpty ? "none" : "\(c.selection.count) chars")
+                    row("Focused field", c.focusedField.isEmpty ? "—" : c.focusedField)
+                    Text("Clipboard, Finder selection and browser tabs are pulled only when a command refers to them. Screenshots only when she genuinely needs to see.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text("Reading…").foregroundStyle(.secondary)
+                }
+                Button("Refresh") { refreshContext() }
+            }
+
+            SSection("Model router — recent decisions") {
+                row("Local-first", localFirstOn ? "On" : "Off")
+                if decisions.isEmpty {
+                    Text("No routed calls yet. Decisions appear once tasks run.")
+                        .font(.callout).foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array(decisions.prefix(10).enumerated()), id: \.offset) { _, e in
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: e.decision.tier == .local ? "desktopcomputer" : "cloud")
+                                .foregroundStyle(e.decision.tier == .local ? Color.green : .blue)
+                                .frame(width: 16)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("\(e.decision.taskClass.rawValue) → \(e.decision.tier.rawValue)")
+                                    .font(.system(size: 12, weight: .semibold))
+                                Text(e.decision.reason).font(.caption2).foregroundStyle(.secondary)
+                                Text(e.date.formatted(date: .omitted, time: .shortened))
+                                    .font(.caption2).foregroundStyle(.tertiary)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                    }
+                }
+            }
+
+            SSection("Timeline — today") {
+                if todayEvents.isEmpty {
+                    Text("Ask “what did I do today?” or “show my week” anytime. Tasks, agent runs and actions all land here as they happen.")
+                        .font(.callout).foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array(todayEvents.suffix(10).enumerated()), id: \.offset) { _, e in
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: e.source == .action ? "bolt" : (e.source == .agent ? "clock.arrow.2.circlepath" : "waveform"))
+                                .font(.system(size: 10))
+                                .foregroundStyle(e.ok ? Color.green : .orange)
+                                .frame(width: 14)
+                                .padding(.top, 3)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(e.title).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                                HStack(spacing: 6) {
+                                    Text(e.date.formatted(date: .omitted, time: .shortened))
+                                        .font(.caption2).foregroundStyle(.tertiary)
+                                    if let p = e.project {
+                                        Text(p).font(.caption2).foregroundStyle(.secondary)
+                                            .padding(.horizontal, 5).padding(.vertical, 1)
+                                            .background(Capsule().fill(Color.secondary.opacity(0.12)))
+                                    }
+                                }
+                            }
+                            Spacer(minLength: 0)
+                        }
+                    }
+                }
+                if !projects.isEmpty {
+                    Text("Projects: \(projects.joined(separator: ", "))")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+
+            SSection("Workflow history") {
+                if work.isEmpty {
+                    Text("Everything Aria completes — voice tasks and background agents — appears here. Per-action detail lives in the Activity tab.")
+                        .font(.callout).foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array(work.prefix(12).enumerated()), id: \.offset) { _, e in
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: e.kind == .agent ? "clock.arrow.2.circlepath" : "waveform")
+                                .font(.system(size: 10))
+                                .foregroundStyle(e.ok ? Color.green : .orange)
+                                .frame(width: 14)
+                                .padding(.top, 3)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(e.title).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                                if !e.outcome.isEmpty {
+                                    Text(e.outcome).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                                }
+                                Text(e.date.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.caption2).foregroundStyle(.tertiary)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                    }
+                    Text("Per-action detail lives in the Activity tab.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .task {
+            refreshContext()
+            decisions = await RoutingLog.shared.recent(10)
+            work = await WorkJournal.shared.recent(12)
+            let now = Date()
+            todayEvents = await Timeline().events(from: Calendar.current.startOfDay(for: now), to: now)
+            projects = await WorkJournal.shared.projects(limit: 6)
+        }
+    }
+
+    private func refreshContext() {
+        context = AgentOrchestrator.currentSystemContext()
+    }
+
+    private func row(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Text(value).foregroundStyle(.secondary).lineLimit(1)
+        }
+    }
+}
+
+// MARK: API key
+
+struct APIKeyTab: View {
+    @StateObject private var settings = AppSettings.shared
+    @State private var key: String = ""
+    @State private var groq: String = ""
+    @State private var cerebras: String = ""
+    @State private var openRouter: String = ""
+    @State private var status: String = ""
+
+    private var keyCount: Int {
+        key.split(whereSeparator: { $0 == "\n" || $0 == "," })
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.count
+    }
+
+    var body: some View {
+        TabHead(title: "Your Gemini Keys", subtitle: "Stored securely in the macOS Keychain. Never transmitted by Aria.")
+        SForm {
+            SSection("API Keys") {
+                TextEditor(text: $key)
+                    .font(.system(.body, design: .monospaced))
+                    .frame(minHeight: 90)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
+                HStack {
+                    Button("Save") { save() }.buttonStyle(.borderedProminent)
+                    Button("Clear") {
+                        KeychainManager.delete(account: KeychainKey.geminiAPIKey)
+                        key = ""; status = "Cleared."
+                    }
+                    Spacer()
+                    Text("\(keyCount) key\(keyCount == 1 ? "" : "s")").foregroundStyle(.secondary).font(.caption)
+                }
+                if !status.isEmpty { Text(status).foregroundStyle(.green).font(.caption) }
+                Text("One key per line. Aria rotates across them — when one hits its daily free-tier limit, she switches to the next. **Click Save** after pasting.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            SSection("More free quota") {
+                Text("Get free keys at aistudio.google.com. Each Google project has its own free daily quota, so adding 2–3 keys from different projects multiplies how much you can do for free.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            SSection("Free fallback providers") {
+                SecureField("Groq key (groq.com — free, fast)", text: $groq)
+                SecureField("Cerebras key (cerebras.ai — free, fast)", text: $cerebras)
+                SecureField("OpenRouter key (openrouter.ai — free tier)", text: $openRouter)
+                Text("When your Gemini quota runs out, Aria automatically continues on these free, fast providers — so she keeps working. Each is free to sign up; add any you like, then Save.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            SSection("Local model") {
+                LocalModelSetupView()
+                Toggle("Use a local model when everything else is out (Ollama)", isOn: $settings.localModelEnabled)
+                Toggle("Local-first: prefer the local model for everyday tasks", isOn: $settings.localFirstEnabled)
+                if settings.localModelEnabled || settings.localFirstEnabled {
+                    TextField("Ollama model", text: $settings.localModelName)
+                }
+                if settings.localFirstEnabled {
+                    TextField("Local vision model (Lens / screen — optional)", text: $settings.localVisionModel)
+                    Text("On-device screen understanding for Lens (⌥⇧C circle-to-explain) and computer-use targeting. Pull a vision model — e.g. `ollama pull qwen2.5vl` or `llava` — and put its name here. Leave blank to use cloud vision (Gemini).")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if settings.localFirstEnabled {
+                    Toggle("Local conversation too (experimental)", isOn: $settings.localChatEnabled)
+                    Text("Planning, agents, knowledge and similar work runs on your Mac first — private, free, no quota — with automatic cloud fallback. Live conversation can run locally too, but needs a fast instruct model (thinking models like Qwen 3.5 take minutes per spoken reply; try llama3.1:8b or qwen2.5:7b-instruct). Requires Ollama (ollama.com) with the model pulled.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else if settings.localModelEnabled {
+                    Text("Last resort — works offline. Requires Ollama running (ollama.com) with the model pulled. Slower, but never hits a limit.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .onAppear {
+            key = KeychainManager.read(account: KeychainKey.geminiAPIKey) ?? ""
+            groq = KeychainManager.read(account: KeychainKey.groqAPIKey) ?? ""
+            cerebras = KeychainManager.read(account: KeychainKey.cerebrasAPIKey) ?? ""
+            openRouter = KeychainManager.read(account: KeychainKey.openRouterAPIKey) ?? ""
+        }
+    }
+
+    private func save() {
+        func put(_ v: String, _ account: String) {
+            let t = v.trimmingCharacters(in: .whitespacesAndNewlines)
+            if t.isEmpty { KeychainManager.delete(account: account) } else { try? KeychainManager.save(t, account: account) }
+        }
+        put(key, KeychainKey.geminiAPIKey)
+        put(groq, KeychainKey.groqAPIKey)
+        put(cerebras, KeychainKey.cerebrasAPIKey)
+        put(openRouter, KeychainKey.openRouterAPIKey)
+        status = "Saved \(keyCount) Gemini key\(keyCount == 1 ? "" : "s") + providers to Keychain."
+    }
+}
+
+// MARK: Memory
+
+struct MemorySettingsTab: View {
+    @State private var facts: [MemoryFact] = []
+
+    var body: some View {
+        TabHead(title: "What Aria Remembers", subtitle: "Durable facts Aria recalls across sessions. Say “remember that …” to add one.")
+        SForm {
+            SSection("Memories (\(facts.count))") {
+                if facts.isEmpty {
+                    Text("Nothing remembered yet.").foregroundStyle(.secondary).font(.callout)
+                } else {
+                    ForEach(facts) { fact in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(fact.text).font(.system(size: 13))
+                                Text(fact.createdAt.formatted(date: .abbreviated, time: .omitted))
+                                    .font(.caption2).foregroundStyle(.tertiary)
+                            }
+                            Spacer()
+                            Button(role: .destructive) {
+                                Task { await LongTermMemory.shared.forget(id: fact.id); await reload() }
+                            } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
+                        }
+                        Divider()
+                    }
+                }
+            }
+
+            if !facts.isEmpty {
+                SSection {
+                    Button("Forget everything", role: .destructive) {
+                        Task { await LongTermMemory.shared.clear(); await reload() }
+                    }
+                }
+            }
+        }
+        .task { await reload() }
+    }
+
+    private func reload() async {
+        facts = await LongTermMemory.shared.all().sorted { $0.createdAt > $1.createdAt }
+    }
+}
+
+// MARK: Activity
+
+struct ActivityTab: View {
+    @State private var entries: [ActivityEntry] = []
+
+    var body: some View {
+        TabHead(title: "Activity", subtitle: "A traceable log of every action Aria has taken. Newest first.")
+        SForm {
+            SSection("Recent actions (\(entries.count))") {
+                if entries.isEmpty {
+                    Text("No actions recorded yet.").foregroundStyle(.secondary).font(.callout)
+                } else {
+                    ForEach(entries) { e in
+                        HStack(alignment: .top, spacing: 9) {
+                            Circle().fill(color(for: e.outcome)).frame(width: 8, height: 8).padding(.top, 5)
+                            VStack(alignment: .leading, spacing: 1) {
+                                HStack(spacing: 6) {
+                                    Text(e.tool).font(.system(size: 13, weight: .semibold))
+                                    if !e.detail.isEmpty {
+                                        Text(e.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                    }
+                                }
+                                if !e.summary.isEmpty {
+                                    Text(e.summary).font(.caption2).foregroundStyle(.tertiary).lineLimit(2)
+                                }
+                                Text(e.date.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.caption2).foregroundStyle(.tertiary)
+                            }
+                            Spacer(minLength: 0)
+                            Text(e.outcome.rawValue).font(.caption2).foregroundStyle(color(for: e.outcome))
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        if e.id != entries.last?.id { Divider() }
+                    }
+                }
+            }
+            if !entries.isEmpty {
+                SSection {
+                    Button("Clear activity log", role: .destructive) {
+                        Task { await ActivityLog.shared.clear(); await reload() }
+                    }
+                }
+            }
+        }
+        .task { await reload() }
+    }
+
+    private func reload() async { entries = await ActivityLog.shared.recent(100) }
+
+    private func color(for outcome: ActivityEntry.Outcome) -> Color {
+        switch outcome {
+        case .ok:       return .green
+        case .failed:   return .orange
+        case .declined: return .secondary
+        }
+    }
+}
+
+// MARK: Tools
+
+struct ToolsTab: View {
+    @StateObject private var settings = AppSettings.shared
+    private let toolNames = ToolRegistry.builtins().map { type(of: $0).name }.sorted()
+
+    var body: some View {
+        TabHead(title: "Tool Permissions", subtitle: "Choose which built-in tools Aria can use on your behalf.")
+        SForm {
+            SSection("Enabled Tools") {
+                ForEach(toolNames, id: \.self) { name in
+                    Toggle(name, isOn: Binding(
+                        get: { !settings.disabledTools.contains(name) },
+                        set: { on in
+                            if on { settings.disabledTools.remove(name) }
+                            else { settings.disabledTools.insert(name) }
+                        }))
+                }
+            }
+        }
+    }
+}
+
+// MARK: Dynamic tools
+
+struct DynamicToolsTab: View {
+    @State private var s = DynamicToolSettings.load()
+
+    var body: some View {
+        TabHead(title: "Dynamic Tools", subtitle: "Let Aria generate and run code to extend its own capabilities.")
+        SForm {
+            SSection("Execution") {
+                Toggle("Allow Aria to write and run code", isOn: $s.allowCodeExecution)
+                Toggle("Show code before running", isOn: $s.showCodeBeforeRun)
+                Toggle("Ask before saving new tools", isOn: $s.askBeforeSaving)
+                Toggle("Sync community tools", isOn: $s.syncCommunityTools)
+            }
+            SSection("Storage") {
+                Text("Generated tools live in Application Support/Aria/tools.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .onChange(of: s.allowCodeExecution) { _, _ in s.save() }
+        .onChange(of: s.showCodeBeforeRun) { _, _ in s.save() }
+        .onChange(of: s.askBeforeSaving) { _, _ in s.save() }
+        .onChange(of: s.syncCommunityTools) { _, _ in s.save() }
+    }
+}
+
+// MARK: Brain (learning)
+
+struct BrainTab: View {
+    @State private var s = LearningSettings.load()
+
+    var body: some View {
+        TabHead(title: "On-Device Learning", subtitle: "Aria observes your patterns locally to get smarter over time.")
+        SForm {
+            SSection("Behavior") {
+                Toggle("Learning enabled", isOn: $s.enabled)
+                Toggle("Pause all automations", isOn: $s.automationsPaused)
+                HStack {
+                    Text("Sensitivity")
+                    Slider(value: $s.sensitivity, in: 0.6...0.9, step: 0.05)
+                    Text(label(for: s.sensitivity)).font(.caption).frame(width: 90, alignment: .trailing)
+                }
+            }
+            SSection("About") {
+                Text("Conservative requires more confidence before suggesting; Aggressive suggests sooner.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("All learning happens on-device. Nothing is sent anywhere.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .onChange(of: s.enabled) { _, _ in s.save() }
+        .onChange(of: s.automationsPaused) { _, _ in s.save() }
+        .onChange(of: s.sensitivity) { _, _ in s.save() }
+    }
+
+    private func label(for v: Double) -> String {
+        v >= 0.85 ? "Conservative" : v <= 0.65 ? "Aggressive" : "Balanced"
+    }
+}
+
+// MARK: Mirror
+
+struct MirrorTab: View {
+    @State private var s = MirrorSettings.load()
+    @State private var portText = "8765"
+
+    var body: some View {
+        TabHead(title: "Mirror Bridge", subtitle: "Stream Aria\u{2019}s context to companion apps on your local network.")
+        SForm {
+            SSection("Connection") {
+                Toggle("Enable Mirror Bridge", isOn: $s.enabled)
+                TextField("Port", text: $portText)
+                HStack {
+                    Circle().fill(s.enabled ? .green : .gray).frame(width: 8, height: 8)
+                    Text(s.enabled ? MirrorBridge.ConnectionState.notConnected.rawValue : "Disabled")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            SSection("Help") {
+                Text("Set-up guide coming soon.").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .onAppear { portText = String(s.port) }
+        .onChange(of: s.enabled) { _, _ in persist() }
+        .onChange(of: portText) { _, _ in persist() }
+    }
+
+    private func persist() {
+        s.port = Int(portText) ?? 8765
+        s.save()
+    }
+}
+
+// MARK: Crew
+
+struct CrewSettingsTab: View {
+    private let crew = SubAgentRegistry.crewInfo()
+
+    var body: some View {
+        TabHead(title: "Crew", subtitle: "Aria\u{2019}s specialist sub-agents \u{2014} each handles a kind of work.")
+        SForm {
+            SSection {
+                ForEach(crew, id: \.name) { c in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(c.name).font(.headline)
+                        Text(c.persona).font(.caption).foregroundStyle(.secondary)
+                        Text(c.description).font(.caption2).foregroundStyle(.tertiary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 2)
+                    if c.name != crew.last?.name { Divider() }
+                }
+            }
+        }
+    }
+}
+
+// MARK: Voice
+
+struct VoiceSettingsTab: View {
+    @StateObject private var settings = AppSettings.shared
+    @State private var elevenKey = ""
+    private let geminiVoices = ["Kore", "Puck", "Charon", "Fenrir", "Aoede", "Leda", "Orus", "Zephyr"]
+    /// Installed offline voices, best first (computed once per body pass).
+    private var offlineVoices: [LocalVoice.Candidate] {
+        LocalVoice.installedCandidates().sorted { a, b in
+            if a.quality != b.quality { return a.quality > b.quality }
+            return a.name < b.name
+        }
+    }
+
+    private static func voiceLabel(_ candidate: LocalVoice.Candidate) -> String {
+        if candidate.quality >= 2 { return "\(candidate.name) ★" }
+        if candidate.quality == 1 { return "\(candidate.name) ✦" }
+        return candidate.name
+    }
+
+    var body: some View {
+        TabHead(title: "How Aria Speaks", subtitle: "Natural neural voice — free and unlimited by default.")
+        SForm {
+            SSection("Voice") {
+                Toggle("Speak responses aloud", isOn: $settings.voiceEnabled)
+                Toggle("Interaction sounds (wake & done chimes)", isOn: $settings.uiSoundsEnabled)
+                if settings.uiSoundsEnabled {
+                    Picker("Sound theme", selection: $settings.soundTheme) {
+                        ForEach(SoundTheme.allCases, id: \.rawValue) {
+                            Text($0.label).tag($0.rawValue)
+                        }
+                    }
+                    Text("Same gestures, different voicing — Aurora is soft sine, Crystal is bright glass, Calm is low and round.")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
+            }
+
+            SSection("Engine") {
+                Picker("Voice engine", selection: $settings.ttsEngine) {
+                    ForEach(VoiceEngine.TTSEngine.allCases, id: \.rawValue) {
+                        Text($0.label).tag($0.rawValue)
+                    }
+                }
+                Text("Edge is free, needs no key, and never hits a quota — natural Microsoft neural voices, unlimited. Gemini and ElevenLabs use your own key. Whatever's picked, Aria falls back so she's never silent.")
+                    .font(.caption).foregroundStyle(.secondary)
+
+                if settings.ttsEngine == "edge" {
+                    Picker("Edge voice", selection: $settings.edgeVoiceName) {
+                        ForEach(EdgeTTS.voices, id: \.id) { Text($0.label).tag($0.id) }
+                    }
+                }
+                if settings.ttsEngine == "gemini" {
+                    Picker("Gemini voice", selection: $settings.geminiVoiceName) {
+                        ForEach(geminiVoices, id: \.self) { Text($0).tag($0) }
+                    }
+                    Text("Uses your Gemini key (Settings → API Key). Metered — falls back to Edge/system if a line is rate-limited.")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
+                if settings.ttsEngine == "elevenlabs" {
+                    Picker("ElevenLabs voice", selection: $settings.elevenLabsVoiceID) {
+                        ForEach(ElevenLabsTTS.voices, id: \.id) { Text($0.label).tag($0.id) }
+                    }
+                    SecureField("ElevenLabs API key (elevenlabs.io — free tier)", text: $elevenKey)
+                        .onChange(of: elevenKey) { _, v in
+                            let t = v.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if t.isEmpty { KeychainManager.delete(account: KeychainKey.elevenLabsAPIKey) }
+                            else { try? KeychainManager.save(t, account: KeychainKey.elevenLabsAPIKey) }
+                        }
+                    Text("Best-in-class quality, 10k characters/month free. Without a key, Aria uses the free Edge voice.")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
+            }
+
+            SSection("Offline fallback") {
+                Picker("Offline voice", selection: $settings.localVoiceID) {
+                    Text("Best installed (automatic)").tag("")
+                    ForEach(offlineVoices, id: \.id) { candidate in
+                        Text(Self.voiceLabel(candidate)).tag(candidate.id)
+                    }
+                }
+                Text("Used when there's no network at all — Aria never goes silent. ★ premium, ✦ enhanced. Download more natural voices in System Settings → Accessibility → Spoken Content → System Voice → Manage Voices.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .onAppear { elevenKey = KeychainManager.read(account: KeychainKey.elevenLabsAPIKey) ?? "" }
+    }
+}

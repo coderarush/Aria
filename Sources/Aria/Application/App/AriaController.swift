@@ -1,0 +1,1737 @@
+import SwiftUI
+import AppKit
+import Combine
+import EventKit
+import Carbon.HIToolbox
+
+/// Top-level coordinator that owns the runtime engines and the Island panel, and
+/// wires wake → listen → think → respond. Lives for the app's lifetime.
+@MainActor
+final class AriaController {
+
+    /// Exposed for `AriaShortcuts` / `RunAriaCommandIntent`. Set once by
+    /// `AppDelegate` when it creates the controller. Unsafe storage is fine here
+    /// because it's written exactly once on the main actor before any shortcut
+    /// can fire, and AppIntents call `perform()` on the main actor.
+    nonisolated(unsafe) static weak var shared: AriaController?
+
+    let islandViewModel = IslandViewModel()
+    private let audioBus = AudioBus()
+    private let wakeEngine = WakeWordEngine()
+    private let voice = VoiceEngine()
+    private let bargeController = BargeController()
+    private let speakerGate = SpeakerGate()
+    private let computerUseIndicator = ComputerUseIndicator()
+    private let orchestrator = AgentOrchestrator()
+    /// Routes the non-streaming command path through the migration bridge.
+    /// Defaults to `.legacy` ⇒ byte-identical forwarding to `orchestrator`;
+    /// advancing the stage is the deliberate, parity-gated production flip.
+    private lazy var responseBridge = OrchestratorBridge.makeResponse(legacyHandler: orchestrator)
+    private let patternEngine = PatternEngine()
+    private var panel: IslandPanel?
+    private let taskViewModel = TaskViewModel()
+    private var taskPanel: TaskPanel?
+    private var learningTimer: Timer?
+    /// Fires every 60 s to tick the Pomodoro session timer.
+    private var pomodoroTimer: Timer?
+    // Proactive Presence (v9): ambient anticipation that surfaces a single
+    // suggestion silently on the orb and speaks it only when you wake/glance.
+    private var proactiveEngine: ProactiveEngine?
+    private var proactivePresenter: SuggestionPresenter?
+    private var proactiveTimer: Timer?
+    private var proactiveExpiryTimer: Timer?
+    /// True between revealing a suggestion and hearing the user's yes/no, so the
+    /// next command is interpreted as the answer.
+    private var proactiveAwaitingReply = false
+    /// Background agents (v9): recurring workflows + folder watchers, run
+    /// silently through the same autonomy engine + safety gates.
+    private var agentCoordinator: AgentCoordinator?
+    /// Live Loop: the always-on perceive → anticipate → act → remember cycle
+    /// (design 2026-06-24). Auto tier preps/briefs; confirm tier rides the same
+    /// SuggestionPresenter card as Proactive Presence.
+    private var liveLoop: LiveLoop?
+    /// Feeds frontmost-app switches into the Live Loop's friction signal.
+    private var liveScreenSignal: ScreenActivitySignal?
+    private var liveLoopActivationObserver: NSObjectProtocol?
+    /// Push-to-talk (⌥Space) and type-to-Aria (⌥⇧Space) global hotkeys.
+    private var hotkeyTap: HotkeyTap?
+    private var liquidSurfacePanel: LiquidSurfacePanel?
+    private var lensOverlay: LensOverlayController?
+    private var stageController: AriaStageController?
+    /// Latest HUD blob center in screen points, for anchoring the worker swarm.
+    private var lastBlobCenter: CGPoint?
+    /// Independent of `currentTurnTask` so it survives other commands.
+    private var regionWatchTask: Task<Void, Never>?
+    /// True while a guided walkthrough is mid-flight (its loop is `currentTurnTask`).
+    private var walkthroughActive = false
+    private let dictation = DictationController()
+    /// Set by startDictation(); the next captured transcript is inserted as text
+    /// rather than handled as a command. Reset the instant it's consumed.
+    private var dictationPending = false
+    /// True while a command is running with no user present (proactive auto-act,
+    /// learning-cycle automation). A destructive confirmation during an unattended
+    /// run is declined rather than blocking on a modal nobody will answer.
+    private var unattendedActive = false
+    /// True while a destructive-confirmation modal is open, so a second one can't
+    /// stack re-entrantly through the run-loop the modal pumps.
+    private var isConfirming = false
+    /// Delivers system notifications for Aria-level events (agent completion, etc.).
+    let notificationBridge = NotificationBridge.shared
+    private var settingsCancellable: AnyCancellable?
+    /// True while Aria is speaking; keeps wake suspended even if the pill
+    /// auto-hides mid-utterance, so she can't hear herself and re-trigger.
+    private var isSpeaking = false
+    /// Word counter for the caption tick sound — plays every ~4 words of streamed response text.
+    private var tickWordCount = 0
+    /// Whether the confirm chime has already fired for the current streaming turn.
+    private var confirmChimeFired = false
+    private var streamVoice: StreamingVoice!
+    private var session: ConversationSession?
+    private var convSilenceTimer: Timer?
+    /// True while an autonomous task is executing. Gates `streamVoice.onAllFinished`
+    /// so a queue-drain mid-task (e.g. after the spoken plan) doesn't re-arm wake
+    /// before the task is actually done.
+    private var taskActive = false
+    /// The in-flight streaming turn task; cancelled on barge-in.
+    private var currentTurnTask: Task<Void, Never>?
+    /// When the current TTS turn started; used to enforce a 0.5 s arm-grace
+    /// so we don't immediately barge-in on the very first audio burst.
+    private var speechStartedAt = Date.distantPast
+
+    func start() {
+        Log.trace("start: begin")
+        // Pre-warm Combine's Published generic metadata ON THE MAIN THREAD before
+        // the audio pipeline starts. In debug builds (no metadata
+        // prespecialization) the first instantiation under concurrency — audio
+        // thread feeding levels vs main thread — deadlocked the main thread in
+        // MetadataCacheEntryBase::awaitSatisfyingState (sampled live).
+        islandViewModel.updateAudioLevel(0)
+        islandViewModel.updateAudioLevel(0.01)
+        setupPanel();              Log.trace("start: panel")
+        wireEngine();              Log.trace("start: engine wired")
+        configureConfirmation()
+        configureLearning();       Log.trace("start: learning")
+        startListening()
+        offerResumeIfPending()
+        reindexKnowledgeIfEnabled()
+        // Bisect kill-switches: `defaults write com.aria.agent app.disableX -bool true`
+        let d = UserDefaults.standard
+        if !d.bool(forKey: "app.disableAgents") { configureBackgroundAgents(); Log.trace("start: agents") }
+        if !d.bool(forKey: "app.disableLiveLoop") { configureLiveLoop(); Log.trace("start: liveloop") }
+        if !d.bool(forKey: "app.disableHotkeys") { configureHotkeys() }
+        configureDebugHooks()
+        warmLocalModel()
+        Task.detached(priority: .utility) { await ClipboardContext.shared.start() }
+        Log.trace("start: done")
+    }
+
+    /// Pull the local model into RAM right after launch so the FIRST real turn
+    /// doesn't pay the cold-load + prompt-eval penalty (measured ~2-3 min cold
+    /// on a 4B model with the full tool catalog; warm it's seconds). Quiet,
+    /// background, only when local-first is on and a server is reachable.
+    private func warmLocalModel() {
+        Task.detached(priority: .utility) {
+            let router = LocalFirstRouter()
+            guard await router.chatGoesLocal() else { return }
+            let model = router.localModelName.isEmpty ? OllamaProvider.defaultModel : router.localModelName
+            let provider = OllamaProvider(model: model)
+            Log.trace("local: warming \(model)…")
+            let start = Date()
+            _ = try? await provider.generateText(prompt: "Reply with: ok", temperature: 0)
+            Log.trace("local: warm in \(Int(Date().timeIntervalSince(start)))s")
+            // Keep it resident: Ollama unloads after ~5 idle minutes, which
+            // would put the cold-load penalty back on the next conversation.
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 240_000_000_000)   // 4 min
+                guard await router.chatGoesLocal() else { continue }
+                _ = try? await provider.generateText(prompt: "ok", temperature: 0)
+            }
+        }
+    }
+
+    /// Global hotkeys: ⌥Space = push-to-talk summon (coexists with the wake
+    /// phrase), ⌥⇧Space = type to Aria. CGEvent tap (consumes the keystroke;
+    /// rides the Accessibility trust Aria already has for computer use).
+    private func configureHotkeys() {
+        hotkeyTap = HotkeyTap(
+            onTalk: { [weak self] in self?.summonAria() },
+            onType: { [weak self] in self?.showTypePanel() },
+            onDictate: { [weak self] in self?.startDictation() },
+            onQuickCapture: { [weak self] in self?.showTypePanel() },   // ⌥⌥ → command palette
+            onLens: { [weak self] in self?.startLens() })               // ⌥⇧C → circle to explain
+        if hotkeyTap?.start() != true {
+            // Accessibility not granted yet (or granted AFTER launch — taps
+            // can't be created retroactively). Keep retrying so the user never
+            // has to relaunch after flipping the toggle in System Settings.
+            retryHotkeysUntilLive()
+        }
+    }
+
+    private func retryHotkeysUntilLive(attempt: Int = 0) {
+        guard attempt < 120 else { return }   // give up after ~30 min
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+            guard let self, let tap = self.hotkeyTap else { return }
+            if tap.start() {
+                Log.trace("hotkeys: live after retry \(attempt + 1)")
+            } else {
+                self.retryHotkeysUntilLive(attempt: attempt + 1)
+            }
+        }
+    }
+
+    /// Push-to-talk: same flow as hearing "Hey Aria". The engine no-ops while
+    /// suspended (she's speaking) or already capturing.
+    func summonAria() {
+        wakeEngine.summon()
+    }
+
+    /// Lens (⌥⇧C / menu / "what's this"): drop a full-screen, see-through canvas
+    /// so the user can circle anything on screen; Aria captures just that region
+    /// and explains it. Local-first — the image stays on device when a local
+    /// vision model is configured (see `VisionRouter`). Idempotent: a second
+    /// trigger while the overlay is up is ignored.
+    func startLens(mode: LensSession.Mode = .explain) {
+        guard lensOverlay == nil else { return }
+        let overlay = LensOverlayController(mode: mode,
+                                            accent: islandViewModel.accent,
+                                            glow: islandViewModel.glowColors)
+        overlay.onExplain = { [weak self] _, fraction in
+            self?.dismissLens()
+            self?.runLensExplain(fraction: fraction)
+        }
+        overlay.onCancel = { [weak self] in self?.dismissLens() }
+        lensOverlay = overlay
+        overlay.present()
+    }
+
+    private func dismissLens() {
+        lensOverlay?.dismiss()
+        lensOverlay = nil
+    }
+
+    /// Capture the circled region and explain it through the blob + voice, the
+    /// same surface every other answer uses. OCR-first: most circled things are
+    /// text/UI, so we read the region on-device (Vision.framework) and explain via
+    /// the local-first text model — no vision model needed, and far more reliable
+    /// than asking a multimodal model to read a tiny crop. Pure images fall back
+    /// to `VisionRouter` (local vision if configured, else Gemini).
+    private func runLensExplain(fraction: CGRect) {
+        islandViewModel.beginThinking()
+        currentTurnTask?.cancel()
+        currentTurnTask = Task { @MainActor in
+            // Let the overlay fully clear the screen before the screenshot so the
+            // scrim/ink never end up in the captured image.
+            try? await Task.sleep(nanoseconds: 160_000_000)
+            let screen = ScreenCaptureEngine()
+            guard let jpeg = try? await screen.captureRegionJPEG(fraction: fraction) else {
+                self.islandViewModel.showError("I couldn't capture that area.")
+                self.speakAndListen("I couldn't capture that area.")
+                return
+            }
+            let ocr = (await ScreenOCR.text(inJPEG: jpeg) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !Task.isCancelled else { return }
+            // Remember what was circled (text + region) so a follow-up ("translate
+            // that", "fix this", "watch this") can act on it without re-circling.
+            LensMemory.shared.record(text: ocr, fraction: fraction)
+
+            var answer: String
+            if ocr.count >= 10 {
+                // Text-bearing region — explain locally from the recognized text, with
+                // a prompt tailored to what was circled (error → fix, code → explain,
+                // math → solve, else plain explanation).
+                let kind = LensClassifier.kind(of: ocr)
+                let prompt = LensClassifier.prompt(for: kind, ocr: ocr)
+                answer = (try? await self.orchestrator.geminiClient.generateText(prompt: prompt, temperature: 0.2)) ?? ""
+                if answer.isEmpty { answer = "It says: \(String(ocr.prefix(280)))" }
+            } else {
+                // Little/no text (a diagram, photo, icon) — use the vision path.
+                let prompt = """
+                The user circled a region of their Mac screen (this image is just that region). \
+                In 1–3 short sentences, plainly explain what it is and what it does or means. \
+                Be concrete and useful; no preamble.
+                """
+                answer = await VisionRouter.explain(prompt: prompt, jpeg: jpeg)
+                    ?? "I couldn't read anything in that area. Try circling a bit wider, or add a Gemini key / local vision model in Settings for images."
+            }
+            guard !Task.isCancelled else { return }
+            self.islandViewModel.showResponse(answer)
+            self.speakAndListen(answer)
+        }
+    }
+
+    /// Guided walkthrough ("walk me through exporting a PDF"): Aria reads the
+    /// current screen, plans the steps, and then POINTS at each one in turn with a
+    /// labeled blob + spoken instruction — the tutor-beside-you move, on the whole
+    /// desktop and local-first. She guides; you do the clicking.
+    func startWalkthrough(task: String) {
+        islandViewModel.beginThinking()
+        currentTurnTask?.cancel()
+        walkthroughActive = true
+        currentTurnTask = Task { @MainActor in
+            defer { self.walkthroughActive = false; AriaStage.shared.clearMarkers() }
+            let ocr = (try? await ScreenOCR.live.readAndTruncate(maxChars: 1600)) ?? ""
+            let prompt = """
+            The user wants a step-by-step walkthrough of: "\(task)".
+            Here is text currently visible on their screen:
+            \"\"\"
+            \(ocr)
+            \"\"\"
+            Output ONLY a JSON array of up to 6 ordered steps. Each step is an object:
+            {"element":"the on-screen control to interact with, named so it can be found",
+            "instruction":"a short imperative telling the user what to do"}.
+            No prose, no markdown — just the JSON array.
+            """
+            let raw = (try? await self.orchestrator.geminiClient.generateText(prompt: prompt, temperature: 0.2)) ?? ""
+            let steps = WalkthroughPlan.parse(raw)
+            guard !Task.isCancelled else { return }
+            guard !steps.isEmpty else {
+                let msg = "I couldn't work out the steps for that here."
+                self.islandViewModel.showResponse(msg); self.speakAndListen(msg); return
+            }
+            for (i, step) in steps.enumerated() {
+                if Task.isCancelled { break }
+                AriaStage.shared.clearMarkers()
+                if !step.element.isEmpty, let hit = await VisionLocator.locateScored(step.element) {
+                    AriaStage.shared.point(at: hit.point, label: "\(i + 1). \(step.instruction)", ttl: 14)
+                }
+                guard !Task.isCancelled else { break }
+                self.islandViewModel.showResponse("Step \(i + 1): \(step.instruction)")
+                self.streamVoice.enqueue("Step \(i + 1). \(step.instruction)")
+                // Pace by how much there is to read/do: longer instructions get
+                // more time. Clamped so it never drags or rushes.
+                let words = step.instruction.split(separator: " ").count
+                let secs = min(max(3.0 + Double(words) * 0.45, 4.0), 9.0)
+                try? await Task.sleep(nanoseconds: UInt64(secs * 1_000_000_000))
+            }
+            AriaStage.shared.clearMarkers()
+            guard !Task.isCancelled else { return }
+            let done = "That's the walkthrough — \(steps.count) step\(steps.count == 1 ? "" : "s")."
+            self.islandViewModel.showResponse(done)
+            self.speakAndListen(done)
+        }
+    }
+
+    /// "Watch this" — after circling a region, poll just that region and notify
+    /// when its content meaningfully changes (a build finishes, a number updates).
+    /// Runs independently of the conversation so other commands don't cancel it;
+    /// fires once, then stops. Capped at 20 minutes.
+    func startRegionWatch(fraction: CGRect) {
+        regionWatchTask?.cancel()
+        regionWatchTask = Task { @MainActor in
+            let screen = ScreenCaptureEngine()
+            guard let baseShot = try? await screen.captureRegionJPEG(fraction: fraction) else {
+                let m = "I couldn't capture that area to watch."
+                self.islandViewModel.showResponse(m); self.speakAndListen(m); return
+            }
+            let baseline = (await ScreenOCR.text(inJPEG: baseShot)) ?? ""
+            let ack = "Watching that — I'll let you know when it changes."
+            self.islandViewModel.showResponse(ack); self.speakAndListen(ack)
+
+            let started = Date()
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 12_000_000_000)
+                if Task.isCancelled { break }
+                if Date().timeIntervalSince(started) > 1200 { break }   // 20-min cap
+                guard let shot = try? await screen.captureRegionJPEG(fraction: fraction) else { continue }
+                let now = (await ScreenOCR.text(inJPEG: shot)) ?? ""
+                if RegionChange.changed(from: baseline, to: now) {
+                    Notifier.notify(title: "That changed", body: String(now.prefix(120)))
+                    let line = "Heads up — the part you circled just changed."
+                    self.islandViewModel.showResponse(line); self.speakAndListen(line)
+                    break
+                }
+            }
+        }
+    }
+
+    /// Call off any on-screen activity Aria is driving — a region watch, a guided
+    /// walkthrough, and any guidance markers / worker blobs — so the screen is left
+    /// clean. Safe to call any time; only touches the conversation turn if it's a
+    /// walkthrough.
+    @discardableResult
+    private func cancelOnScreenActivity() -> Bool {
+        let wasActive = regionWatchTask != nil || walkthroughActive
+            || !AriaStage.shared.markers.isEmpty || !AriaStage.shared.workers.isEmpty
+        regionWatchTask?.cancel(); regionWatchTask = nil
+        if walkthroughActive { currentTurnTask?.cancel(); walkthroughActive = false }
+        AriaStage.shared.clearMarkers()
+        AriaStage.shared.clearWorkers()
+        return wasActive
+    }
+
+    /// System-wide dictation (⌥⇧D): reuse the exact voice-capture path, but flag
+    /// the next captured transcript to be cleaned and TYPED into the focused app
+    /// instead of routed to the agent (see the divert at the top of handleCommand).
+    func startDictation() {
+        guard AppSettings.shared.dictationEnabled else { return }
+        dictationPending = true
+        islandViewModel.isDictating = true
+        playChime(.task)
+        summonAria()
+    }
+
+    /// Soft interaction chime, AEC-cancelled (played as far-end reference so
+    /// the mic never hears it). Deferred off the caller's stack so it can never
+    /// block the wake path; subtle by design; toggleable in Settings.
+    func playChime(_ kind: UISounds.Kind) {
+        guard AppSettings.shared.uiSoundsEnabled else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            Log.trace("chime: \(kind) start")
+            let samples = UISounds.pcm(for: kind)
+            var pcm = Data(capacity: samples.count * 2)
+            for s in samples {
+                var le = s.littleEndian
+                withUnsafeBytes(of: &le) { pcm.append(contentsOf: $0) }
+            }
+            self.audioBus.playReference(pcm: pcm, pcmRate: UISounds.sampleRate) {
+                Log.trace("chime: \(kind) done")
+            }
+        }
+    }
+
+    /// Local debug hooks for headless driving (summon + typed commands) so the
+    /// capture pipeline can be exercised and traced without a microphone.
+    /// Off unless `defaults write com.aria.agent app.debugHooks -bool true`.
+    private func configureDebugHooks() {
+        guard UserDefaults.standard.bool(forKey: "app.debugHooks") else { return }
+        Log.trace("debug hooks ON")
+        // Selector API with .deliverImmediately — the block API holds
+        // notifications for background (LSUIElement) apps until activation.
+        let dnc = DistributedNotificationCenter.default()
+        dnc.addObserver(self, selector: #selector(debugSummon),
+                        name: Notification.Name("aria.debug.summon"), object: nil,
+                        suspensionBehavior: .deliverImmediately)
+        dnc.addObserver(self, selector: #selector(debugSay(_:)),
+                        name: Notification.Name("aria.debug.say"), object: nil,
+                        suspensionBehavior: .deliverImmediately)
+    }
+
+    @objc private func debugSummon() { summonAria() }
+
+    @objc private func debugSay(_ note: Notification) {
+        let text = note.object as? String ?? ""
+        Log.trace("debug.say: '\(text)'")
+        handleTypedCommand(text)
+    }
+
+    func showTypePanel() {
+        islandViewModel.beginComposing(source: .keyboard)
+        showLiquidSurface(focusEditor: true)
+    }
+
+    /// Menu bar "Pause listening": hard-mutes the wake word and push-to-talk
+    /// until turned back off. The mic stays technically open (tearing the
+    /// audio engine down and back up is the historic source of deafness bugs)
+    /// — Aria simply ignores everything she hears.
+    var isListeningPaused: Bool {
+        get { wakeEngine.manuallyMuted }
+        set {
+            wakeEngine.manuallyMuted = newValue
+            Log.trace("listening \(newValue ? "PAUSED" : "resumed") via menu")
+            if newValue { islandViewModel.dismiss() }
+        }
+    }
+
+    /// One-line status for the menu bar: what Aria last did.
+    func lastActivityLine() async -> String? {
+        if let run = await AgentStore.shared.recentRuns(1).first {
+            let when = run.date.formatted(date: .omitted, time: .shortened)
+            return "\(run.ok ? "✓" : "✗") \(run.agentName) — \(when)"
+        }
+        return nil
+    }
+
+    /// A typed command enters the exact same conversation pipeline as speech.
+    func handleTypedCommand(_ text: String) {
+        if session == nil {
+            wakeEngine.conversationActive = true
+            session = ConversationSession(
+                onEnd: { [weak self] in self?.endConversation() },
+                onTurn: { [weak self] in self?.handleCommand($0) })
+            session?.start()
+        }
+        islandViewModel.beginListening()
+        convSilenceTimer?.invalidate()
+        session?.userSaid(text)
+    }
+
+    /// Background agents run due goals through the normal autonomy engine —
+    /// same tools, same Safety gates — but silently: no voice, no orb takeover.
+    /// Completion always notifies (never hidden), and runs land in history.
+    private func configureBackgroundAgents() {
+        let coordinator = AgentCoordinator(
+            isBusy: { [weak self] in
+                guard let self else { return true }
+                return self.isSpeaking || self.taskActive || self.wakeEngine.conversationActive
+            },
+            runner: { [weak self] goal in
+                guard let self else { return (false, "unavailable") }
+                return await self.runSilentTask(goal: goal)
+            },
+            notify: { [weak self] title, body in
+                guard UserDefaults.standard.object(forKey: "app.notifyAgentRuns") as? Bool ?? true else { return }
+                Notifier.notify(title: title, body: body)
+                // Mirror through NotificationBridge for richer event semantics.
+                let agentName = title.components(separatedBy: " — ").first ?? title
+                Task.detached(priority: .utility) { [weak self] in
+                    await self?.notificationBridge.send(.agentCompleted(name: agentName, summary: body))
+                }
+            })
+        agentCoordinator = coordinator
+        coordinator.start()
+        // Settings tab posts this after any agent add/remove/toggle.
+        NotificationCenter.default.addObserver(forName: .ariaAgentsChanged, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in await self?.agentCoordinator?.refreshWatchers() }
+        }
+    }
+
+    /// Deliver a system notification when a background agent finishes.
+    func notifyAgentCompleted(name: String, summary: String) {
+        Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
+            await self.notificationBridge.send(.agentCompleted(name: name, summary: summary))
+        }
+    }
+
+    /// Run one autonomy goal without touching the voice/orb surfaces; returns
+    /// the engine's final summary.
+    private func runSilentTask(goal: String) async -> (Bool, String) {
+        // The daily briefing is composed deterministically, not planned —
+        // crafted output, fixed inputs, no model roulette.
+        if goal == BriefingComposer.agentSentinel {
+            let (text, ok) = await deliverBriefing(silent: true)
+            // V11 P4: optionally speak the scheduled briefing — but never on
+            // top of an active conversation or task.
+            if ok, AppSettings.shared.briefingSpoken,
+               !isSpeaking, !taskActive, !wakeEngine.conversationActive {
+                speakAndListen(text)
+            }
+            return (ok, String(text.prefix(140)))
+        }
+        actor ResultBox {
+            var value: (Bool, String)?
+            func set(_ v: (Bool, String)) { if value == nil { value = v } }
+        }
+        let box = ResultBox()
+        let priorUnattended = unattendedActive
+        unattendedActive = true
+        defer { unattendedActive = priorUnattended }
+        await orchestrator.runTask(goal: goal, silent: true) { event in
+            if case .finished(let ok, let summary) = event {
+                Task { await box.set((ok, summary)) }
+            }
+        }
+        // The finished event may land via a detached Task — give it a moment.
+        for _ in 0..<20 {
+            if let v = await box.value { return v }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        return (false, "The task ended without reporting a result.")
+    }
+
+    /// Refresh the local knowledge index shortly after launch (incremental —
+    /// unchanged files are skipped, so steady-state cost is a folder walk).
+    /// Strictly opt-in via Settings → Knowledge.
+    private func reindexKnowledgeIfEnabled() {
+        Task.detached(priority: .utility) {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)   // let launch settle
+            let settings = KnowledgeSettings.load()
+            guard settings.enabled, !settings.folders.isEmpty else { return }
+            let stats = await KnowledgeIndex.shared.reindex(folders: settings.folders)
+            Log.trace("knowledge: reindexed \(stats.indexed), skipped \(stats.skipped), removed \(stats.removed)")
+        }
+    }
+
+    /// If a multi-step task was interrupted (crash/quit), proactively surface it once
+    /// startup has settled — a single system notification, nothing intrusive. The user
+    /// continues by voice ("Hey Aria, resume"); we never auto-run a task on launch.
+    private func offerResumeIfPending() {
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)   // let launch settle first
+            guard let self, let pending = await self.orchestrator.pendingTask() else { return }
+            let remaining = pending.unfinishedCount
+            guard UserDefaults.standard.object(forKey: "app.notifyResume") as? Bool ?? true else { return }
+            let msg = "Unfinished task: “\(pending.goal)” — \(remaining) step\(remaining == 1 ? "" : "s") left. Say “Hey Aria, resume” to continue."
+            Notifier.notify(title: "Aria", body: msg)
+            Log.trace("resume: offered pending task '\(pending.goal)'")
+        }
+    }
+
+    private var previewWindow: NSWindow?
+
+    /// Preview mode (used for screenshots/docs): shows the island in a plain titled
+    /// window on a dark backdrop, without starting the mic so there is no TCC
+    /// prompt. The production island lives in a borderless non-activating panel,
+    /// which doesn't capture cleanly; this window does. Triggered by the
+    /// `/tmp/aria_show_orb` sentinel or the `ARIA_SHOW_ORB` env var.
+    func startForScreenshot() {
+        // Defer off the launch call stack so the runloop is up before building
+        // the hosting view.
+        DispatchQueue.main.async { [weak self] in self?.buildPreviewWindow() }
+    }
+
+    private func buildPreviewWindow() {
+        islandViewModel.beginListening()
+        islandViewModel.updateAudioLevel(0.6)
+
+        let root = ZStack {
+            Color.black
+            IslandView(viewModel: islandViewModel)
+        }
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 420),
+            styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.title = "Aria — Island Preview"
+        window.contentView = NSHostingView(rootView: root)
+        window.isReleasedWhenClosed = false
+        window.center()
+        window.level = .floating
+        previewWindow = window
+
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        // Publish the window number so a screenshot script can target it.
+        try? "\(window.windowNumber)".write(toFile: "/tmp/aria_window.txt", atomically: true, encoding: .utf8)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+            self?.islandViewModel.showResponse("**Aria** is online.\nSay *Hey Aria* to begin.")
+            self?.previewWindow?.orderFrontRegardless()
+        }
+    }
+
+    // MARK: Behavioral learning
+
+    private func configureLearning() {
+        observeAppEvents()
+        configureProactive()
+        configureDailyDigest()
+        // Hourly: re-detect patterns + fire approved automations. Suggestions now
+        // surface ambiently through the Proactive engine, not a blocking modal.
+        learningTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.runLearningCycle() }
+        }
+        // Pomodoro: tick the focus session timer once per minute.
+        pomodoroTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in
+            Task.detached(priority: .utility) {
+                await PomodoroSession.shared.tick()
+            }
+        }
+    }
+
+    private func observeAppEvents() {
+        // P1: track which app the user is actually in, continuously — so context
+        // reflects live focus instead of a once-an-hour snapshot.
+        Task { await AppFocusMonitor.shared.start() }
+        let nc = NSWorkspace.shared.notificationCenter
+        nc.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { [weak self] note in
+            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  let bundle = app.bundleIdentifier else { return }
+            Task { await self?.patternEngine.recordAppEvent(AppEvent(bundleId: bundle, kind: .launched, timestamp: Date())) }
+        }
+        nc.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { [weak self] note in
+            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  let bundle = app.bundleIdentifier else { return }
+            Task { await self?.patternEngine.recordAppEvent(AppEvent(bundleId: bundle, kind: .quit, timestamp: Date())) }
+        }
+    }
+
+    private func runLearningCycle() async {
+        let sensitivity = LearningSettings.load().sensitivity
+        _ = await patternEngine.analyzePatterns(sensitivity: sensitivity)
+        let firing = await patternEngine.automationsToFire()
+        for pattern in firing {
+            if case let .runSavedCommand(command) = pattern.action {
+                Log.app.info("Firing automation: \(command, privacy: .public)")
+                islandViewModel.beginThinking()
+                playChime(.thinking)
+                // Unattended automation: decline destructive confirmations rather
+                // than block on a modal (restored to false after the turn).
+                unattendedActive = true
+                let response = await responseBridge.handle(command: command, privacyMode: false)
+                unattendedActive = false
+                islandViewModel.showResponse("⚡️ " + response.message)
+                // Self-improvement loop (P12): feed the REAL execution outcome back
+                // (response.succeeded — set by the orchestrator from whether the
+                // action actually completed, not the model's narration) so an
+                // automation that keeps failing or gets declined stops auto-firing.
+                await patternEngine.recordOutcome(pattern.id, success: response.succeeded)
+            }
+        }
+    }
+
+    // MARK: Proactive Presence (v9)
+
+    /// Build the engine, providers (calendar + learned routines), and presenter,
+    /// then poll gently for something worth offering.
+    private func configureProactive() {
+        guard !UserDefaults.standard.bool(forKey: "app.disableProactive") else { return }
+        let pe = patternEngine
+        let calendar = CalendarSignalProvider(leadWindow: 300) { now in
+            await Self.upcomingCalendarEvents(now: now, window: 360)
+        }
+        let routine = RoutineSignalProvider { now in
+            await pe.patternsToSuggest(now: now)
+        }
+        // V11 P13: fresh-download summaries + busy-session recaps.
+        let downloads = DownloadsSignalProvider()
+        let session = SessionSignalProvider()
+        let engine = ProactiveEngine(providers: [calendar, routine, downloads, session],
+                                     settings: { ProactiveSettings.load() })
+        proactiveEngine = engine
+
+        let surface = ProactiveSurfaceAdapter(controller: self)
+        proactivePresenter = SuggestionPresenter(surface: surface) { [weak self] outcome, suggestion in
+            Task { await self?.proactiveEngine?.record(outcome, for: suggestion, now: Date()) }
+        }
+
+        proactiveTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.proactiveTick() }
+        }
+        // A first look shortly after launch settles, so calendar offers don't wait a full minute.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+            Task { @MainActor in await self?.proactiveTick() }
+        }
+    }
+
+    /// Ask the engine for the single best suggestion and surface it — but only
+    /// while Aria is idle, never on top of speech, a task, or a live conversation.
+    @MainActor
+    private func proactiveTick() async {
+        guard let engine = proactiveEngine, let presenter = proactivePresenter else { return }
+        guard idleForProactive, presenter.pending == nil else { return }
+        // World-aware (P2): bias ranking toward the app the user is in right now.
+        let activeApp = await ContextCoordinator.shared.worldState().activeApp
+        guard let suggestion = await engine.tick(now: Date(), activeApp: activeApp) else { return }
+        // An await elapsed — re-check we're still idle and nothing else surfaced.
+        guard idleForProactive, presenter.pending == nil else { return }
+        // Phase D — anticipation that ACTS: a very-high-confidence, reversible
+        // suggestion runs on its own (receipted + undoable) instead of waiting to
+        // be accepted. Anything important-irreversible still surfaces to ask.
+        if let cmd = AnticipationPolicy.autoActCommand(
+            for: suggestion,
+            enabled: AppSettings.shared.autonomousActions || AppSettings.shared.autonomousMode) {
+            // Defense-in-depth (P5): the unified trust decision must also say "auto".
+            // If Safety classifies the command as important-irreversible (something
+            // AnticipationPolicy's text check missed), surface it to ask instead of
+            // firing it silently.
+            let importance = Safety.importance(tool: "", input: [:], summary: cmd)
+            let level = TrustProfile.advisedLevel(importance: importance,
+                                                  confirmsDestructive: effectiveConfirmsDestructive())
+            if level == .auto {
+                Log.trace("proactive: auto-acting on \(suggestion.dedupeKey)")
+                await engine.record(.accepted, for: suggestion, now: Date())
+                Notifier.notify(title: "Aria", body: "\(suggestion.spokenLine) — say “undo” to revert.")
+                // Unattended: any destructive action the model still expands to is
+                // declined, never run silently (see confirmDestructiveAction).
+                handleCommand(cmd, unattended: true)
+                return
+            }
+            Log.trace("proactive: trust gate held back auto-act for \(suggestion.dedupeKey) (\(level.rawValue)) — surfacing")
+            // fall through to present the suggestion for explicit approval
+        }
+        presenter.present(suggestion)
+        scheduleProactiveExpiry(at: suggestion.expiry)
+        Log.trace("proactive: surfaced \(suggestion.dedupeKey)")
+    }
+
+    /// Idle = not speaking, no running task, no active conversation, not mid-reveal.
+    private var idleForProactive: Bool {
+        !isSpeaking && !taskActive && !wakeEngine.conversationActive && !proactiveAwaitingReply
+    }
+
+    private func scheduleProactiveExpiry(at date: Date) {
+        proactiveExpiryTimer?.invalidate()
+        let delay = max(1, date.timeIntervalSinceNow)
+        proactiveExpiryTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let p = self.proactivePresenter,
+                      p.pending != nil, !self.proactiveAwaitingReply else { return }
+                p.expire(now: Date())
+                Log.trace("proactive: suggestion expired untouched")
+            }
+        }
+    }
+
+    // MARK: Live Loop
+
+    /// Wire the always-on perceive → anticipate → act → remember cycle. All
+    /// detection is local and event-driven + a low-frequency tick; the LLM only
+    /// runs inside a fired playbook. Auto tier = read-only prep (meeting brief,
+    /// daily brief); confirm tier surfaces through the SAME SuggestionPresenter
+    /// card as Proactive Presence, so there is never more than one live card.
+    private func configureLiveLoop() {
+        let screenSignal = ScreenActivitySignal(idleSeconds: {
+            CGEventSource.secondsSinceLastEventType(.combinedSessionState,
+                                                    eventType: CGEventType(rawValue: ~0)!)
+        })
+        liveScreenSignal = screenSignal
+
+        let signals: [any LiveSignal] = [
+            ClockSignal(briefAlreadyRan: { LiveLoopStore().briefAlreadyRan(on: $0) }),
+            CalendarSignal(fetchUpcoming: { now in
+                await Self.upcomingCalendarEvents(now: now, window: 3600)
+            }),
+            MailSignal(fetchUnreadCount: {
+                guard let token = await ConnectorStore.shared.validAccessToken(.google) else {
+                    return nil
+                }
+                return try? await GoogleConnector().unreadInboxCount(accessToken: token)
+            }),
+            screenSignal,
+        ]
+        let rules: [any OpportunityRule] = [
+            MeetingPrepRule(), InboxTriageRule(), ScreenCoPilotRule(), DailyBriefRule(),
+        ]
+
+        let loop = LiveLoop(deps: .init(
+            signals: signals,
+            rules: rules,
+            canSurface: { [weak self] in
+                await MainActor.run { [weak self] in
+                    guard let self else { return false }
+                    return self.idleForProactive && self.proactivePresenter?.pending == nil
+                }
+            },
+            act: { [weak self] command, narration in
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    Log.trace("liveloop: auto-acting — \(narration)")
+                    Notifier.notify(title: "Aria", body: narration)
+                    self.handleCommand(command, unattended: true)
+                }
+            },
+            offer: { [weak self] suggestion in
+                await MainActor.run { [weak self] in
+                    guard let self, let presenter = self.proactivePresenter,
+                          presenter.pending == nil else { return }
+                    presenter.present(suggestion)
+                    self.scheduleProactiveExpiry(at: suggestion.expiry)
+                    Log.trace("liveloop: offered \(suggestion.dedupeKey)")
+                }
+            },
+            remember: { line in
+                await LongTermMemory.shared.remember(line, kind: "event")
+            }))
+        liveLoop = loop
+
+        // Event-driven perception: frontmost-app switches feed the friction
+        // signal and nudge an evaluation (cheap — all local, no LLM).
+        liveLoopActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil, queue: .main
+        ) { [weak self] note in
+            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  app.bundleIdentifier != Bundle.main.bundleIdentifier,
+                  let name = app.localizedName else { return }
+            Task { [weak self] in
+                guard let self else { return }
+                await self.liveScreenSignal?.noteActivation(app: name, at: Date())
+                await self.liveLoop?.nudge()
+            }
+        }
+
+        Task { await loop.start() }
+    }
+
+    /// Called when the user wakes Aria while a suggestion is glowing — speak it
+    /// and await their yes/no.
+    @MainActor
+    private func revealPendingSuggestionIfAny() {
+        guard let p = proactivePresenter, p.pending != nil, !proactiveAwaitingReply else { return }
+        proactiveAwaitingReply = true
+        proactiveExpiryTimer?.invalidate()
+        p.reveal()
+    }
+
+    /// Speak a line, then re-arm the mic for the user's reply (mirrors the chat
+    /// turn tail). Used to voice a revealed offer and accept confirmations.
+    @MainActor
+    func speakAndListen(_ line: String) {
+        wakeEngine.isSuspended = true
+        isSpeaking = true
+        speechStartedAt = Date()
+        applyVoiceSettings()
+        islandViewModel.appendResponse(line)
+        streamVoice.onAllFinished = { [weak self] in
+            guard let self else { return }
+            self.isSpeaking = false
+            self.wakeEngine.freshTurn()
+            self.wakeEngine.isSuspended = false
+            self.islandViewModel.beginListening(source: self.dictationPending ? .systemDictation : .voice)
+            self.convSilenceTimer?.invalidate()
+            self.convSilenceTimer = Timer.scheduledTimer(withTimeInterval: AppSettings.shared.conversationSilenceTimeout, repeats: false) { [weak self] _ in
+                Task { @MainActor in self?.session?.end() }
+            }
+        }
+        streamVoice.enqueue(line)
+        if !streamVoice.isSpeaking { streamVoice.onAllFinished?() }
+    }
+
+    /// Run an accepted suggestion's command through the normal voice pipeline.
+    @MainActor
+    func runProactiveCommand(_ command: String) { handleCommand(command) }
+
+    /// Approve an accepted learned routine and confirm out loud.
+    @MainActor
+    func approveProactivePattern(_ id: UUID) async {
+        await patternEngine.approve(id, mode: .previewFirst)
+        speakAndListen("Done — I'll take care of that automatically from now on.")
+    }
+
+    /// Compose today's briefing, save it as a note, and (for the scheduled
+    /// agent) notify. Returns (briefing text, ok).
+    @discardableResult
+    private func deliverBriefing(silent: Bool) async -> (String, Bool) {
+        let (text, ok) = await BriefingComposer.compose(gemini: orchestrator.geminiClient)
+        let title = "Briefing — \(Date().formatted(date: .abbreviated, time: .omitted))"
+        _ = try? await SaveNoteTool().run(input: ["title": title, "content": text])
+        if silent {
+            Notifier.notify(title: "Your briefing is ready",
+                            body: String(text.prefix(140)))
+        }
+        return (text, ok)
+    }
+
+    /// Pull calendar events starting within `window` seconds. Returns nothing
+    /// unless calendar access is already granted (never prompts from a timer).
+    nonisolated private static func upcomingCalendarEvents(now: Date, window: TimeInterval) async -> [UpcomingEvent] {
+        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return [] }
+        let store = EKEventStore()
+        let predicate = store.predicateForEvents(withStart: now, end: now.addingTimeInterval(window), calendars: nil)
+        return store.events(matching: predicate)
+            .filter { !$0.isAllDay && $0.startDate > now }
+            .map { UpcomingEvent(id: $0.eventIdentifier ?? ($0.title ?? UUID().uuidString),
+                                 title: $0.title ?? "an event",
+                                 start: $0.startDate) }
+    }
+
+    /// Confirm genuinely destructive actions before they run. The orchestrator
+    /// only routes important-irreversible actions (send / pay / delete / external
+    /// comms / raw shell) to this handler — everything reversible or routine still
+    /// runs without a prompt and is receipted + undoable as before. Users who want
+    /// the original zero-friction mode can opt out via `app.confirmDestructive`.
+    private func configureConfirmation() {
+        Task {
+            await orchestrator.setConfirmationHandler { [weak self] prompt in
+                await self?.confirmDestructiveAction(prompt) ?? false
+            }
+            await orchestrator.setPlanApprovalHandler { _ in true }
+        }
+    }
+
+    /// Decide a destructive-action confirmation. Unattended runs are declined (an
+    /// important-irreversible action must never auto-fire with nobody there), and
+    /// a second confirmation while one is open is declined rather than stacked.
+    /// Only an attended, first-in-flight request presents the modal — where the
+    /// safe choice (Cancel) is the default button so a stray Return can't approve.
+    /// Autonomous mode skips the modal only for attended commands. The policy
+    /// still declines important irreversible work from background runs.
+    private func effectiveConfirmsDestructive() -> Bool {
+        !AppSettings.shared.autonomousMode && ConfirmationPolicy.confirmsDestructive()
+    }
+
+    @MainActor
+    private func confirmDestructiveAction(_ prompt: String) async -> Bool {
+        switch ConfirmationPolicy.decision(confirmsDestructive: effectiveConfirmsDestructive(),
+                                           unattended: unattendedActive,
+                                           alreadyConfirming: isConfirming) {
+        case .autoApprove: return true
+        case .decline:     return false
+        case .prompt:      break
+        }
+        isConfirming = true
+        hotkeyTap?.setEnabled(false)            // freeze hotkeys for the modal's duration
+        defer { isConfirming = false; hotkeyTap?.setEnabled(true) }
+        let alert = NSAlert()
+        alert.messageText = "Confirm before Aria does this?"
+        alert.informativeText = prompt
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Cancel")    // default (Return / Esc) — the safe choice
+        alert.addButton(withTitle: "Approve")
+        NSApp.activate(ignoringOtherApps: true)
+        return alert.runModal() == .alertSecondButtonReturn
+    }
+
+    // MARK: Panel
+
+    private func setupPanel() {
+        let panel = IslandPanel()
+        let island = IslandView(viewModel: islandViewModel,
+                                onBlobFrameChange: { [weak self, weak panel] rect in
+                                    panel?.setBlobFrame(rect)
+                                    // Track the live blob center so the worker swarm
+                                    // clusters at the blob (wherever the user parked it),
+                                    // not always bottom-right. Plain var → no @Published churn.
+                                    self?.lastBlobCenter = rect.map { CGPoint(x: $0.midX, y: $0.midY) }
+                                },
+                                onBlobTap: { [weak self] in self?.showTypePanel() })
+        let host = NSHostingView(rootView: island)
+        host.frame = panel.contentLayoutRect
+        host.autoresizingMask = [.width, .height]
+        panel.contentView = host
+        self.panel = panel
+        liquidSurfacePanel = LiquidSurfacePanel(
+            viewModel: islandViewModel,
+            onSubmit: { [weak self] text in
+                let command = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !command.isEmpty else { return }
+                RecentCommands.record(command)
+                self?.handleTypedCommand(command)
+            },
+            onDismiss: { [weak self] in self?.dismissLiquidSurface() })
+        islandViewModel.onSurfaceDismiss = { [weak self] in self?.liquidSurfacePanel?.dismissSurface() }
+        islandViewModel.showRestingBlob()
+
+        // Aria's on-screen stage: guidance markers + the agentic worker swarm,
+        // in a separate passive (click-through) overlay so it never fights the
+        // draggable blob for mouse events.
+        let stage = AriaStageController(accent: islandViewModel.accent)
+        stage.start()
+        self.stageController = stage
+
+        // Keep the overlay (and its screen-edge border) fitted to the active
+        // display if the screen arrangement changes mid-session.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let panel = self.panel, panel.isVisible else { return }
+                panel.reposition()
+            }
+        }
+
+        islandViewModel.onVisibilityChange = { [weak self] visible in
+            guard let self else { return }
+            self.setPanelVisible(visible)
+            if visible, self.islandViewModel.liquidPhase != .resting {
+                self.showLiquidSurface(focusEditor: false)
+            }
+            // Re-arm wake only when the pill is hidden AND Aria isn't still
+            // speaking — otherwise a long spoken reply could re-trigger her.
+            if !visible && !self.isSpeaking {
+                self.wakeEngine.isSuspended = false
+                Log.trace("island hidden → wake re-armed (isSuspended=false)")
+            }
+        }
+
+        // Task panel — floats top-right while an autonomous task is running.
+        taskPanel = TaskPanel(viewModel: taskViewModel)
+        taskViewModel.onVisibilityChange = { [weak self] visible in
+            guard let p = self?.taskPanel else { return }
+            if visible { p.reposition(); p.orderFrontRegardless() } else { p.orderOut(nil) }
+        }
+        taskViewModel.onStop = { [weak self] in
+            guard let self else { return }
+            self.taskActive = false
+            self.streamVoice.stop()             // silence queued narration immediately
+            self.currentTurnTask?.cancel()      // engine checks isCancelled before next step
+            self.isSpeaking = false
+            self.wakeEngine.freshTurn()
+            self.wakeEngine.isSuspended = false // re-arm the mic — never leave Aria deaf
+            self.islandViewModel.dismiss()
+            self.taskViewModel.hide()
+        }
+    }
+
+    private func setPanelVisible(_ visible: Bool) {
+        guard let panel else { return }
+        if visible {
+            panel.reposition()
+            panel.orderFrontRegardless()
+        } else {
+            panel.orderOut(nil)
+        }
+    }
+
+    private func showLiquidSurface(focusEditor: Bool) {
+        guard let screen = panel?.screen ?? NSScreen.main else { return }
+        let anchor: CGPoint
+        if let blob = lastBlobCenter {
+            // IslandView reports top-left SwiftUI coordinates; NSPanel geometry
+            // uses the screen's bottom-left coordinate system.
+            anchor = CGPoint(x: screen.frame.minX + blob.x, y: screen.frame.maxY - blob.y)
+        } else {
+            anchor = CGPoint(x: screen.visibleFrame.midX, y: screen.visibleFrame.minY + 110)
+        }
+        liquidSurfacePanel?.present(anchor: anchor, on: screen, focusEditor: focusEditor)
+    }
+
+    private func dismissLiquidSurface() {
+        // Never cancel active work or listening by clicking away. Dismissal only
+        // hides a composer/answer; task cancellation remains the explicit task UI.
+        if islandViewModel.liquidPhase == .composing || islandViewModel.liquidPhase == .answering || islandViewModel.liquidPhase == .error {
+            islandViewModel.dismiss()
+        }
+        liquidSurfacePanel?.dismissSurface()
+    }
+
+    // MARK: Engine wiring
+
+    private func applyConversationSettings() {
+        // sensitivity 0…1 (1 = most sensitive) → lower RMS threshold + shorter onset.
+        let s = AppSettings.shared.bargeInSensitivity
+        let threshold = 1800.0 - s * 1500.0      // ~1800 (needs loud) … ~300 (touchy)
+        let onset = Int((4.0 - s * 2.0).rounded()) // 4 frames (40 ms) … 2 frames (20 ms)
+        bargeController.configure(onsetFrames: onset, energyThreshold: threshold)
+        refreshSpeakerGate()
+    }
+
+    /// Wire (or unwire) the experimental speaker gate. verifyWake is only set when the
+    /// gate is active (enrolling, or enabled + enrolled) so the wake path is untouched
+    /// by default — accept() itself always allows when inert.
+    /// Grace period (first 7 days after enrollment): mismatches warn but don't block.
+    private func refreshSpeakerGate() {
+        let settings = AppSettings.shared
+        speakerGate.enabled = settings.speakerVerificationEnabled
+        guard speakerGate.isActive else {
+            wakeEngine.verifyWake = nil
+            return
+        }
+        let enrolledDate = settings.speakerVerificationEnrolledDate
+        wakeEngine.verifyWake = { [weak self] features in
+            guard let self else { return true }
+            let passed = self.speakerGate.accept(features)
+            if passed { return true }
+            // Grace period: warn but don't block
+            if SpeakerGracePolicy.shouldBlock(verificationPassed: false, enrolledDate: enrolledDate) {
+                Log.trace("speaker gate: voice mismatch — blocking (grace period elapsed)")
+                return false
+            } else {
+                Log.trace("speaker gate: voice mismatch — grace period active, allowing through")
+                return true
+            }
+        }
+    }
+
+    /// Capture the next few "Hey Aria" utterances as the owner's voiceprint.
+    func enrollOwnerVoice() {
+        speakerGate.onEnrollmentComplete = { [weak self] in
+            // Record enrollment timestamp for the grace-period policy.
+            AppSettings.shared.speakerVerificationEnrolledDate = Date().timeIntervalSince1970
+            self?.refreshSpeakerGate()
+            self?.islandViewModel.beginListening()
+        }
+        speakerGate.beginEnrollment()
+        refreshSpeakerGate()   // sets verifyWake so enrollment frames accumulate
+    }
+
+    private func applyVoiceSettings() {
+        let s = AppSettings.shared
+        voice.enabled = s.voiceEnabled
+        voice.geminiVoiceName = s.geminiVoiceName
+        voice.ttsEngine = VoiceEngine.TTSEngine(rawValue: s.ttsEngine) ?? .edge
+        voice.edgeVoiceName = s.edgeVoiceName
+        voice.elevenLabsVoiceID = s.elevenLabsVoiceID
+    }
+
+    private func wireEngine() {
+        func refreshTheme() {
+            islandViewModel.accent = AppSettings.shared.accentColor
+            islandViewModel.glowColors = Theme.glowColors(id: AppSettings.shared.glowPaletteID,
+                                                          accent: AppSettings.shared.accentColor)
+        }
+        refreshTheme()
+        settingsCancellable = Publishers.MergeMany(
+            AppSettings.shared.$accentChoiceRaw.map { _ in () }.eraseToAnyPublisher(),
+            AppSettings.shared.$glowPaletteID.map { _ in () }.eraseToAnyPublisher(),
+            AppSettings.shared.$bargeInSensitivity.map { _ in () }.eraseToAnyPublisher(),
+            AppSettings.shared.$speakerVerificationEnabled.map { _ in () }.eraseToAnyPublisher())
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in refreshTheme(); self?.applyConversationSettings() }
+        // The Settings "teach my voice" button posts this; enroll from live wakes.
+        NotificationCenter.default.addObserver(forName: .ariaEnrollVoice, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.enrollOwnerVoice() }
+        }
+        // Computer-use: show the visible "controlling your Mac" indicator while ui_* runs.
+        computerUseIndicator.onStop = { [weak self] in
+            self?.currentTurnTask?.cancel()
+            self?.taskActive = false
+            self?.streamVoice.stop()
+            self?.wakeEngine.isSuspended = false
+        }
+        NotificationCenter.default.addObserver(forName: .ariaUIActivity, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.computerUseIndicator.pulse() }
+        }
+        // Quiet update check on launch (surfaces in Settings → General).
+        Task { await UpdateChecker.shared.check() }
+        applyVoiceSettings()
+        applyConversationSettings()
+        voice.audioBus = audioBus
+        voice.onStart = { [weak self] in
+            self?.isSpeaking = true
+            self?.wakeEngine.isSuspended = true
+        }
+        voice.onFinish = { [weak self] in
+            guard let self else { return }
+            self.isSpeaking = false
+            // If the pill already hid while Aria was talking, re-arm wake now.
+            if !self.islandViewModel.isVisible { self.wakeEngine.isSuspended = false }
+        }
+        streamVoice = StreamingVoice(speakChunk: { [weak self] in self?.voice.speakChunk($0) },
+                                     stopAll: { [weak self] in self?.voice.stop() })
+        voice.onChunkFinished = { [weak self] in self?.streamVoice.chunkDidFinish() }
+        wakeEngine.onWake = { [weak self] in
+            guard let self else { return }
+            Log.trace("onWake — conversation start")
+            self.wakeEngine.conversationActive = true
+            self.session = ConversationSession(
+                onEnd: { [weak self] in self?.endConversation() },
+                onTurn: { [weak self] in self?.handleCommand($0) })
+            self.session?.start()
+            self.islandViewModel.beginListening()
+            self.showLiquidSurface(focusEditor: false)
+            self.playChime(.wake)   // soft "I'm listening" cue
+            // If a suggestion is glowing, lead with it and await the user's yes/no.
+            self.revealPendingSuggestionIfAny()
+        }
+        wakeEngine.onAudioLevel = { [weak self] level in
+            self?.islandViewModel.updateAudioLevel(level)
+        }
+        wakeEngine.onCommandPartial = { [weak self] partial in
+            self?.islandViewModel.replacePartialTranscript(partial)
+        }
+        wakeEngine.onCommand = { [weak self] command in
+            Log.trace("onCommand: '\(command)'")
+            self?.convSilenceTimer?.invalidate()      // user engaged; cancel end timer
+            self?.session?.userSaid(command)
+        }
+        wakeEngine.onCommandEmpty = { [weak self] in
+            // Heard the wake word but no command — dismiss only if still listening.
+            guard let self, self.islandViewModel.state == .listening else { return }
+            self.islandViewModel.dismiss()
+        }
+        wakeEngine.onError = { [weak self] message in
+            self?.islandViewModel.beginListening()
+            self?.islandViewModel.showError(message)
+        }
+        // v5.1 talk-over barge-in. AudioBus feeds the CLEANED mic stream to the
+        // recognizer (audio thread → nonisolated acceptCleanedFrame) and to the
+        // BargeController, which watches its energy while Aria speaks. On talk-over
+        // it stops her and re-arms to capture what you say.
+        // These run on the AUDIO thread — capture the consumers directly so we never
+        // read a main-actor-isolated property (self.wakeEngine/…) off the main actor,
+        // which traps in release builds. acceptCleanedFrame/feed/setPlaying are all
+        // nonisolated + internally locked, so calling them from the audio thread is safe.
+        let wake = wakeEngine
+        let barge = bargeController
+        audioBus.onCleanedFrame = { frame in
+            wake.acceptCleanedFrame(frame)
+            barge.feed(frame)
+        }
+        audioBus.onPlayStateChange = { playing in
+            barge.setPlaying(playing)
+        }
+        bargeController.onBarge = { [weak self] in
+            Task { @MainActor in self?.handleBarge() }
+        }
+    }
+
+    // MARK: Barge-in
+
+    @MainActor private func handleBarge() {
+        guard AppSettings.shared.bargeInEnabled, isSpeaking else { return }
+        // Grace at the start of her speech: the AEC needs ~1.2 s to converge on
+        // typical hardware; shorter windows let Aria's own voice echo back and
+        // self-interrupt. Increase if "cutting off" still occurs.
+        guard Date().timeIntervalSince(speechStartedAt) > 1.2 else { return }
+        Log.trace("barge-in — user talked over Aria")
+        streamVoice.stop()              // → AudioBus.stopPlayback()
+        currentTurnTask?.cancel()
+        taskActive = false
+        isSpeaking = false
+        convSilenceTimer?.invalidate()
+        // Re-arm into command capture so the interrupting utterance becomes the next
+        // turn (she stopped the instant you spoke; now she listens).
+        wakeEngine.freshTurn()
+        wakeEngine.isSuspended = false
+        islandViewModel.beginListening()
+    }
+
+    private func startListening() {
+        Task {
+            let micOK = await PermissionsManager.requestMicrophone()
+            let speechOK = await PermissionsManager.requestSpeech()
+            Log.trace("permissions: mic=\(micOK) speech=\(speechOK)")
+            guard micOK, speechOK else {
+                let missing = [micOK ? nil : "Microphone", speechOK ? nil : "Speech Recognition"]
+                    .compactMap { $0 }.joined(separator: " + ")
+                Log.app.error("Permissions denied: \(missing)")
+                islandViewModel.beginListening()
+                islandViewModel.showError("\(missing) permission denied. Enable it in System Settings → Privacy & Security, then relaunch Aria.")
+                return
+            }
+            do {
+                try audioBus.start()          // owns the mic; feeds cleaned frames to the wake engine
+                try wakeEngine.start()
+                Log.trace("audio bus + wake engine started OK — listening for 'Hey Aria'")
+            }
+            catch {
+                Log.trace("audio/wake start FAILED: \(error.localizedDescription)")
+                Log.app.error("Audio/wake engine failed to start: \(error.localizedDescription)")
+                islandViewModel.beginListening()
+                islandViewModel.showError(error.localizedDescription)
+            }
+        }
+    }
+
+    // MARK: Command handling
+
+    private func handleCommand(_ rawCommand: String, unattended: Bool = false) {
+        // Track whether a user is present for this command, so a destructive
+        // confirmation during an unattended (proactive/auto) run is declined
+        // rather than blocking on a modal. User-initiated commands default false.
+        unattendedActive = unattended
+        // Dictation divert: these words are output, not a command — clean them and
+        // type them into whatever the user is focused on, then tear the turn down
+        // cleanly (re-arms wake; never leaves her deaf).
+        if dictationPending {
+            dictationPending = false
+            islandViewModel.isDictating = false
+            let raw = rawCommand
+            let useAI = AppSettings.shared.dictationAICleanup
+            endConversation()
+            Task { [weak self] in
+                guard let self else { return }
+                // Heuristic clean is instant; the optional AI pass fixes punctuation
+                // and obvious mis-hears but costs a round-trip, so it's opt-in.
+                var text = DictationController.cleanup(raw)
+                if useAI, let polished = await self.dictation.aiCleanup(raw, via: self.orchestrator.geminiClient) {
+                    text = polished
+                }
+                if !text.isEmpty {
+                    self.dictation.insert(text)
+                    self.playChime(.done)
+                }
+            }
+            return
+        }
+
+        // Control phrases (dismiss / brief / walkthrough / lens / focus) match on the
+        // raw words; only the agent paths below fold in any circled Lens content.
+        let command = rawCommand
+        let lower = command.lowercased()
+
+
+        // Answering a revealed proactive offer? Yes → run it; anything else →
+        // dismiss the offer and treat the words as a normal request.
+        if proactiveAwaitingReply {
+            proactiveAwaitingReply = false
+            let action = proactivePresenter?.pending?.action
+            if ProactiveReply.isAffirmative(command) {
+                Task { [weak self] in await self?.proactivePresenter?.accept(now: Date()) }
+                if case .acknowledge = action { streamVoice.stop(); session?.end() }
+                return   // acknowledge/runCommand/approve handle their own follow-up
+            }
+            proactivePresenter?.dismiss(now: Date())
+            // fall through — process `command` as an ordinary turn
+        }
+
+        // "Stop watching / stop the walkthrough" — call off on-screen activity but
+        // keep the conversation going. Checked before dismiss so it doesn't end the
+        // session.
+        if StopActivityIntent.matches(command) {
+            let wasActive = cancelOnScreenActivity()
+            streamVoice.stop()
+            let m = wasActive ? "Okay, stopped." : "Nothing's running right now."
+            islandViewModel.showResponse(m); speakAndListen(m)
+            return
+        }
+
+        if DismissIntent.matches(command) {
+            cancelOnScreenActivity()   // leave the screen clean; stop any watch/walkthrough
+            streamVoice.stop(); session?.end(); return
+        }
+
+        // "Brief me" — the signature daily-briefing workflow, on demand.
+        if BriefingComposer.isBriefingIntent(command) {
+            islandViewModel.beginThinking()
+            playChime(.task)
+            playChime(.thinking)
+            currentTurnTask = Task { [weak self] in
+                guard let self else { return }
+                let (text, _) = await self.deliverBriefing(silent: false)
+                await MainActor.run {
+                    self.playChime(.confirm)
+                    self.islandViewModel.appendResponse(text)
+                    self.speakAndListen(text)
+                }
+            }
+            return
+        }
+
+        // Resume the interrupted task. resumeTask() reports "nothing to resume" itself
+        // if there isn't one, so no async pre-check is needed on the main actor here.
+        if ResumeIntent.matches(command) {
+            runAutonomousTask(command, resume: true)
+            return
+        }
+
+        // Guided walkthrough: "walk me through X" / "show me how to X" → Aria
+        // points at each step on screen. Explicit phrasing so plain how-to
+        // questions she should just answer still route to the agent.
+        if let task = WalkthroughIntent.task(for: command) {
+            streamVoice.stop()
+            startWalkthrough(task: task)
+            return
+        }
+
+        // Lens: "let me circle something" / "draw on my screen" → drop the
+        // see-through canvas. Explicit phrasing only, so ordinary questions
+        // ("what is this error") still route to the agent.
+        if let lensMode = LensIntent.mode(for: command) {
+            streamVoice.stop()
+            session?.end()
+            startLens(mode: lensMode)
+            return
+        }
+
+        // "Watch this" — poll the just-circled region and ping when it changes.
+        if RegionWatchIntent.matches(command) {
+            if let f = LensMemory.shared.freshFraction() {
+                startRegionWatch(fraction: f)
+            } else {
+                let m = "Circle something first with ⌥⇧C, then say \"watch this\"."
+                islandViewModel.showResponse(m); speakAndListen(m)
+            }
+            return
+        }
+
+        // V11 P12: focus mode bracket — enter opens/closes apps and starts the
+        // session; end recaps it from the timeline.
+        if let modeName = FocusMode.enterIntent(command) {
+            enterFocusMode(named: modeName)
+            return
+        }
+        if FocusMode.isEndIntent(command) {
+            endFocusMode()
+            return
+        }
+
+        // Instant commands: everyday one-shots (open an app, set the volume, start
+        // a timer, open a site) execute directly with ZERO model calls — no
+        // planning round-trip, so they finish the moment you stop speaking, just
+        // like biscuit's recipes. Conservative matcher: anything ambiguous falls
+        // through to the full agent below. Skipped for unattended/proactive runs
+        // (those already carry a resolved command) and when the user turns it off.
+        if !unattended, AppSettings.shared.instantCommandsEnabled,
+           let quick = QuickCommand.match(command) {
+            streamVoice.stop()
+            playChime(.confirm)
+            currentTurnTask = Task { [weak self] in
+                let confirmation = await QuickCommand.run(quick)
+                await MainActor.run {
+                    guard let self else { return }
+                    self.islandViewModel.showResponse(confirmation)
+                    self.speakAndListen(confirmation)
+                }
+            }
+            return
+        }
+
+        // Lens follow-up: only now (the agent paths) do we fold just-circled content
+        // into a deictic action — "translate that", "fix this error" — so control
+        // phrases above stay untouched. Consumed once.
+        let agentCommand = LensFollowUp.fold(command: command, capture: LensMemory.shared.last)
+            .map { folded in LensMemory.shared.clear(); return folded } ?? command
+
+        // V11 P8: "run my morning startup" — recipe-style phrasing goes down
+        // the task path, where the recipe store gets first claim on the goal.
+        if Recipe.invocationLikely(command) {
+            runAutonomousTask(command)
+            return
+        }
+
+        if IntentRouter.isTask(command) {
+            runAutonomousTask(agentCommand)
+            return
+        }
+
+        wakeEngine.isSuspended = true
+        isSpeaking = true
+        speechStartedAt = Date()
+        applyVoiceSettings()
+        islandViewModel.beginThinking()
+        playChime(.thinking)
+        tickWordCount = 0
+        confirmChimeFired = false
+        // The Gemini voice speaks the whole reply in ONE call at the end — per-
+        // sentence TTS calls burn the free quota fast.
+        streamVoice.onAllFinished = { [weak self] in
+            guard let self else { return }
+            self.isSpeaking = false
+            // Fresh recognition session so Aria's own voice (heard by the mic while
+            // she spoke) doesn't leak into the next turn, then resume listening.
+            self.wakeEngine.freshTurn()
+            self.wakeEngine.isSuspended = false
+            self.islandViewModel.beginListening()   // show "Listening…" for a follow-up
+            self.convSilenceTimer?.invalidate()
+            self.convSilenceTimer = Timer.scheduledTimer(withTimeInterval: AppSettings.shared.conversationSilenceTimeout, repeats: false) { [weak self] _ in
+                Task { @MainActor in self?.session?.end() }
+            }
+        }
+        currentTurnTask = Task { [weak self] in
+            guard let self else { return }
+            await self.orchestrator.handleStreaming(command: agentCommand, privacyMode: AppSettings.shared.privacyMode) { delta in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    // Play confirm on the first delta of each streaming turn.
+                    if !self.confirmChimeFired {
+                        self.confirmChimeFired = true
+                        self.playChime(.confirm)
+                    }
+                    self.islandViewModel.appendResponse(delta)   // caption streams; no auto-dismiss
+                    // Play a tick every ~4 words of streamed text.
+                    let newWords = delta.split(whereSeparator: \.isWhitespace).count
+                    self.tickWordCount += newWords
+                    if self.tickWordCount >= 4 {
+                        self.tickWordCount = 0
+                        self.playChime(.tick)
+                    }
+                }
+            }
+            await MainActor.run {
+                if Task.isCancelled { return }   // barge-in cancelled this turn — don't resume speaking
+                // Speak the whole reply in a single Gemini call.
+                let full = self.islandViewModel.responseText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !full.isEmpty { self.streamVoice.enqueue(full) }
+                // Safety: if nothing was spoken (empty reply/error), re-arm anyway.
+                if !self.streamVoice.isSpeaking { self.streamVoice.onAllFinished?() }
+            }
+        }
+    }
+
+    /// V11 P12: enter a focus mode — start the session, then run its
+    /// deterministic plan (open the work apps, close the distractions).
+    private func enterFocusMode(named name: String) {
+        let mode = FocusMode.preset(named: name)
+        Task { await FocusSession.shared.begin(mode: mode.name) }
+        runAutonomousTask("\(mode.name.capitalized) focus", prebuiltSteps: mode.taskSteps())
+    }
+
+    /// V11 P12: end the focus session — recap from the timeline, journal it.
+    private func endFocusMode() {
+        islandViewModel.beginThinking()
+        playChime(.thinking)
+        currentTurnTask = Task { [weak self] in
+            guard let self else { return }
+            guard let record = await FocusSession.shared.end() else {
+                await MainActor.run { self.speakAndListen("There's no focus session running.") }
+                return
+            }
+            let now = Date()
+            let events = await Timeline().events(from: record.startedAt, to: now)
+            let minutes = max(1, Int(now.timeIntervalSince(record.startedAt) / 60))
+            let done = events.filter(\.ok).count
+            var recap = "Focus session over — \(minutes) minute\(minutes == 1 ? "" : "s")"
+            recap += done > 0 ? ", \(done) thing\(done == 1 ? "" : "s") completed." : "."
+            await WorkJournal.shared.record(kind: .task,
+                                            title: "\(record.mode.capitalized) focus session",
+                                            outcome: "\(minutes) min, \(done) completed", ok: true)
+            await MainActor.run {
+                self.playChime(.confirm)
+                self.islandViewModel.appendResponse(recap)
+                self.speakAndListen(recap)
+            }
+        }
+    }
+
+    private func runAutonomousTask(_ goal: String, resume: Bool = false,
+                                   prebuiltSteps: [TaskStep]? = nil) {
+        taskActive = true
+        playChime(.task)   // "rolling up sleeves" — a longer job is starting
+        playChime(.thinking)
+        wakeEngine.isSuspended = true
+        isSpeaking = true
+        speechStartedAt = Date()
+        islandViewModel.beginThinking()
+        applyVoiceSettings()
+
+        // The voice queue drains several times during a task (after the spoken plan,
+        // between steps). Only re-arm wake once the task is DONE (taskActive == false),
+        // and re-arm exactly the way the chat path does — fresh turn + silence timer
+        // that ends the session through the canonical endConversation() reset.
+        streamVoice.onAllFinished = { [weak self] in
+            guard let self, !self.taskActive else { return }
+            self.isSpeaking = false
+            self.wakeEngine.freshTurn()
+            self.wakeEngine.isSuspended = false
+            self.islandViewModel.beginListening()
+            self.convSilenceTimer?.invalidate()
+            self.convSilenceTimer = Timer.scheduledTimer(withTimeInterval: AppSettings.shared.conversationSilenceTimeout, repeats: false) { [weak self] _ in
+                Task { @MainActor in self?.session?.end() }
+            }
+        }
+
+        currentTurnTask = Task { [weak self] in
+            guard let self else { return }
+            let handler: @Sendable (TaskEvent) -> Void = { event in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    switch event {
+                    case .planReady(let plan):
+                        self.taskViewModel.show(plan)
+                        // Summon a worker blob per step — Aria's sub-agents, visibly
+                        // doing the work on screen. They dissolve one-by-one as steps
+                        // finish (and all clear when the task ends).
+                        AriaStage.shared.setWorkers(count: plan.steps.count,
+                                                    labels: plan.steps.map { $0.summary },
+                                                    anchor: self.lastBlobCenter)
+                    case .stepStarted(let i):
+                        // First real step → she splashes to the bottom and becomes
+                        // the working border. Simple chat answers never reach here.
+                        if i == 0 { self.islandViewModel.beginExecuting() }
+                        self.taskViewModel.markRunning(i)
+                        // Spoken play-by-play: a short "Searching the web…" as each step
+                        // begins. The plan-start narrate already gave the overview, so skip
+                        // the first step to avoid repeating it.
+                        if i > 0, AppSettings.shared.spokenStepNarration,
+                           let steps = self.taskViewModel.plan?.steps, steps.indices.contains(i) {
+                            let line = TaskNarration.spoken(for: steps[i].summary)
+                            if !line.isEmpty { self.streamVoice.enqueue(line) }
+                        }
+                    case .stepFinished(let i, let ok, let result):
+                        self.taskViewModel.markFinished(i, ok: ok, result: result)
+                        // One sub-agent done → one worker blob squishes away.
+                        AriaStage.shared.setWorkers(count: max(0, AriaStage.shared.workers.count - 1))
+                    case .narrate(let line):
+                        // While executing she stays the screen-edge border and just
+                        // speaks the play-by-play; appending text would consolidate her
+                        // back into the blob mid-task. Outside execution, stream as before.
+                        if self.islandViewModel.state != .executing {
+                            self.islandViewModel.appendResponse(line + " ")
+                        }
+                        self.streamVoice.enqueue(line)
+                    case .finished(let ok, let summary):
+                        self.taskActive = false   // now the next queue-drain re-arms wake
+                        AriaStage.shared.clearWorkers()   // swarm disperses
+                        // She consolidates from the border back into the blob and
+                        // explains what she did (then the existing drain re-arms / dismisses).
+                        self.islandViewModel.showResponse(summary)
+                        self.playChime(ok ? .done : .error)
+                        // Project memory: every finished task is recallable later.
+                        Task { await WorkJournal.shared.record(kind: .task, title: goal,
+                                                               outcome: summary, ok: ok) }
+                        // Session continuation (P3): remember where this work stands so
+                        // "continue yesterday" can resume it. A failed task leaves a
+                        // next-step to retry.
+                        Task {
+                            await SessionMemoryStore.shared.record(SessionSnapshot(
+                                project: ProjectTagger.infer(from: goal),
+                                goal: goal,
+                                progress: summary,
+                                nextStep: ok ? nil : "Retry: \(goal)"))
+                        }
+                        self.streamVoice.enqueue(summary)
+                        if !self.streamVoice.isSpeaking { self.streamVoice.onAllFinished?() }
+                        let finishedGoal = goal
+                        Task { [weak self] in
+                            try? await Task.sleep(nanoseconds: 4_000_000_000)
+                            await MainActor.run {
+                                guard let self, self.taskViewModel.plan?.goal == finishedGoal else { return }
+                                self.taskViewModel.hide()
+                            }
+                        }
+                    }
+                }
+            }
+            if resume {
+                await self.orchestrator.resumeTask(emit: handler)
+            } else if let steps = prebuiltSteps {
+                // V11 P12: focus mode (and other callers) hand a ready plan.
+                await self.orchestrator.runPlan(goal: goal, steps: steps, emit: handler)
+            } else if let recipe = await RecipeStore.shared.match(command: goal) {
+                // V11 P8: a named recipe runs its pre-built plan — same panel,
+                // same gates, no model planning.
+                await self.orchestrator.runRecipe(recipe, emit: handler)
+            } else {
+                await self.orchestrator.runTask(goal: goal, emit: handler)
+            }
+        }
+    }
+
+    private func endConversation() {
+        convSilenceTimer?.invalidate(); convSilenceTimer = nil
+        // Drop the ended session: ConversationSession.userSaid silently ignores
+        // input after end(), so keeping the dead object made the SECOND typed
+        // command vanish ("she only answers once") — found live.
+        session = nil
+        // A revealed-but-unanswered offer expires (not counted as a rejection).
+        if proactiveAwaitingReply {
+            proactiveAwaitingReply = false
+            proactivePresenter?.expire(now: Date())
+        }
+        wakeEngine.endConversation()
+        playChime(.dismiss)
+        islandViewModel.dismiss()
+    }
+
+    func toggleManually() {
+        if islandViewModel.isVisible {
+            islandViewModel.dismiss()
+        } else {
+            islandViewModel.beginListening()
+        }
+    }
+
+    // MARK: Shortcuts integration (Task 7)
+
+    /// Handle a command from macOS Shortcuts / `RunAriaCommandIntent` and return
+    /// the response text. Routes through the orchestrator's non-streaming path so
+    /// AppIntents get a clean string back.
+    func handleCommandForShortcuts(_ command: String) async -> String {
+        let response = await responseBridge.handle(command: command, privacyMode: false)
+        return response.message
+    }
+
+    // MARK: Daily Digest trigger (Task 5)
+
+    /// Wires a 3600-second repeating timer that fires the daily digest at 6 pm.
+    /// Called once from `configureLearning()`. Uses AppStorage-compatible
+    /// `UserDefaults` to track whether today's digest has already been sent.
+    func configureDailyDigest() {
+        Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.digestTickIfNeeded() }
+        }
+        // Also check shortly after launch in case it's already past 6 pm.
+        Task { @MainActor in await self.digestTickIfNeeded() }
+    }
+
+    private func digestTickIfNeeded() async {
+        let hour = Calendar.current.component(.hour, from: Date())
+        guard hour == 18 else { return }
+        let today = DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .none)
+        let key = "app.lastDigestDate"
+        guard UserDefaults.standard.string(forKey: key) != today else { return }
+        UserDefaults.standard.set(today, forKey: key)
+        // Run digest silently
+        do {
+            let result = try await DigestTool(gemini: GeminiClient()).run(input: [:])
+            if result.success {
+                let preview = String(result.output.prefix(200))
+                await notificationBridge.send(.agentCompleted(name: "Daily digest", summary: preview))
+            }
+        } catch {
+            // Best-effort; never surface errors from a background timer
+        }
+    }
+}
+
+/// Bridges the testable `SuggestionPresenter` to the live orb, voice, and
+/// orchestrator. Holds the controller weakly to avoid a retain cycle.
+@MainActor
+private final class ProactiveSurfaceAdapter: PresenterSurface {
+    weak var controller: AriaController?
+    init(controller: AriaController) { self.controller = controller }
+
+    func showGlow() {
+        controller?.islandViewModel.showSuggestionGlow()
+        controller?.playChime(.notification)
+    }
+    func clearGlow() { controller?.islandViewModel.clearSuggestionGlow() }
+    func speak(_ line: String) { controller?.speakAndListen(line) }
+    func runCommand(_ command: String) async { controller?.runProactiveCommand(command) }
+    func approvePattern(_ id: UUID) async { await controller?.approveProactivePattern(id) }
+}

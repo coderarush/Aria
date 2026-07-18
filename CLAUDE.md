@@ -1,7 +1,12 @@
-# Aria — V11.1.1 "The Operator" Working Context
+# Aria — Working Context
 
-**Status:** v11.1.1 in progress on branch `aria-v11.1.1` (off v11.0.1). v11.0.1
-(Living Presence + dictation + connectors + premium app) is the predecessor.
+**Status:** active branch `runtime-os` — Master Build Spec engine layer (Parts
+1–5) + Lens + local-first vision + **Live Loop** (2026-07: always-on
+perceive→anticipate→act→remember; `Presence/Live/`, four recognizers with
+per-playbook autonomy tiers, executes through the existing orchestrator) +
+everyday tools (timer/weather/music/contacts/window/clipboard/system) +
+customization (standing instructions, sound themes, offline-voice picker).
+Suite ~1499 tests green. v11.1.1 notes below still describe the trust layer.
 **Governing docs (read these for product direction):**
 - `docs/v11.1/ARIA_V11.1.1_SPEC.md` — v11.1.1 "The Operator" spec + locked decisions
 - `docs/superpowers/plans/2026-06-13-v11.1.1-phaseA-trust.md` — Phase A (Trust) plan

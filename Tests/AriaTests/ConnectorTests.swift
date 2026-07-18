@@ -339,7 +339,7 @@ final class ConnectorStoreActorTests: XCTestCase {
 
     func testConnectThrowsNotConfigured() async {
         // The "no client ID ⇒ .notConfigured" contract is specific to bring-your-own
-        // mode; in the default relay mode the relay supplies the client and connect
+        // mode; in relay mode the relay supplies the client and connect
         // proceeds without a user client ID. Pin BYO for this contract test.
         let prior = UserDefaults.standard.string(forKey: ConnectorMode.defaultsKey)
         UserDefaults.standard.set(ConnectorMode.bringYourOwn.rawValue, forKey: ConnectorMode.defaultsKey)
@@ -352,7 +352,11 @@ final class ConnectorStoreActorTests: XCTestCase {
             authorize: { _, _ in
                 XCTFail("should not authorize when not configured")
                 return OAuth2.TokenResponse(accessToken: "", refreshToken: nil, expiresIn: 0, scopes: [], tokenType: "Bearer")
-            })
+            },
+            // Pin "no client ID" hermetically: the real resolver reads the Keychain,
+            // so a developer's stored Google client ID would otherwise satisfy BYO
+            // and skip the .notConfigured contract this test asserts.
+            resolveClientID: { _ in nil })
         do {
             try await store.connect(.google)
             XCTFail("expected notConfigured")
